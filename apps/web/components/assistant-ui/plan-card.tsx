@@ -1,6 +1,7 @@
 "use client";
 
 import { useThread, type DataMessagePartProps } from "@assistant-ui/react";
+import { Button, Card, Chip, Dropdown, Separator, Spinner, Tooltip } from "@heroui/react";
 import {
   BadgeCheck,
   Ban,
@@ -11,110 +12,32 @@ import {
   CircleX,
   CopyIcon,
   Ellipsis,
-  LoaderCircle,
-  Map as PlanModeIcon,
-  Play,
+  ListChecks,
   RotateCcw,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FC } from "react";
+import { useEffect, useId, useRef, useState, type FC, type Key } from "react";
 
 import { useCocola, type PlanStatus, type UiPlanPart } from "@/app/runtime-provider";
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
-import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   PLAN_ACTION_LABELS,
   PLAN_GATE_COPY,
   PLAN_STATUS_LABELS,
   normalizePlanStatus,
 } from "@/lib/plan-mode.mjs";
-import { cn } from "@/lib/utils";
 
-const PLAN_STATUS_VIEW: Record<
-  PlanStatus,
-  {
-    icon: LucideIcon;
-    badge: string;
-    accent: string;
-    frame: string;
-    header: string;
-    iconFrame: string;
-    notice: string;
-    spin?: boolean;
-  }
-> = {
-  ready: {
-    icon: ShieldCheck,
-    badge: "border-indigo-500/25 bg-indigo-500/10 text-indigo-700",
-    accent: "bg-indigo-600",
-    frame: "border-indigo-500/25 shadow-[0_18px_45px_-34px_rgba(79,70,229,0.75)]",
-    header: "bg-indigo-500/[0.045]",
-    iconFrame: "bg-indigo-600 text-white",
-    notice: PLAN_GATE_COPY.noChanges,
-  },
-  executing: {
-    icon: LoaderCircle,
-    badge: "border-indigo-500/25 bg-indigo-500/10 text-indigo-700",
-    accent: "bg-indigo-600",
-    frame: "border-indigo-500/25 shadow-[0_18px_45px_-34px_rgba(79,70,229,0.75)]",
-    header: "bg-indigo-500/[0.045]",
-    iconFrame: "bg-indigo-500/10 text-indigo-700",
-    notice: PLAN_GATE_COPY.executingNotice,
-    spin: true,
-  },
-  completed: {
-    icon: BadgeCheck,
-    badge: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700",
-    accent: "bg-emerald-500",
-    frame: "border-emerald-500/20",
-    header: "bg-emerald-500/[0.035]",
-    iconFrame: "bg-emerald-500/10 text-emerald-700",
-    notice: PLAN_GATE_COPY.completedNotice,
-  },
-  stopped: {
-    icon: CirclePause,
-    badge: "border-amber-500/30 bg-amber-500/10 text-amber-700",
-    accent: "bg-amber-500",
-    frame: "border-amber-500/25",
-    header: "bg-amber-500/[0.035]",
-    iconFrame: "bg-amber-500/10 text-amber-700",
-    notice: PLAN_GATE_COPY.stoppedNotice,
-  },
-  failed: {
-    icon: CircleX,
-    badge: "border-red-500/25 bg-red-500/10 text-red-700",
-    accent: "bg-red-500",
-    frame: "border-red-500/20",
-    header: "bg-red-500/[0.035]",
-    iconFrame: "bg-red-500/10 text-red-700",
-    notice: PLAN_GATE_COPY.failedNotice,
-  },
-  superseded: {
-    icon: RotateCcw,
-    badge: "border-border bg-surface-secondary text-muted",
-    accent: "bg-foreground/35",
-    frame: "border-border",
-    header: "bg-surface-secondary/25",
-    iconFrame: "bg-surface-secondary text-muted",
-    notice: PLAN_GATE_COPY.supersededNotice,
-  },
-  cancelled: {
-    icon: Ban,
-    badge: "border-border bg-surface-secondary text-muted",
-    accent: "bg-foreground/35",
-    frame: "border-border",
-    header: "bg-surface-secondary/25",
-    iconFrame: "bg-surface-secondary text-muted",
-    notice: PLAN_GATE_COPY.cancelledNotice,
-  },
+type PlanStatusColor = "accent" | "danger" | "default" | "success" | "warning";
+
+const PLAN_STATUS_VIEW: Record<PlanStatus, { color: PlanStatusColor; icon: LucideIcon | null }> = {
+  ready: { color: "accent", icon: ShieldCheck },
+  executing: { color: "accent", icon: null },
+  completed: { color: "success", icon: BadgeCheck },
+  stopped: { color: "warning", icon: CirclePause },
+  failed: { color: "danger", icon: CircleX },
+  superseded: { color: "default", icon: RotateCcw },
+  cancelled: { color: "default", icon: Ban },
 };
 
 export const PlanCardPart: FC<
@@ -156,6 +79,7 @@ export const PlanCardPart: FC<
       : status === "stopped"
         ? PLAN_GATE_COPY.continueNotice
         : PLAN_GATE_COPY.replanNotice;
+  const FooterIcon = status === "failed" ? CircleX : ShieldCheck;
 
   useEffect(
     () => () => {
@@ -197,195 +121,188 @@ export const PlanCardPart: FC<
 
   const revise = () => revisePlan(plan);
 
+  const handleMenuAction = (key: Key) => {
+    if (key === "copy") {
+      void copy();
+      return;
+    }
+    if (key === "cancel" && canCancel) {
+      void runAction("cancel", () => cancelPlan(plan));
+    }
+  };
+
   return (
-    <section
-      aria-labelledby={planTitleId}
-      className={cn(
-        "relative my-4 overflow-hidden rounded-2xl border bg-surface",
-        statusView.frame,
-      )}
-    >
-      <div className={cn("absolute inset-y-0 left-0 w-1", statusView.accent)} aria-hidden="true" />
-      <div
-        className={cn(
-          "flex flex-col gap-3 border-b border-border/70 py-4 pr-4 pl-5 sm:flex-row sm:items-start sm:justify-between sm:pr-5 sm:pl-6",
-          statusView.header,
-        )}
-      >
+    <Card aria-labelledby={planTitleId} className="my-4 w-full max-w-[720px] overflow-hidden p-0">
+      <Card.Header className="flex-col items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <span
-            className={cn(
-              "mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl shadow-sm",
-              statusView.iconFrame,
-            )}
-          >
-            <PlanModeIcon className="size-[18px]" aria-hidden="true" />
+          <span className="bg-accent-soft text-accent grid size-8 shrink-0 place-items-center rounded-xl">
+            <ListChecks className="size-4" aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <div className="text-[10px] font-bold tracking-[0.16em] text-indigo-700 uppercase">
-              {PLAN_GATE_COPY.eyebrow}
-            </div>
-            <h3
-              id={planTitleId}
-              className="mt-0.5 text-lg font-semibold tracking-[-0.01em] text-foreground"
-            >
+            <Card.Title id={planTitleId} className="text-base tracking-[-0.02em]">
+              Implementation plan
+            </Card.Title>
+            <Card.Description className="mt-0.5 text-xs tabular-nums">
               Plan v{data.version}
-            </h3>
-            <p className="mt-1 text-xs leading-5 text-muted">{statusView.notice}</p>
+            </Card.Description>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 self-start">
-          <span
-            role="status"
-            aria-live="polite"
-            className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold",
-              statusView.badge,
-            )}
-          >
-            <StatusIcon
-              className={cn(
-                "size-3.5",
-                statusView.spin && "animate-spin motion-reduce:animate-none",
-              )}
-              aria-hidden="true"
-            />
-            {PLAN_STATUS_LABELS[status]}
-          </span>
-          {canCollapse ? (
-            <TooltipIconButton
-              tooltip={expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
-              variant="ghost"
-              onClick={() => setExpanded((value) => !value)}
-              aria-label={expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
-              aria-expanded={expanded}
-              className="size-8 rounded-full p-0 text-muted hover:bg-background/80 hover:text-foreground"
-            >
-              {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-            </TooltipIconButton>
-          ) : null}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={
-                  pendingAction === "cancel"
-                    ? PLAN_GATE_COPY.cancelling
-                    : copied
-                      ? PLAN_GATE_COPY.copied
-                      : PLAN_GATE_COPY.moreActions
-                }
-                aria-busy={pendingAction === "cancel"}
-                disabled={pendingAction === "cancel"}
-                className={cn(
-                  "grid size-8 place-items-center rounded-full text-muted transition-colors hover:bg-background/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-                  copied && "text-emerald-600",
-                )}
-              >
-                {pendingAction === "cancel" ? (
-                  <LoaderCircle
-                    className="size-4 animate-spin motion-reduce:animate-none"
-                    aria-hidden="true"
-                  />
-                ) : copied ? (
-                  <Check className="size-4" aria-hidden="true" />
-                ) : (
-                  <Ellipsis className="size-4" aria-hidden="true" />
-                )}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="cocola-user-ui w-48 rounded-xl">
-              <DropdownMenuItem disabled={busy} onSelect={() => void copy()}>
-                <CopyIcon className="size-4" aria-hidden="true" />
-                {PLAN_ACTION_LABELS.copy}
-              </DropdownMenuItem>
-              {canCancel ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    disabled={approvalDisabled}
-                    onSelect={() => void runAction("cancel", () => cancelPlan(plan))}
-                  >
-                    <Ban className="size-4" aria-hidden="true" />
-                    {PLAN_ACTION_LABELS.cancel}
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-      {expanded ? (
-        <div className="px-5 py-5 sm:px-6 sm:py-6">
-          <MarkdownContent value={data.contentMarkdown} />
-        </div>
-      ) : null}
-      {isRevising ? (
-        <div className="flex items-center gap-2 border-t border-indigo-500/15 bg-indigo-500/[0.055] px-5 py-3 text-xs font-medium text-indigo-700 sm:px-6">
-          <RotateCcw className="size-3.5" aria-hidden="true" />
-          {PLAN_GATE_COPY.revisionInProgress}
-        </div>
-      ) : null}
-      {error ? (
-        <div
-          role="alert"
-          className="border-t border-danger/15 bg-danger/[0.045] px-5 py-3 text-xs text-danger sm:px-6"
-        >
-          {error}
-        </div>
-      ) : null}
-      {hasDecisionFooter ? (
-        <div className="flex flex-col gap-3 border-t border-border/70 bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p className="max-w-md text-xs leading-5 text-muted">{footerNotice}</p>
-          <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row">
-            {status !== "failed" ? (
-              <button
-                type="button"
-                disabled={busy || isRunning || isRevising || questionInputLocked}
-                onClick={revise}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-              >
-                <RotateCcw className="size-4" aria-hidden="true" />
-                {status === "ready" ? PLAN_ACTION_LABELS.revise : PLAN_ACTION_LABELS.replan}
-              </button>
+
+        <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
+          <Chip color={statusView.color} size="sm" variant="soft">
+            {status === "executing" ? (
+              <Spinner color="current" size="sm" />
+            ) : StatusIcon ? (
+              <StatusIcon className="size-3.5" aria-hidden="true" />
             ) : null}
-            {status === "failed" ? (
-              <button
-                type="button"
-                disabled={busy || isRunning || isRevising || questionInputLocked}
-                onClick={revise}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+            {PLAN_STATUS_LABELS[status]}
+          </Chip>
+          {canCollapse ? (
+            <Tooltip delay={0}>
+              <Button
+                isIconOnly
+                aria-label={expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
+                aria-expanded={expanded}
+                size="sm"
+                variant="ghost"
+                onPress={() => setExpanded((value) => !value)}
               >
-                <RotateCcw className="size-4" aria-hidden="true" />
-                {PLAN_ACTION_LABELS.replan}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={approvalDisabled}
-                aria-busy={pendingAction === "execute"}
-                onClick={() => void runAction("execute", () => executePlan(plan))}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-              >
-                {pendingAction === "execute" ? (
-                  <LoaderCircle
-                    className="size-4 animate-spin motion-reduce:animate-none"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <Play className="size-4 fill-current" aria-hidden="true" />
-                )}
-                {pendingAction === "execute"
-                  ? PLAN_GATE_COPY.startingExecution
-                  : status === "ready"
-                    ? PLAN_ACTION_LABELS.approve
-                    : PLAN_ACTION_LABELS.continue}
-              </button>
-            )}
-          </div>
+                {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              </Button>
+              <Tooltip.Content>
+                {expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
+              </Tooltip.Content>
+            </Tooltip>
+          ) : null}
+          <Dropdown>
+            <Dropdown.Trigger
+              aria-label={
+                pendingAction === "cancel"
+                  ? PLAN_GATE_COPY.cancelling
+                  : copied
+                    ? PLAN_GATE_COPY.copied
+                    : PLAN_GATE_COPY.moreActions
+              }
+              className="text-muted hover:bg-default hover:text-foreground inline-flex size-8 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
+              isDisabled={pendingAction === "cancel"}
+            >
+              {pendingAction === "cancel" ? (
+                <Spinner color="current" size="sm" />
+              ) : copied ? (
+                <Check className="text-success size-4" aria-hidden="true" />
+              ) : (
+                <Ellipsis className="size-4" aria-hidden="true" />
+              )}
+            </Dropdown.Trigger>
+            <Dropdown.Popover className="min-w-44" placement="bottom end">
+              <Dropdown.Menu aria-label="More plan actions" onAction={handleMenuAction}>
+                <Dropdown.Item id="copy" isDisabled={busy} textValue={PLAN_ACTION_LABELS.copy}>
+                  <CopyIcon className="text-muted size-4 shrink-0" aria-hidden="true" />
+                  <span data-slot="label">{PLAN_ACTION_LABELS.copy}</span>
+                </Dropdown.Item>
+                {canCancel ? (
+                  <Dropdown.Item
+                    id="cancel"
+                    isDisabled={approvalDisabled}
+                    textValue={PLAN_ACTION_LABELS.cancel}
+                    variant="danger"
+                  >
+                    <Ban className="size-4 shrink-0" aria-hidden="true" />
+                    <span data-slot="label">{PLAN_ACTION_LABELS.cancel}</span>
+                  </Dropdown.Item>
+                ) : null}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
         </div>
+      </Card.Header>
+
+      {expanded ? (
+        <>
+          <Separator />
+          <Card.Content className="px-4 py-3">
+            <MarkdownContent
+              className="text-sm leading-6 [&_h1]:mt-3 [&_h2]:mt-3 [&_h3]:mt-3 [&_hr]:my-3 [&_li]:my-0.5 [&_ol]:my-2 [&_p]:my-1.5 [&_ul]:my-2"
+              value={data.contentMarkdown}
+            />
+          </Card.Content>
+        </>
       ) : null}
-    </section>
+
+      {isRevising ? (
+        <>
+          <Separator />
+          <div className="bg-accent-soft text-accent flex items-center gap-2 px-4 py-2 text-xs font-medium">
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+            {PLAN_GATE_COPY.revisionInProgress}
+          </div>
+        </>
+      ) : null}
+
+      {error ? (
+        <>
+          <Separator />
+          <div role="alert" className="bg-danger-soft text-danger px-4 py-2 text-xs">
+            {error}
+          </div>
+        </>
+      ) : null}
+
+      {hasDecisionFooter ? (
+        <>
+          <Separator />
+          <Card.Footer className="flex-col items-stretch gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-muted flex min-w-0 items-center gap-2 text-xs leading-4">
+              <FooterIcon
+                className={
+                  status === "failed"
+                    ? "text-danger size-4 shrink-0"
+                    : "text-accent size-4 shrink-0"
+                }
+                aria-hidden="true"
+              />
+              {footerNotice}
+            </p>
+            <div className="flex shrink-0 gap-2">
+              {status !== "failed" ? (
+                <Button
+                  className="flex-1 sm:flex-none"
+                  isDisabled={busy || isRunning || isRevising || questionInputLocked}
+                  size="sm"
+                  variant="outline"
+                  onPress={revise}
+                >
+                  {status === "ready" ? PLAN_ACTION_LABELS.revise : PLAN_ACTION_LABELS.replan}
+                </Button>
+              ) : null}
+              {status === "failed" ? (
+                <Button
+                  className="flex-1 sm:flex-none"
+                  isDisabled={busy || isRunning || isRevising || questionInputLocked}
+                  size="sm"
+                  onPress={revise}
+                >
+                  {PLAN_ACTION_LABELS.replan}
+                </Button>
+              ) : (
+                <Button
+                  className="flex-1 sm:flex-none"
+                  isDisabled={approvalDisabled}
+                  isPending={pendingAction === "execute"}
+                  size="sm"
+                  onPress={() => void runAction("execute", () => executePlan(plan))}
+                >
+                  {pendingAction === "execute"
+                    ? PLAN_GATE_COPY.startingExecution
+                    : status === "ready"
+                      ? PLAN_ACTION_LABELS.approve
+                      : PLAN_ACTION_LABELS.continue}
+                </Button>
+              )}
+            </div>
+          </Card.Footer>
+        </>
+      ) : null}
+    </Card>
   );
 };

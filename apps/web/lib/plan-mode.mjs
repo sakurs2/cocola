@@ -24,17 +24,9 @@ export const PLAN_MODE_COPY = Object.freeze({
 });
 
 export const PLAN_GATE_COPY = Object.freeze({
-  eyebrow: "Plan mode",
-  noChanges: "No workspace changes have been made.",
-  approveNotice: "Approving this plan will let Claude make changes in your workspace.",
+  approveNotice: "Workspace remains unchanged until you approve.",
   continueNotice: "Continue this approved plan or create a new one.",
-  replanNotice: "This plan cannot be resumed. Create a new plan to continue.",
-  executingNotice: "Claude is executing this approved plan.",
-  completedNotice: "Claude completed this approved plan.",
-  stoppedNotice: "Execution stopped before the plan was completed.",
-  failedNotice: "Execution failed. Create a new plan before trying again.",
-  supersededNotice: "A newer version of this plan is available.",
-  cancelledNotice: "This plan was cancelled without execution.",
+  replanNotice: "Create a new plan before trying again.",
   revisionInProgress: "Revision in progress",
   moreActions: "More plan actions",
   showPlan: "Show plan",
