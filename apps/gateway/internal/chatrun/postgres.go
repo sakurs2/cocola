@@ -242,6 +242,25 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			return StartResult{}, err
 		}
 	}
+	if in.RevisionPlanID != "" {
+		var conversationID, status string
+		var version int
+		planErr := tx.QueryRow(ctx, `SELECT conversation_id, version, status
+			FROM conversation_plans WHERE id=$1::uuid FOR SHARE`, in.RevisionPlanID).Scan(
+			&conversationID, &version, &status)
+		if errors.Is(planErr, pgx.ErrNoRows) {
+			return StartResult{}, ErrPlanNotCurrent
+		}
+		if planErr != nil {
+			return StartResult{}, planErr
+		}
+		if conversationID != in.Run.ConversationID || version != in.ExpectedRevisionPlanVersion {
+			return StartResult{}, ErrPlanNotCurrent
+		}
+		if status != PlanStatusReady && status != PlanStatusStopped {
+			return StartResult{}, ErrPlanState
+		}
+	}
 	if effective.AgentID != "" {
 		if effective.AgentSnapshot == nil ||
 			effective.AgentVersion <= 0 ||
@@ -529,6 +548,37 @@ func (p *Postgres) ListQuestions(
 		questions = append(questions, question)
 	}
 	return questions, rows.Err()
+}
+
+func (p *Postgres) ListAwaitingUserActionConversationIDs(
+	ctx context.Context,
+	userID string,
+) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT q.conversation_id
+		FROM conversation_questions q
+		JOIN conversations c ON c.id=q.conversation_id
+		WHERE c.user_id=$1 AND q.status='pending'
+		UNION
+		SELECT p.conversation_id
+		FROM conversation_plans p
+		JOIN conversations c ON c.id=p.conversation_id
+		WHERE c.user_id=$1 AND p.status IN ('ready', 'stopped')
+		ORDER BY 1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	conversationIDs := make([]string, 0)
+	for rows.Next() {
+		var conversationID string
+		if err := rows.Scan(&conversationID); err != nil {
+			return nil, err
+		}
+		conversationIDs = append(conversationIDs, conversationID)
+	}
+	return conversationIDs, rows.Err()
 }
 
 func updateQuestionMessageStatus(ctx context.Context, tx pgx.Tx, question Question) error {

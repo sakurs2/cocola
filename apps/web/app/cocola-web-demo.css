@@ -104,19 +104,20 @@
 }
 
 .cocola-user-ui .cocola-web-plan-indicator {
-  background: oklch(0.51 0.23 277) !important;
-  color: white !important;
-  box-shadow: 0 8px 18px -12px oklch(0.51 0.23 277 / 0.72);
+  background: transparent !important;
+  color: var(--accent) !important;
+  box-shadow: none;
   transition:
-    transform 160ms ease,
     background-color 160ms ease,
-    box-shadow 160ms ease;
+    color 160ms ease;
 }
 
-.cocola-user-ui .cocola-web-plan-indicator:hover {
-  background: oklch(0.45 0.22 277) !important;
-  transform: translateY(-1px);
-  box-shadow: 0 12px 22px -12px oklch(0.51 0.23 277 / 0.82);
+.cocola-user-ui .cocola-web-plan-indicator:hover,
+.cocola-user-ui .cocola-web-plan-indicator[data-hovered="true"] {
+  background: color-mix(in oklab, var(--surface-secondary) 82%, var(--accent) 18%) !important;
+  color: var(--accent) !important;
+  transform: none;
+  box-shadow: none;
 }
 
 .cocola-user-ui .cocola-web-composer-send {

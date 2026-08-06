@@ -27,6 +27,47 @@ func newAPIWithConvo(t *testing.T, fs *fakeStreamer, cs convo.Store) http.Handle
 	return newConfiguredTestAPIWithConvo(fs, v, logger.Must(), cs).Handler()
 }
 
+type conversationAttentionStore struct {
+	chatrun.Store
+	conversationIDs []string
+}
+
+func (s *conversationAttentionStore) ListAwaitingUserActionConversationIDs(
+	context.Context,
+	string,
+) ([]string, error) {
+	return append([]string(nil), s.conversationIDs...), nil
+}
+
+func TestListConversationsMarksRowsAwaitingUserAction(t *testing.T) {
+	cs := convo.NewMemory()
+	now := time.Now().UTC()
+	if err := cs.UpsertConversation(context.Background(), convo.Conversation{
+		ID: "needs-confirmation", UserID: auth.DevIdentity.UserID,
+		TenantID: auth.DevIdentity.TenantID, Title: "Review plan",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	api := New(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithConvoStore(cs).
+		WithChatRuns(&conversationAttentionStore{
+			Store:           chatrun.NewMemory(cs),
+			conversationIDs: []string{"needs-confirmation"},
+		}, RunConfig{})
+	rec := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/conversations", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload []map[string]any
+	mustJSON(t, rec.Body.Bytes(), &payload)
+	if len(payload) != 1 || payload[0]["requires_user_action"] != true {
+		t.Fatalf("conversation attention summary = %#v", payload)
+	}
+}
+
 func TestListConversationsReturnsSlimAgentSnapshot(t *testing.T) {
 	cs := convo.NewMemory()
 	snapshot := &agentprofile.Snapshot{

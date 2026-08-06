@@ -20,7 +20,6 @@ export const PLAN_MODE_COPY = Object.freeze({
   cancelLabel: "Exit Plan mode",
   lockedLabel: "Plan mode is fixed while Claude is responding",
   initialPlaceholder: "Describe what you want Claude to plan…",
-  revisionPlaceholder: "Describe how you want to revise this plan…",
 });
 
 export const PLAN_GATE_COPY = Object.freeze({
@@ -56,7 +55,9 @@ export function normalizePlanStatus(status) {
 
 export const PLAN_ACTION_LABELS = Object.freeze({
   approve: "Approve and execute",
-  revise: "Revise plan",
+  revise: "Request changes",
+  generateRevision: "Generate revised plan",
+  cancelRevision: "Cancel",
   cancel: "Cancel plan",
   continue: "Continue execution",
   replan: "Re-plan",

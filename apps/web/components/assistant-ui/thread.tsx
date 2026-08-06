@@ -144,10 +144,10 @@ export const Thread: FC = () => {
         <ThreadPrimitive.If empty={false}>
           <ChatConversation className="relative z-10 min-h-0 flex-1 overflow-hidden">
             <ThreadPrimitive.Viewport className="flex h-full flex-1 flex-col items-center overflow-y-auto scroll-smooth px-4 sm:px-6 [scrollbar-gutter:stable_both-edges]">
+              <ActiveExecutionDock />
+
               <ChatConversation.Content className="flex min-h-full w-full max-w-[var(--thread-max-width)] flex-col gap-0 px-0 pb-0 pt-4">
                 <div className="h-6 w-full shrink-0" aria-hidden="true" />
-
-                <ActiveExecutionDock />
 
                 <ThreadPrimitive.Messages
                   components={{
@@ -186,8 +186,8 @@ const ActiveExecutionDock: FC = () => {
   if (normalizeProgressItems(items).length === 0) return null;
 
   return (
-    <div className="pointer-events-none sticky top-0 z-30 flex w-full shrink-0 justify-center bg-gradient-to-b from-background via-background/95 to-transparent pb-3 pt-1">
-      <div className="pointer-events-auto w-full max-w-[var(--thread-max-width)]">
+    <div className="pointer-events-none sticky top-12 z-30 flex w-full shrink-0 justify-center pb-3 pt-2">
+      <div className="pointer-events-auto w-full max-w-[var(--thread-max-width)] pl-[2.375rem]">
         <RailProgress items={items} pinned />
       </div>
     </div>
@@ -384,16 +384,6 @@ const ConversationComposerInner: FC<{
     pendingQuestion,
     questionInputLocked,
   } = useCocola();
-  const hasCurrentPlan = useThread((thread) =>
-    thread.messages.some((message) =>
-      message.content.some(
-        (part) =>
-          part.type === "data" &&
-          part.name === "plan" &&
-          ["ready", "stopped"].includes(String(part.data.status)),
-      ),
-    ),
-  );
   const contextualBranchControl = useProjectComposerBranchControl();
   const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
@@ -454,9 +444,7 @@ const ConversationComposerInner: FC<{
                           : pendingQuestion
                             ? "Reply to Cocola…"
                             : interactionMode === "plan"
-                              ? hasCurrentPlan
-                                ? PLAN_MODE_COPY.revisionPlaceholder
-                                : PLAN_MODE_COPY.initialPlaceholder
+                              ? PLAN_MODE_COPY.initialPlaceholder
                               : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
                     }
                     promptStarter={promptStarter}
@@ -1283,9 +1271,10 @@ const PlanModeIndicator: FC = () => {
   return (
     <Button
       aria-label="Exit Plan mode"
-      className="cocola-web-plan-indicator h-9 shrink-0 rounded-full px-3"
+      className="cocola-web-plan-indicator inline-flex h-9 shrink-0 items-center gap-2 rounded-xl px-2.5 text-xs font-medium"
       isDisabled={isRunning || questionInputLocked}
       size="sm"
+      variant="ghost"
       onPress={() => setInteractionMode("execute")}
     >
       <GravityBookOpen className="size-3.5" />

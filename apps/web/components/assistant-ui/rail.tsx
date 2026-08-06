@@ -193,13 +193,13 @@ export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ item
         const active = item.status === "in_progress";
         return (
           <li key={item.id} className="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-2">
-            <span className="flex h-5 items-center justify-center" aria-hidden="true">
+            <span className="flex h-5 items-center justify-end" aria-hidden="true">
               {done ? (
                 <CheckCircle2 className="size-3.5 text-emerald-500" />
               ) : active ? (
-                <SpinnerGap className="size-3.5 animate-spin text-violet-500 motion-reduce:animate-none" />
+                <SpinnerGap className="text-accent size-3.5 animate-spin motion-reduce:animate-none" />
               ) : (
-                <span className="size-3 rounded-full border border-separator/50" />
+                <span className="bg-surface-secondary size-3 rounded-full border-2 border-foreground/25" />
               )}
             </span>
             <span
@@ -225,21 +225,18 @@ export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ item
       <section
         aria-label="Current plan"
         aria-live="polite"
-        className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5 rounded-xl border border-violet-200/70 bg-background/95 px-3 py-2.5 shadow-[0_8px_24px_-18px_rgba(76,29,149,0.55)] backdrop-blur-sm dark:border-violet-800/60"
+        className="rounded-2xl border border-border/80 bg-surface px-4 py-3 shadow-surface"
       >
-        <span
-          className="flex size-7 items-center justify-center text-violet-500"
-          aria-hidden="true"
-        >
-          <ListChecks className="size-5" />
-        </span>
-        <div className="min-w-0">
+        <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2">
+          <span className="text-accent flex h-7 items-center justify-end" aria-hidden="true">
+            <ListChecks className="size-4" />
+          </span>
           <div className="flex min-h-7 items-center text-[13px] font-medium leading-none text-foreground">
             {label}
           </div>
-          <div className="max-h-64 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
-            {content}
-          </div>
+        </div>
+        <div className="max-h-64 overflow-y-auto overscroll-contain pr-1 pt-1 [scrollbar-gutter:stable]">
+          {content}
         </div>
       </section>
     );

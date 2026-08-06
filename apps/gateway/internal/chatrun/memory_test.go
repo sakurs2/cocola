@@ -3,6 +3,7 @@ package chatrun
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -275,6 +276,69 @@ func TestMemoryPlanExecutionStopsAndContinuesWithoutUserMessage(t *testing.T) {
 	}
 }
 
+func TestMemoryListsConversationsAwaitingUserAction(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+
+	planning := testStartInput("plan-run", "plan-request", "user-1", "plan-chat")
+	planning.Run.InteractionMode = InteractionModePlan
+	if _, err := store.Start(ctx, planning); err != nil {
+		t.Fatal(err)
+	}
+	planResult, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "plan-run", UserID: "user-1", Status: StatusSuccess,
+		PlanCandidate: &PlanCandidate{
+			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
+			ContentMarkdown: "## Plan\n\n- Review",
+		},
+	})
+	if err != nil || planResult.Plan == nil {
+		t.Fatalf("plan finalize = %+v, %v", planResult, err)
+	}
+
+	questionRun := testStartInput("question-run", "question-request", "user-1", "question-chat")
+	if _, err := store.Start(ctx, questionRun); err != nil {
+		t.Fatal(err)
+	}
+	questionResult, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "question-run", UserID: "user-1", Status: StatusWaitingInput,
+		QuestionCandidate: &QuestionCandidate{
+			ID: "22222222-2222-4222-8222-222222222222", RuntimeID: "claude-code",
+			InteractionMode: InteractionModeExecute, Text: "Which option?",
+		},
+	})
+	if err != nil || questionResult.Question == nil {
+		t.Fatalf("question finalize = %+v, %v", questionResult, err)
+	}
+
+	conversationIDs, err := store.ListAwaitingUserActionConversationIDs(ctx, "user-1")
+	if err != nil || !reflect.DeepEqual(conversationIDs, []string{"plan-chat", "question-chat"}) {
+		t.Fatalf("awaiting user action = %v, %v", conversationIDs, err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := store.CancelPlan(
+		ctx, "plan-chat", planResult.Plan.ID, "user-1", planResult.Plan.Version, now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CancelQuestion(
+		ctx,
+		"question-chat",
+		questionResult.Question.ID,
+		"user-1",
+		questionResult.Question.Version,
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+	conversationIDs, err = store.ListAwaitingUserActionConversationIDs(ctx, "user-1")
+	if err != nil || len(conversationIDs) != 0 {
+		t.Fatalf("cleared awaiting user action = %v, %v", conversationIDs, err)
+	}
+}
+
 func TestMemoryNewPlanSupersedesOldVersion(t *testing.T) {
 	ctx := context.Background()
 	conversations := convo.NewMemory()
@@ -327,6 +391,43 @@ func TestMemoryNewPlanSupersedesOldVersion(t *testing.T) {
 	)
 	if err != nil || cancelled.Status != PlanStatusCancelled {
 		t.Fatalf("cancelled plan = %+v, %v", cancelled, err)
+	}
+}
+
+func TestMemoryStartValidatesRevisionPlanVersion(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	initial := testStartInput("plan-run", "plan-request", "user-1", "conversation-1")
+	initial.Run.InteractionMode = InteractionModePlan
+	if _, err := store.Start(ctx, initial); err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "plan-run", UserID: "user-1", Status: StatusSuccess,
+		PlanCandidate: &PlanCandidate{
+			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
+			ContentMarkdown: "## Plan\n\n- Review",
+		},
+	})
+	if err != nil || created.Plan == nil {
+		t.Fatalf("created plan = %+v, %v", created, err)
+	}
+
+	stale := testStartInput("revision-stale", "revision-stale-request", "user-1", "conversation-1")
+	stale.Run.InteractionMode = InteractionModePlan
+	stale.RevisionPlanID = created.Plan.ID
+	stale.ExpectedRevisionPlanVersion = created.Plan.Version + 1
+	if _, err := store.Start(ctx, stale); !errors.Is(err, ErrPlanNotCurrent) {
+		t.Fatalf("stale revision error = %v, want ErrPlanNotCurrent", err)
+	}
+
+	valid := testStartInput("revision-valid", "revision-valid-request", "user-1", "conversation-1")
+	valid.Run.InteractionMode = InteractionModePlan
+	valid.RevisionPlanID = created.Plan.ID
+	valid.ExpectedRevisionPlanVersion = created.Plan.Version
+	if result, err := store.Start(ctx, valid); err != nil || !result.Created {
+		t.Fatalf("valid revision start = %+v, %v", result, err)
 	}
 }
 

@@ -299,6 +299,7 @@ export type ConversationSummary = {
   agent_id?: string;
   agent_version?: number;
   agent?: AgentConversationSnapshot;
+  requires_user_action?: boolean;
 };
 
 type PendingProjectTaskHint = {
@@ -394,6 +395,8 @@ export type SkillOption = {
 export type UiMessageMetadata = {
   interaction_mode?: InteractionMode;
   skill_id?: string;
+  revision_of_plan_id?: string;
+  expected_plan_version?: number;
   model_route_id?: string;
   model_alias?: string;
   model_label?: string;
@@ -402,6 +405,28 @@ export type UiMessageMetadata = {
   model_icon_slug?: string;
   model_icon?: ModelIconConfig;
   duration_ms?: number;
+};
+
+type PlanRevisionRequest = {
+  planId: string;
+  expectedVersion: number;
+};
+
+type NewChatMessage = {
+  content: readonly { type: string; text?: string }[];
+  attachments?: readonly {
+    id?: string;
+    name?: string;
+    contentType?: string;
+    content?: readonly {
+      type: string;
+      text?: string;
+      filename?: string;
+      data?: string;
+      mimeType?: string;
+    }[];
+  }[];
+  planRevision?: PlanRevisionRequest;
 };
 
 // Wire shape of a persisted message (gateway GET /v1/conversations/{id}/messages).
@@ -476,7 +501,7 @@ type CocolaContextValue = {
   interactionMode: InteractionMode;
   setInteractionMode: (mode: InteractionMode) => void;
   revisingPlanId: string;
-  revisePlan: (plan: UiPlanPart) => void;
+  revisePlan: (plan: UiPlanPart, feedback: string) => boolean;
   executePlan: (plan: UiPlanPart) => Promise<void>;
   cancelPlan: (plan: UiPlanPart) => Promise<void>;
   pendingQuestion: UiQuestionPart | null;
@@ -872,6 +897,14 @@ function eventTimeMs(primary: unknown, fallback?: unknown): number {
 
 function isTerminalAgentEvent(event: AgentEvent): boolean {
   return event.kind === "done";
+}
+
+function partsRequireUserAction(parts: UiPart[]): boolean {
+  return parts.some(
+    (part) =>
+      (part.type === "plan" && (part.status === "ready" || part.status === "stopped")) ||
+      (part.type === "question" && part.status === "pending"),
+  );
 }
 
 // Append text to the trailing text part, or start a new one. Immutable.
@@ -1373,6 +1406,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const preferredRuntimeIdRef = useRef("");
   const preferredModelIdRef = useRef("");
   const conversationsRef = useRef(conversations);
+  const awaitingUserActionIdsRef = useRef<Set<string>>(new Set());
   const realtimeScheduledRunsRef = useRef<Set<string>>(new Set());
   const deletedScheduledConversationsRef = useRef<Map<string, number>>(new Map());
   const workspaceResetAllowedRef = useRef<Set<string>>(new Set());
@@ -1475,15 +1509,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           return next;
         });
       }
-    },
-    [isRunning, questionInputLocked, selectedRuntime?.id, sessionId],
-  );
-
-  const revisePlan = useCallback(
-    (plan: UiPlanPart) => {
-      if (isRunning || questionInputLocked || selectedRuntime?.id !== "claude-code") return;
-      setInteractionModes((previous) => ({ ...previous, [sessionId]: "plan" }));
-      setRevisingPlanIds((previous) => ({ ...previous, [sessionId]: plan.planId }));
     },
     [isRunning, questionInputLocked, selectedRuntime?.id, sessionId],
   );
@@ -1641,127 +1666,168 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const applyEvent = useCallback((targetSessionId: string, assistantId: string, ev: AgentEvent) => {
-    if (ev.kind === "snapshot") {
-      let parts: UiPart[] = [];
-      try {
-        const parsed = JSON.parse(ev.data?.parts ?? "[]") as UiPart[];
-        if (Array.isArray(parsed)) parts = normalizePersistedParts(parsed);
-      } catch {
+  const markConversationRequiresUserAction = useCallback(
+    (targetSessionId: string, required: boolean) => {
+      if (required) awaitingUserActionIdsRef.current.add(targetSessionId);
+      else awaitingUserActionIdsRef.current.delete(targetSessionId);
+      setConversations((previous) =>
+        previous.map((conversation) =>
+          conversation.id === targetSessionId && conversation.requires_user_action !== required
+            ? { ...conversation, requires_user_action: required }
+            : conversation,
+        ),
+      );
+      if (required) {
+        setUnreadCompletedIds((previous) => {
+          if (!previous.has(targetSessionId)) return previous;
+          const next = new Set(previous);
+          next.delete(targetSessionId);
+          return next;
+        });
+      }
+    },
+    [],
+  );
+
+  const applyEvent = useCallback(
+    (targetSessionId: string, assistantId: string, ev: AgentEvent) => {
+      if (ev.kind === "snapshot") {
+        let parts: UiPart[] = [];
+        try {
+          const parsed = JSON.parse(ev.data?.parts ?? "[]") as UiPart[];
+          if (Array.isArray(parsed)) parts = normalizePersistedParts(parsed);
+        } catch {
+          return;
+        }
+        markConversationRequiresUserAction(targetSessionId, partsRequireUserAction(parts));
+        setEnvironmentStatuses((prev) =>
+          withSessionStatus(prev, targetSessionId, sessionStatusFromParts(parts)),
+        );
+        setConvMessages((prev) => {
+          const current = prev[targetSessionId] ?? [];
+          const index = current.findIndex((message) => message.id === assistantId);
+          const assistant: UiMessage = {
+            id: assistantId,
+            role: "assistant",
+            parts,
+            createdAt: Date.now(),
+          };
+          const next =
+            index >= 0
+              ? current.map((message, messageIndex) =>
+                  messageIndex === index ? { ...message, parts } : message,
+                )
+              : [...current, assistant];
+          return { ...prev, [targetSessionId]: next };
+        });
         return;
       }
-      setEnvironmentStatuses((prev) =>
-        withSessionStatus(prev, targetSessionId, sessionStatusFromParts(parts)),
-      );
-      setConvMessages((prev) => {
-        const current = prev[targetSessionId] ?? [];
-        const index = current.findIndex((message) => message.id === assistantId);
-        const assistant: UiMessage = {
-          id: assistantId,
-          role: "assistant",
-          parts,
-          createdAt: Date.now(),
-        };
-        const next =
-          index >= 0
-            ? current.map((message, messageIndex) =>
-                messageIndex === index ? { ...message, parts } : message,
-              )
-            : [...current, assistant];
-        return { ...prev, [targetSessionId]: next };
-      });
-      return;
-    }
-    if (ev.kind === "environment_status") {
-      setEnvironmentStatuses((prev) =>
-        withSessionStatus(prev, targetSessionId, parseEnvironmentStatus(ev)),
-      );
-      return;
-    }
-    if (ev.kind === "done" || ev.kind === "error") {
-      setEnvironmentStatuses((prev) => {
-        const current = prev[targetSessionId];
-        if (!current || current.phase !== "preparing") return prev;
-        const components = current.components.map((component) =>
-          component.status === "pending"
-            ? { ...component, status: "unavailable" as const }
-            : component,
+      if (ev.kind === "environment_status") {
+        setEnvironmentStatuses((prev) =>
+          withSessionStatus(prev, targetSessionId, parseEnvironmentStatus(ev)),
         );
-        const degraded =
-          ev.kind === "error" ||
-          components.some((component) =>
-            ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
+        return;
+      }
+      if (ev.kind === "done" || ev.kind === "error") {
+        setRevisingPlanIds((previous) => {
+          if (!(targetSessionId in previous)) return previous;
+          const next = { ...previous };
+          delete next[targetSessionId];
+          return next;
+        });
+        setEnvironmentStatuses((prev) => {
+          const current = prev[targetSessionId];
+          if (!current || current.phase !== "preparing") return prev;
+          const components = current.components.map((component) =>
+            component.status === "pending"
+              ? { ...component, status: "unavailable" as const }
+              : component,
           );
-        return {
+          const degraded =
+            ev.kind === "error" ||
+            components.some((component) =>
+              ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
+            );
+          return {
+            ...prev,
+            [targetSessionId]: {
+              ...current,
+              phase: degraded ? "degraded" : "ready",
+              components,
+              updatedAt: Date.now(),
+            },
+          };
+        });
+      }
+      if (ev.kind === "sandbox") {
+        const d = ev.data ?? {};
+        setSandboxes((prev) => ({
           ...prev,
           [targetSessionId]: {
-            ...current,
-            phase: degraded ? "degraded" : "ready",
-            components,
-            updatedAt: Date.now(),
+            sandboxId: d.sandbox_id ?? "",
+            endpoint: d.endpoint ?? "",
+            reused: isTruthy(d.reused),
           },
-        };
+        }));
+        return;
+      }
+      if (ev.kind === "plan_status") {
+        const planId = ev.data?.id ?? "";
+        const status = ev.data?.status ?? "";
+        markConversationRequiresUserAction(
+          targetSessionId,
+          status === "ready" || status === "stopped",
+        );
+        setConvMessages((previous) => {
+          const current = previous[targetSessionId] ?? [];
+          const next = updatePlanStatus(current, planId, status);
+          return next === current ? previous : { ...previous, [targetSessionId]: next };
+        });
+        return;
+      }
+      if (ev.kind === "question_status") {
+        const questionId = ev.data?.id ?? "";
+        const status = ev.data?.status ?? "";
+        markConversationRequiresUserAction(targetSessionId, status === "pending");
+        setConvMessages((previous) => {
+          const current = previous[targetSessionId] ?? [];
+          const next = updateQuestionStatus(current, questionId, status, ev.data?.answer);
+          return next === current ? previous : { ...previous, [targetSessionId]: next };
+        });
+        return;
+      }
+      if (ev.kind === "plan_ready" || ev.kind === "question_ready") {
+        markConversationRequiresUserAction(targetSessionId, true);
+      }
+      if (ev.kind === "plan_ready") {
+        setRevisingPlanIds((previous) => {
+          if (!(targetSessionId in previous)) return previous;
+          const next = { ...previous };
+          delete next[targetSessionId];
+          return next;
+        });
+      }
+      setConvMessages((prev) => {
+        const cur = prev[targetSessionId] ?? [];
+        const duration =
+          ev.kind === "done"
+            ? inferAgentDurationMs(ev.data?.duration_ms, undefined, undefined)
+            : undefined;
+        const next = cur.map((m) => {
+          if (m.id !== assistantId) return m;
+          return {
+            ...m,
+            parts: reducePart(m.parts, ev),
+            ...(duration !== undefined
+              ? { metadata: { ...(m.metadata ?? {}), duration_ms: duration } }
+              : {}),
+          };
+        });
+        return { ...prev, [targetSessionId]: next };
       });
-    }
-    if (ev.kind === "sandbox") {
-      const d = ev.data ?? {};
-      setSandboxes((prev) => ({
-        ...prev,
-        [targetSessionId]: {
-          sandboxId: d.sandbox_id ?? "",
-          endpoint: d.endpoint ?? "",
-          reused: isTruthy(d.reused),
-        },
-      }));
-      return;
-    }
-    if (ev.kind === "plan_status") {
-      const planId = ev.data?.id ?? "";
-      const status = ev.data?.status ?? "";
-      setConvMessages((previous) => {
-        const current = previous[targetSessionId] ?? [];
-        const next = updatePlanStatus(current, planId, status);
-        return next === current ? previous : { ...previous, [targetSessionId]: next };
-      });
-      return;
-    }
-    if (ev.kind === "question_status") {
-      const questionId = ev.data?.id ?? "";
-      const status = ev.data?.status ?? "";
-      setConvMessages((previous) => {
-        const current = previous[targetSessionId] ?? [];
-        const next = updateQuestionStatus(current, questionId, status, ev.data?.answer);
-        return next === current ? previous : { ...previous, [targetSessionId]: next };
-      });
-      return;
-    }
-    if (ev.kind === "plan_ready") {
-      setRevisingPlanIds((previous) => {
-        if (!(targetSessionId in previous)) return previous;
-        const next = { ...previous };
-        delete next[targetSessionId];
-        return next;
-      });
-    }
-    setConvMessages((prev) => {
-      const cur = prev[targetSessionId] ?? [];
-      const duration =
-        ev.kind === "done"
-          ? inferAgentDurationMs(ev.data?.duration_ms, undefined, undefined)
-          : undefined;
-      const next = cur.map((m) => {
-        if (m.id !== assistantId) return m;
-        return {
-          ...m,
-          parts: reducePart(m.parts, ev),
-          ...(duration !== undefined
-            ? { metadata: { ...(m.metadata ?? {}), duration_ms: duration } }
-            : {}),
-        };
-      });
-      return { ...prev, [targetSessionId]: next };
-    });
-  }, []);
+    },
+    [markConversationRequiresUserAction],
+  );
 
   // Pull the sidebar conversation list from the gateway (scoped server-side to
   // the verified identity). Best-effort: a failure just leaves the list as-is.
@@ -1775,7 +1841,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!res.ok) return;
         const rows = (await res.json()) as ConversationSummary[];
-        if (Array.isArray(rows)) setConversations(rows);
+        if (Array.isArray(rows)) {
+          awaitingUserActionIdsRef.current = new Set(
+            rows
+              .filter((conversation) => conversation.requires_user_action === true)
+              .map((conversation) => conversation.id),
+          );
+          setConversations(rows);
+        }
       } catch {
         // ignore — sidebar list is non-critical
       }
@@ -1899,7 +1972,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       abortMap.current.delete(cursor.conversationId);
       runCursors.current.delete(cursor.conversationId);
       writeRunCursors(runCursors.current);
-      if (cursor.conversationId !== sessionIdRef.current) {
+      if (
+        cursor.conversationId !== sessionIdRef.current &&
+        !awaitingUserActionIdsRef.current.has(cursor.conversationId)
+      ) {
         setUnreadCompletedIds((prev) => new Set(prev).add(cursor.conversationId));
       }
       refreshConversations();
@@ -2302,8 +2378,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           [sessionId]: updateQuestionStatus(current, question.questionId, "cancelled"),
         };
       });
+      refreshConversations();
     },
-    [sessionId],
+    [refreshConversations, sessionId],
   );
 
   const applyUserEvent = useCallback(
@@ -2424,21 +2501,8 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   }, [applyUserEvent, applyUserEventSnapshot]);
 
   const onNew = useCallback(
-    async (message: {
-      content: readonly { type: string; text?: string }[];
-      attachments?: readonly {
-        id?: string;
-        name?: string;
-        contentType?: string;
-        content?: readonly {
-          type: string;
-          text?: string;
-          filename?: string;
-          data?: string;
-          mimeType?: string;
-        }[];
-      }[];
-    }) => {
+    async (message: NewChatMessage) => {
+      const planRevision = message.planRevision;
       const rawText = message.content
         .filter(
           (p): p is { type: "text"; text: string } =>
@@ -2493,9 +2557,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const turnAgent = selectedAgent;
       const turnSkill = selectedSkill;
       if (!model || !agentRuntime) return;
-      const turnInteractionMode = interactionModeForRuntime(
-        agentRuntime.id,
-        interactionMode,
+      const turnInteractionMode = (
+        planRevision
+          ? interactionModeForRuntime(agentRuntime.id, "plan")
+          : interactionModeForRuntime(agentRuntime.id, interactionMode)
       ) as InteractionMode;
       if (abortMap.current.has(turnSessionId) || runCursors.current.has(turnSessionId)) return;
       setSelectedSkillIds((prev) => {
@@ -2543,6 +2608,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               metadata: {
                 interaction_mode: turnInteractionMode,
                 ...(turnSkill ? { skill_id: turnSkill.id } : {}),
+                ...(planRevision
+                  ? {
+                      revision_of_plan_id: planRevision.planId,
+                      expected_plan_version: planRevision.expectedVersion,
+                    }
+                  : {}),
               },
             },
             {
@@ -2593,6 +2664,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               : {}),
             updated_at: now,
             runtime_id: existing?.runtime_id || agentRuntime.id,
+            requires_user_action: existing?.requires_user_action === true,
             ...(turnAgent
               ? {
                   agent_id: turnAgent.id,
@@ -2616,6 +2688,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           runtime_id: agentRuntime.id,
           ...(turnAgent ? { agent_id: turnAgent.id } : {}),
           interaction_mode: turnInteractionMode,
+          ...(planRevision
+            ? {
+                revision_of_plan_id: planRevision.planId,
+                expected_plan_version: planRevision.expectedVersion,
+              }
+            : {}),
           ...(allowWorkspaceReset ? { allow_workspace_reset: true } : {}),
           ...(turnSkill ? { skill_id: turnSkill.id } : {}),
           model_route_id: model.id,
@@ -2855,6 +2933,38 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     ],
   );
 
+  const revisePlan = useCallback(
+    (plan: UiPlanPart, feedback: string) => {
+      const trimmedFeedback = feedback.trim();
+      if (
+        !trimmedFeedback ||
+        isRunning ||
+        questionInputLocked ||
+        !selectedModel ||
+        abortMap.current.has(sessionId) ||
+        runCursors.current.has(sessionId) ||
+        selectedRuntime?.id !== "claude-code"
+      ) {
+        return false;
+      }
+      setInteractionModes((previous) => ({ ...previous, [sessionId]: "plan" }));
+      setRevisingPlanIds((previous) => ({ ...previous, [sessionId]: plan.planId }));
+      void onNew({
+        content: [{ type: "text", text: trimmedFeedback }],
+        ...(["ready", "stopped"].includes(plan.status)
+          ? {
+              planRevision: {
+                planId: plan.planId,
+                expectedVersion: plan.version,
+              },
+            }
+          : {}),
+      });
+      return true;
+    },
+    [isRunning, onNew, questionInputLocked, selectedModel, selectedRuntime?.id, sessionId],
+  );
+
   const executePlan = useCallback(
     async (plan: UiPlanPart) => {
       const turnSessionId = sessionId;
@@ -3009,8 +3119,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           [sessionId]: updatePlanStatus(current, plan.planId, "cancelled"),
         };
       });
+      refreshConversations();
     },
-    [sessionId],
+    [refreshConversations, sessionId],
   );
 
   const onCancel = useCallback(async () => {

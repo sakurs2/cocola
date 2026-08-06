@@ -15,6 +15,10 @@ test("Plan Card uses the compact HeroUI composition", () => {
   assert.match(planCardSource, /<Card\.Footer className="flex-col items-stretch gap-3 px-4 py-3/);
   assert.match(planCardSource, /<Dropdown\.Menu aria-label="More plan actions"/);
   assert.match(planCardSource, /<Separator \/>/);
+  assert.match(planCardSource, /className="my-4 w-full max-w-none/);
+  assert.match(planCardSource, /<TextField[\s\S]*?<TextArea/);
+  assert.match(planCardSource, /PLAN_ACTION_LABELS\.generateRevision/);
+  assert.match(planCardSource, /revisePlan\(plan, feedback\)/);
 });
 
 test("Plan Card no longer carries the legacy hand-styled surface", () => {
@@ -22,4 +26,5 @@ test("Plan Card no longer carries the legacy hand-styled surface", () => {
   assert.doesNotMatch(planCardSource, /statusView\.(accent|badge|frame|header|iconFrame)/);
   assert.doesNotMatch(planCardSource, /<button/);
   assert.doesNotMatch(planCardSource, /absolute inset-y-0 left-0 w-1/);
+  assert.doesNotMatch(planCardSource, /max-w-\[720px\]/);
 });

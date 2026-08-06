@@ -2,6 +2,7 @@ package chatrun
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -69,6 +70,16 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 		if run.UserID == in.Run.UserID && run.ConversationID == in.Run.ConversationID &&
 			run.ClientRequestID != "" && run.ClientRequestID == in.Run.ClientRequestID {
 			return StartResult{Run: run, Conversation: effective}, nil
+		}
+	}
+	if in.RevisionPlanID != "" {
+		plan, ok := m.plans[in.RevisionPlanID]
+		if !ok || plan.ConversationID != in.Run.ConversationID ||
+			plan.Version != in.ExpectedRevisionPlanVersion {
+			return StartResult{}, ErrPlanNotCurrent
+		}
+		if plan.Status != PlanStatusReady && plan.Status != PlanStatusStopped {
+			return StartResult{}, ErrPlanState
 		}
 	}
 	if err == nil && in.Conversation.FolderID != "" && in.Conversation.FolderID != effective.FolderID {
@@ -340,6 +351,35 @@ func (m *Memory) ListQuestions(
 		}
 	}
 	return out, nil
+}
+
+func (m *Memory) ListAwaitingUserActionConversationIDs(
+	ctx context.Context,
+	userID string,
+) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	candidates := make(map[string]struct{})
+	for _, question := range m.questions {
+		if question.Status == QuestionStatusPending {
+			candidates[question.ConversationID] = struct{}{}
+		}
+	}
+	for _, plan := range m.plans {
+		if plan.Status == PlanStatusReady || plan.Status == PlanStatusStopped {
+			candidates[plan.ConversationID] = struct{}{}
+		}
+	}
+
+	conversationIDs := make([]string, 0, len(candidates))
+	for conversationID := range candidates {
+		if _, err := m.convo.GetConversation(ctx, conversationID, userID); err == nil {
+			conversationIDs = append(conversationIDs, conversationID)
+		}
+	}
+	sort.Strings(conversationIDs)
+	return conversationIDs, nil
 }
 
 func (m *Memory) ListRuns(

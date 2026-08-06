@@ -17,6 +17,8 @@ test("session status fits its content until expanded details need an internal sc
     chatPageSource,
     /max-h-\[calc\(100svh-4rem\)\][^\n]*md:max-h-\[min\(36rem,calc\(100svh-5rem\)\)\]/,
   );
+  assert.match(chatPageSource, /md:m-2 md:max-h-/);
+  assert.doesNotMatch(chatPageSource, /md:m-2 md:ml-0/);
   assert.match(chatPageSource, /md:w-80 md:shrink-0 md:self-start/);
   assert.doesNotMatch(chatPageSource, /md:self-stretch/);
   assert.match(statusPanelSource, /flex max-h-\[inherit\] flex-col/);

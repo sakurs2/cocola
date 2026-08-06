@@ -2,6 +2,18 @@
 
 import { type DataMessagePartProps } from "@assistant-ui/react";
 import {
+  Button,
+  Card,
+  Chip,
+  Label,
+  Radio,
+  RadioGroup,
+  Separator,
+  Spinner,
+  TextArea,
+  TextField,
+} from "@heroui/react";
+import {
   Activity,
   BarChart3,
   Braces,
@@ -39,10 +51,20 @@ import {
 import { cn } from "@/lib/utils";
 
 const QUESTION_STATUS_LABELS: Record<QuestionStatus, string> = {
-  pending: "Claude needs your input",
+  pending: "Waiting for you",
   answering: "Continuing",
   answered: "Answered",
   cancelled: "Cancelled",
+};
+
+const QUESTION_STATUS_VIEW: Record<
+  QuestionStatus,
+  { color: "accent" | "default" | "success" | "warning"; icon: typeof CircleHelp }
+> = {
+  pending: { color: "warning", icon: CircleHelp },
+  answering: { color: "accent", icon: LoaderCircle },
+  answered: { color: "success", icon: CheckCircle2 },
+  cancelled: { color: "default", icon: XCircle },
 };
 
 export const QuestionCardPart: FC<DataMessagePartProps<Omit<UiQuestionPart, "type">>> = ({
@@ -122,125 +144,125 @@ export function QuestionCard({
     return [label, question.answer?.text].filter(Boolean).join(" · ");
   }, [question.answer?.optionId, question.answer?.text, question.options]);
 
-  return (
-    <section
-      aria-labelledby={titleId}
-      className="my-4 overflow-hidden rounded-2xl border border-sky-500/25 bg-surface shadow-[0_18px_45px_-36px_rgba(2,132,199,0.7)]"
-    >
-      <div className="flex items-start gap-3 border-b border-sky-500/15 bg-sky-500/[0.045] px-5 py-4">
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sky-600 text-white shadow-sm">
-          {question.status === "answering" ? (
-            <LoaderCircle className="size-[18px] animate-spin motion-reduce:animate-none" />
-          ) : question.status === "cancelled" ? (
-            <XCircle className="size-[18px]" />
-          ) : question.status === "answered" ? (
-            <CheckCircle2 className="size-[18px]" />
-          ) : (
-            <CircleHelp className="size-[18px]" />
-          )}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-bold tracking-[0.16em] text-sky-700 uppercase">
-            Question
-          </div>
-          <h3 id={titleId} className="mt-0.5 text-base font-semibold text-foreground">
-            {QUESTION_STATUS_LABELS[question.status]}
-          </h3>
-          {question.status === "pending" ? (
-            <p className="mt-1 text-xs leading-5 text-muted">
-              Choose an option or enter your own answer.
-            </p>
-          ) : null}
-        </div>
-      </div>
+  const statusView = QUESTION_STATUS_VIEW[question.status];
+  const StatusIcon = statusView.icon;
 
-      <div className="space-y-4 px-5 py-5">
-        <p className="text-[15px] font-medium leading-6 text-foreground">{question.question}</p>
-        {interactive && question.options.length > 0 ? (
-          <div className="grid gap-2" role="radiogroup" aria-label={question.question}>
-            {question.options.map((option) => {
-              const selected = selectedOptionId === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={busy}
-                  onClick={() => setSelectedOptionId(option.id)}
-                  className={cn(
-                    "flex min-h-11 items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500",
-                    selected
-                      ? "border-sky-500 bg-sky-500/[0.07] text-foreground"
-                      : "border-border bg-background hover:bg-surface-secondary/50",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "grid size-4 shrink-0 place-items-center rounded-full border",
-                      selected ? "border-sky-600 bg-sky-600 text-white" : "border-border",
-                    )}
-                  >
-                    {selected ? <Check className="size-2.5" /> : null}
-                  </span>
-                  <span>{option.label}</span>
-                </button>
-              );
-            })}
+  return (
+    <Card aria-labelledby={titleId} className="my-4 w-full max-w-none overflow-hidden p-0">
+      <Card.Header className="flex-row items-start justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="bg-warning-soft text-warning grid size-8 shrink-0 place-items-center rounded-xl">
+            <CircleHelp className="size-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <Card.Title id={titleId} className="text-base tracking-[-0.02em]">
+              {question.status === "pending" ? "Your input is needed" : "Question"}
+            </Card.Title>
+            <Card.Description className="mt-0.5 text-xs">
+              {question.status === "pending"
+                ? "Choose an option or write a response."
+                : QUESTION_STATUS_LABELS[question.status]}
+            </Card.Description>
           </div>
+        </div>
+        <Chip color={statusView.color} size="sm" variant="soft">
+          {question.status === "answering" ? (
+            <Spinner color="current" size="sm" />
+          ) : (
+            <StatusIcon className="size-3.5" aria-hidden="true" />
+          )}
+          {QUESTION_STATUS_LABELS[question.status]}
+        </Chip>
+      </Card.Header>
+
+      <Separator />
+      <Card.Content className="grid gap-3 px-4 py-3">
+        <p className="text-sm font-medium leading-6 text-foreground">{question.question}</p>
+        {interactive && question.options.length > 0 ? (
+          <RadioGroup
+            aria-label={question.question}
+            className="grid gap-2"
+            isDisabled={busy}
+            value={selectedOptionId}
+            onChange={setSelectedOptionId}
+          >
+            {question.options.map((option) => (
+              <Radio
+                key={option.id}
+                className={({ isSelected }) =>
+                  cn(
+                    "border-separator hover:bg-default min-h-10 rounded-xl border px-3 py-2 transition-[background-color,border-color,transform] duration-150",
+                    isSelected && "border-warning bg-warning-soft",
+                  )
+                }
+                value={option.id}
+              >
+                <Radio.Content className="flex w-full items-center gap-3 text-left">
+                  <Radio.Control className="shrink-0">
+                    <Radio.Indicator />
+                  </Radio.Control>
+                  <span className="text-sm leading-5 text-foreground">{option.label}</span>
+                </Radio.Content>
+              </Radio>
+            ))}
+          </RadioGroup>
         ) : null}
         {interactive ? (
-          <textarea
+          <TextField
+            className="w-full"
+            isDisabled={busy}
             value={customAnswer}
-            disabled={busy}
-            maxLength={16 * 1024}
-            rows={3}
-            onChange={(event) => setCustomAnswer(event.target.value)}
-            placeholder="Enter your own answer…"
-            className="w-full resize-y rounded-xl border border-border bg-background px-3.5 py-3 text-sm leading-5 outline-none placeholder:text-muted focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-60"
-          />
+            variant="secondary"
+            onChange={setCustomAnswer}
+          >
+            <Label className="sr-only">Your answer</Label>
+            <TextArea
+              className="min-h-20 resize-y"
+              maxLength={16 * 1024}
+              placeholder="Write your own answer…"
+              rows={3}
+            />
+          </TextField>
         ) : answeredLabel ? (
-          <div className="rounded-xl border border-border bg-surface-secondary/35 px-3.5 py-3 text-sm text-foreground">
+          <div className="bg-default rounded-xl px-3 py-2.5 text-sm text-foreground">
             {answeredLabel}
           </div>
         ) : null}
         {question.status === "cancelled" ? (
-          <p className="text-sm text-muted">This question is no longer current.</p>
+          <p className="text-xs text-muted">This question is no longer active.</p>
         ) : null}
         {error ? (
-          <p role="alert" className="text-xs text-danger">
+          <p role="alert" className="bg-danger-soft text-danger rounded-xl px-3 py-2 text-xs">
             {error}
           </p>
         ) : null}
-      </div>
+      </Card.Content>
 
       {interactive ? (
-        <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void cancel()}
-            className="inline-flex h-10 items-center justify-center rounded-xl border border-border bg-background px-4 text-sm font-semibold hover:bg-surface-secondary disabled:opacity-50"
-          >
-            {action === "cancel" ? (
-              <LoaderCircle className="mr-2 size-4 animate-spin motion-reduce:animate-none" />
-            ) : null}
-            Cancel question
-          </button>
-          <button
-            type="button"
-            disabled={busy || (!selectedOptionId && !customAnswer.trim())}
-            onClick={() => void submit()}
-            className="inline-flex h-10 items-center justify-center rounded-xl bg-sky-600 px-4 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {action === "answer" ? (
-              <LoaderCircle className="mr-2 size-4 animate-spin motion-reduce:animate-none" />
-            ) : null}
-            Answer and continue
-          </button>
-        </div>
+        <>
+          <Separator />
+          <Card.Footer className="flex justify-end gap-2 px-4 py-3">
+            <Button
+              isDisabled={busy}
+              isPending={action === "cancel"}
+              size="sm"
+              variant="outline"
+              onPress={() => void cancel()}
+            >
+              Cancel question
+            </Button>
+            <Button
+              isDisabled={busy || (!selectedOptionId && !customAnswer.trim())}
+              isPending={action === "answer"}
+              size="sm"
+              onPress={() => void submit()}
+            >
+              Answer and continue
+            </Button>
+          </Card.Footer>
+        </>
       ) : null}
-    </section>
+    </Card>
   );
 }
 

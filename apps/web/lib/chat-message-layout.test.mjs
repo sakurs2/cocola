@@ -29,6 +29,10 @@ const demoStylesSource = await readFile(
   new URL("../app/cocola-web-demo.css", import.meta.url),
   "utf8",
 );
+const railSource = await readFile(
+  new URL("../components/assistant-ui/rail.tsx", import.meta.url),
+  "utf8",
+);
 const globalStylesSource = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 test("conversation messages use the Cocola compatibility skeleton without replacing Cocola parts", () => {
   assert.match(threadSource, /from "@cocola\/ui-compat\/chat-message"/);
@@ -47,6 +51,27 @@ test("assistant identity remains model-aware and the thread uses the bounded pro
   assert.match(threadSource, /<div className="h-6 w-full shrink-0" aria-hidden="true" \/>/);
   assert.match(threadSource, /cocola-web-prompt-starter/);
   assert.match(threadSource, /cocola-chat-user-bubble/);
+  assert.match(threadSource, /cocola-chat-user-bubble max-w-\[min\(72%,42rem\)\]/);
+  assert.match(
+    threadSource,
+    /ThreadPrimitive\.Viewport[\s\S]*?<ActiveExecutionDock \/>[\s\S]*?<ChatConversation\.Content/,
+  );
+  assert.match(threadSource, /pointer-events-none sticky top-12/);
+  assert.doesNotMatch(
+    threadSource,
+    /pointer-events-none sticky top-12[^"\n]*bg-gradient-to-b/,
+  );
+  assert.match(threadSource, /max-w-\[var\(--thread-max-width\)\] pl-\[2\.375rem\]/);
+  assert.match(railSource, /rounded-2xl border border-border\/80 bg-surface px-4 py-3 shadow-surface/);
+  assert.match(
+    railSource,
+    /grid min-w-0 grid-cols-\[1rem_minmax\(0,1fr\)\] items-center gap-2/,
+  );
+  assert.match(railSource, /text-accent flex h-7 items-center justify-end/);
+  assert.match(railSource, /flex h-5 items-center justify-end/);
+  assert.doesNotMatch(railSource, /bg-accent-soft text-accent flex size-7/);
+  assert.match(railSource, /border-2 border-foreground\/25/);
+  assert.match(railSource, /overscroll-contain pr-1 pt-1/);
 });
 
 test("the empty thread preserves the HeroUI demo welcome composition", () => {
@@ -80,6 +105,20 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.match(threadSource, /avatarKey=\{agent\.avatar_key\}/);
   assert.doesNotMatch(threadSource, /PlanModeContextStrip/);
   assert.match(threadSource, /<PlanModeIndicator \/>/);
+  assert.match(
+    threadSource,
+    /cocola-web-plan-indicator inline-flex h-9 shrink-0 items-center gap-2 rounded-xl px-2\.5 text-xs font-medium/,
+  );
+  assert.match(threadSource, /variant="ghost"[\s\S]*?setInteractionMode\("execute"\)/);
+  assert.doesNotMatch(threadSource, /cocola-web-plan-indicator h-9 shrink-0 rounded-full/);
+  assert.match(
+    demoStylesSource,
+    /\.cocola-user-ui \.cocola-web-plan-indicator \{[\s\S]*?background: transparent !important;/,
+  );
+  assert.match(
+    demoStylesSource,
+    /\.cocola-user-ui \.cocola-web-plan-indicator:hover,[\s\S]*?transform: none;/,
+  );
   assert.match(threadSource, /PLAN_MODE_COPY\.initialPlaceholder/);
   assert.match(demoStylesSource, /\.prompt-input__shell \{[\s\S]*?var\(--border\) 88%/);
   assert.match(

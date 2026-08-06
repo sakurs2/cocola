@@ -81,11 +81,13 @@ type Run struct {
 }
 
 type StartInput struct {
-	Run            Run
-	Conversation   convo.Conversation
-	UserMessage    convo.Message
-	ProjectBaseRef string
-	ProjectBaseSHA string
+	Run                         Run
+	Conversation                convo.Conversation
+	UserMessage                 convo.Message
+	ProjectBaseRef              string
+	ProjectBaseSHA              string
+	RevisionPlanID              string
+	ExpectedRevisionPlanVersion int
 }
 
 type StartResult struct {
@@ -247,6 +249,7 @@ type Store interface {
 	CancelQuestion(ctx context.Context, conversationID, questionID, userID string, expectedVersion int, now time.Time) (Question, error)
 	GetQuestion(ctx context.Context, conversationID, questionID, userID string) (Question, error)
 	ListQuestions(ctx context.Context, conversationID, userID string) ([]Question, error)
+	ListAwaitingUserActionConversationIDs(ctx context.Context, userID string) ([]string, error)
 	ListRuns(ctx context.Context, conversationID, userID string) ([]Run, error)
 	StartPlanExecution(ctx context.Context, in PlanExecutionInput) (PlanExecutionResult, error)
 	CancelPlan(ctx context.Context, conversationID, planID, userID string, expectedVersion int, now time.Time) (Plan, error)

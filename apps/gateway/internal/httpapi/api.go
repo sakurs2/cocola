@@ -642,6 +642,8 @@ type chatRequest struct {
 	ClientRequestID                      string                         `json:"client_request_id"`
 	RuntimeID                            string                         `json:"runtime_id"`
 	InteractionMode                      string                         `json:"interaction_mode"`
+	RevisionOfPlanID                     string                         `json:"revision_of_plan_id"`
+	ExpectedPlanVersion                  int                            `json:"expected_plan_version"`
 	RequireSessionResume                 bool                           `json:"-"`
 	QuestionID                           string                         `json:"-"`
 	FolderID                             string                         `json:"folder_id"`
@@ -808,6 +810,10 @@ func userMetadata(req chatRequest) map[string]any {
 	if skillID := strings.TrimSpace(req.SkillID); skillID != "" {
 		out["skill_id"] = skillID
 	}
+	if planID := strings.TrimSpace(req.RevisionOfPlanID); planID != "" {
+		out["revision_of_plan_id"] = planID
+		out["expected_plan_version"] = req.ExpectedPlanVersion
+	}
 	return out
 }
 
@@ -916,25 +922,30 @@ type conversationAgentSummary struct {
 }
 
 type conversationSummaryResponse struct {
-	ID           string                    `json:"id"`
-	Title        string                    `json:"title"`
-	ChatType     string                    `json:"chat_type"`
-	FolderID     string                    `json:"folder_id,omitempty"`
-	ProjectID    string                    `json:"project_id,omitempty"`
-	RuntimeID    string                    `json:"runtime_id"`
-	AgentID      string                    `json:"agent_id,omitempty"`
-	AgentVersion int64                     `json:"agent_version,omitempty"`
-	Agent        *conversationAgentSummary `json:"agent,omitempty"`
-	CreatedAt    time.Time                 `json:"created_at"`
-	UpdatedAt    time.Time                 `json:"updated_at"`
+	ID                 string                    `json:"id"`
+	Title              string                    `json:"title"`
+	ChatType           string                    `json:"chat_type"`
+	FolderID           string                    `json:"folder_id,omitempty"`
+	ProjectID          string                    `json:"project_id,omitempty"`
+	RuntimeID          string                    `json:"runtime_id"`
+	AgentID            string                    `json:"agent_id,omitempty"`
+	AgentVersion       int64                     `json:"agent_version,omitempty"`
+	Agent              *conversationAgentSummary `json:"agent,omitempty"`
+	RequiresUserAction bool                      `json:"requires_user_action"`
+	CreatedAt          time.Time                 `json:"created_at"`
+	UpdatedAt          time.Time                 `json:"updated_at"`
 }
 
-func conversationSummary(value convo.Conversation) conversationSummaryResponse {
+func conversationSummary(
+	value convo.Conversation,
+	requiresUserAction bool,
+) conversationSummaryResponse {
 	response := conversationSummaryResponse{
 		ID: value.ID, Title: value.Title, ChatType: value.ChatType,
 		FolderID: value.FolderID, ProjectID: value.ProjectID, RuntimeID: value.RuntimeID,
 		AgentID: value.AgentID, AgentVersion: value.AgentVersion,
-		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		RequiresUserAction: requiresUserAction,
+		CreatedAt:          value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 	if value.AgentSnapshot != nil {
 		snapshot := value.AgentSnapshot
@@ -967,9 +978,24 @@ func (a *API) listConversations(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not list conversations")
 		return
 	}
+	awaitingUserAction := make(map[string]struct{})
+	if a.runs != nil && a.runs.store != nil {
+		conversationIDs, attentionErr := a.runs.store.ListAwaitingUserActionConversationIDs(
+			r.Context(),
+			id.UserID,
+		)
+		if attentionErr != nil {
+			a.log.Warn("list conversations awaiting user action failed: " + attentionErr.Error())
+		} else {
+			for _, conversationID := range conversationIDs {
+				awaitingUserAction[conversationID] = struct{}{}
+			}
+		}
+	}
 	result := make([]conversationSummaryResponse, 0, len(convs))
 	for _, conversation := range convs {
-		result = append(result, conversationSummary(conversation))
+		_, requiresUserAction := awaitingUserAction[conversation.ID]
+		result = append(result, conversationSummary(conversation, requiresUserAction))
 	}
 	writeJSON(w, http.StatusOK, result)
 }

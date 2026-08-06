@@ -204,9 +204,13 @@ func (s *planModeStreamer) Stream(_ context.Context, query agent.Query, onEvent 
 	s.queries = append(s.queries, query)
 	call := len(s.queries)
 	s.mu.Unlock()
-	if call == 1 {
+	if query.InteractionMode == agent.InteractionModePlan {
+		content := "## Plan\n\n- Implement the change"
+		if call > 1 {
+			content = "## Revised plan\n\n- Add the requested tests"
+		}
 		if err := onEvent(agent.Event{Kind: "plan_ready", Data: map[string]string{
-			"content_markdown": "## Plan\n\n- Implement the change",
+			"content_markdown": content,
 		}}); err != nil {
 			return err
 		}
@@ -218,6 +222,74 @@ func (s *planModeStreamer) Stream(_ context.Context, query agent.Query, onEvent 
 		}
 	}
 	return onEvent(agent.Event{Kind: "done"})
+}
+
+func TestPlanRevisionIsPersistedAsUserTurnAndSupersedesAfterSuccess(t *testing.T) {
+	streamer := &planModeStreamer{}
+	conversations := convo.NewMemory()
+	runs := chatrun.NewMemory(conversations)
+	api := New(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
+		WithConvoStore(conversations).
+		WithChatRuns(runs, RunConfig{
+			PingEvery: time.Hour, MergeWindow: time.Millisecond, DraftInterval: time.Millisecond,
+		})
+	handler := api.Handler()
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"plan the change","session_id":"conversation-plan-revision","client_request_id":"plan-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","interaction_mode":"plan"}`,
+	)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("initial plan response = %d %s", first.Code, first.Body.String())
+	}
+	messages, err := conversations.GetMessages(
+		context.Background(), "conversation-plan-revision", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 2 || len(messages[1].Parts) != 1 {
+		t.Fatalf("initial plan history = %+v, %v", messages, err)
+	}
+	initialPlan := messages[1].Parts[0]
+
+	revision := httptest.NewRecorder()
+	revisionBody := fmt.Sprintf(
+		`{"prompt":"Please add browser tests","session_id":"conversation-plan-revision","client_request_id":"revision-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","interaction_mode":"plan","revision_of_plan_id":%q,"expected_plan_version":%d}`,
+		initialPlan.PlanID,
+		initialPlan.Version,
+	)
+	handler.ServeHTTP(revision, httptest.NewRequest(
+		http.MethodPost, "/v1/chat", strings.NewReader(revisionBody),
+	))
+	if revision.Code != http.StatusOK || !strings.Contains(revision.Body.String(), `"kind":"plan_ready"`) {
+		t.Fatalf("revision response = %d %s", revision.Code, revision.Body.String())
+	}
+
+	messages, err = conversations.GetMessages(
+		context.Background(), "conversation-plan-revision", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 4 || len(messages[3].Parts) != 1 {
+		t.Fatalf("revision history = %+v, %v", messages, err)
+	}
+	if messages[2].Role != "user" || len(messages[2].Parts) != 1 ||
+		messages[2].Parts[0].Text != "Please add browser tests" {
+		t.Fatalf("revision user turn = %+v", messages[2])
+	}
+	if messages[2].Metadata["revision_of_plan_id"] != initialPlan.PlanID ||
+		messages[2].Metadata["expected_plan_version"] != initialPlan.Version {
+		t.Fatalf("revision metadata = %#v", messages[2].Metadata)
+	}
+	if messages[1].Parts[0].Status != chatrun.PlanStatusSuperseded ||
+		messages[3].Parts[0].Status != chatrun.PlanStatusReady ||
+		messages[3].Parts[0].Version != 2 {
+		t.Fatalf("versioned revision history = %+v", messages)
+	}
+
+	streamer.mu.Lock()
+	queries := append([]agent.Query(nil), streamer.queries...)
+	streamer.mu.Unlock()
+	if len(queries) != 2 || queries[1].InteractionMode != agent.InteractionModePlan ||
+		!strings.Contains(queries[1].Prompt, "Requested changes:\nPlease add browser tests") {
+		t.Fatalf("revision query = %+v", queries)
+	}
 }
 
 func (s *questionModeStreamer) Stream(

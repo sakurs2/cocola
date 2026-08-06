@@ -7,6 +7,7 @@ import {
   Check,
   ChevronsLeft,
   CircleCheck,
+  CircleQuestionFill,
   Comments,
   Ellipsis,
   FaceRobot,
@@ -324,6 +325,7 @@ function HeroUIWorkspaceSidebarContents({
                 folders={folders}
                 idPrefix={idPrefix}
                 isCurrent={pathname === "/" && activeSessionId === conversation.id}
+                requiresUserAction={conversation.requires_user_action === true}
                 running={runningSessionIds.has(conversation.id)}
                 unread={unreadCompletedSessionIds.has(conversation.id)}
                 onAction={(action) => void handleConversationAction(conversation, action)}
@@ -443,6 +445,7 @@ function ConversationSidebarItem({
   onCommitRename,
   onDraftTitleChange,
   onOpen,
+  requiresUserAction,
   running,
   unread,
 }: {
@@ -457,6 +460,7 @@ function ConversationSidebarItem({
   onCommitRename: () => void;
   onDraftTitleChange: (title: string) => void;
   onOpen: () => void;
+  requiresUserAction: boolean;
   running: boolean;
   unread: boolean;
 }) {
@@ -502,8 +506,19 @@ function ConversationSidebarItem({
               aria-label="Agent is answering"
               className="text-accent size-3.5 animate-spin"
             />
+          ) : requiresUserAction ? (
+            <Tooltip delay={0}>
+              <span
+                aria-label="Waiting for your confirmation"
+                className="text-warning grid size-5 place-items-center"
+                role="img"
+              >
+                <CircleQuestionFill className="size-3.5" />
+              </span>
+              <Tooltip.Content>Waiting for your confirmation</Tooltip.Content>
+            </Tooltip>
           ) : null}
-          {unread ? (
+          {unread && !running && !requiresUserAction ? (
             <CircleCheck aria-label="Answer completed" className="size-3.5 text-emerald-500" />
           ) : null}
           <Dropdown>

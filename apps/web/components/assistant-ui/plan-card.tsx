@@ -1,7 +1,18 @@
 "use client";
 
 import { useThread, type DataMessagePartProps } from "@assistant-ui/react";
-import { Button, Card, Chip, Dropdown, Separator, Spinner, Tooltip } from "@heroui/react";
+import {
+  Button,
+  Card,
+  Chip,
+  Dropdown,
+  Label,
+  Separator,
+  Spinner,
+  TextArea,
+  TextField,
+  Tooltip,
+} from "@heroui/react";
 import {
   BadgeCheck,
   Ban,
@@ -54,6 +65,8 @@ export const PlanCardPart: FC<
   const isInitiallyCollapsed = ["completed", "superseded", "cancelled"].includes(status);
   const [expanded, setExpanded] = useState(!isInitiallyCollapsed);
   const [pendingAction, setPendingAction] = useState<"execute" | "cancel" | null>(null);
+  const [revisionOpen, setRevisionOpen] = useState(false);
+  const [revisionText, setRevisionText] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const copiedTimeoutRef = useRef<number | null>(null);
@@ -119,7 +132,22 @@ export const PlanCardPart: FC<
     }
   };
 
-  const revise = () => revisePlan(plan);
+  const revise = () => {
+    setError("");
+    setRevisionOpen(true);
+  };
+
+  const submitRevision = () => {
+    const feedback = revisionText.trim();
+    if (!feedback) return;
+    setError("");
+    if (!revisePlan(plan, feedback)) {
+      setError("A revised plan cannot be started right now.");
+      return;
+    }
+    setRevisionText("");
+    setRevisionOpen(false);
+  };
 
   const handleMenuAction = (key: Key) => {
     if (key === "copy") {
@@ -132,7 +160,7 @@ export const PlanCardPart: FC<
   };
 
   return (
-    <Card aria-labelledby={planTitleId} className="my-4 w-full max-w-[720px] overflow-hidden p-0">
+    <Card aria-labelledby={planTitleId} className="my-4 w-full max-w-none overflow-hidden p-0">
       <Card.Header className="flex-col items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className="bg-accent-soft text-accent grid size-8 shrink-0 place-items-center rounded-xl">
@@ -229,6 +257,50 @@ export const PlanCardPart: FC<
         </>
       ) : null}
 
+      {revisionOpen && !isRevising ? (
+        <>
+          <Separator />
+          <Card.Content className="grid gap-2.5 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">What should change?</p>
+              <p className="mt-0.5 text-xs text-muted">
+                Your feedback will be sent as the next message in Plan mode.
+              </p>
+            </div>
+            <TextField
+              className="w-full"
+              value={revisionText}
+              variant="secondary"
+              onChange={setRevisionText}
+            >
+              <Label className="sr-only">Requested plan changes</Label>
+              <TextArea
+                autoFocus
+                className="min-h-20 resize-y"
+                maxLength={16 * 1024}
+                placeholder="Describe the changes you want in the plan…"
+                rows={3}
+              />
+            </TextField>
+            <div className="flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => {
+                  setRevisionOpen(false);
+                  setRevisionText("");
+                }}
+              >
+                {PLAN_ACTION_LABELS.cancelRevision}
+              </Button>
+              <Button isDisabled={!revisionText.trim()} size="sm" onPress={submitRevision}>
+                {PLAN_ACTION_LABELS.generateRevision}
+              </Button>
+            </div>
+          </Card.Content>
+        </>
+      ) : null}
+
       {isRevising ? (
         <>
           <Separator />
@@ -248,7 +320,7 @@ export const PlanCardPart: FC<
         </>
       ) : null}
 
-      {hasDecisionFooter ? (
+      {hasDecisionFooter && !revisionOpen ? (
         <>
           <Separator />
           <Card.Footer className="flex-col items-stretch gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

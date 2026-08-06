@@ -69,7 +69,6 @@ test("Plan Mode product copy is stable and English", () => {
     cancelLabel: "Exit Plan mode",
     lockedLabel: "Plan mode is fixed while Claude is responding",
     initialPlaceholder: "Describe what you want Claude to plan…",
-    revisionPlaceholder: "Describe how you want to revise this plan…",
   });
   assert.deepEqual(PLAN_GATE_COPY, {
     approveNotice: "Workspace remains unchanged until you approve.",
@@ -95,7 +94,9 @@ test("Plan Mode product copy is stable and English", () => {
   });
   assert.deepEqual(PLAN_ACTION_LABELS, {
     approve: "Approve and execute",
-    revise: "Revise plan",
+    revise: "Request changes",
+    generateRevision: "Generate revised plan",
+    cancelRevision: "Cancel",
     cancel: "Cancel plan",
     continue: "Continue execution",
     replan: "Re-plan",

@@ -243,6 +243,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
 	req.InteractionMode = strings.TrimSpace(req.InteractionMode)
+	req.RevisionOfPlanID = strings.TrimSpace(req.RevisionOfPlanID)
 	if req.InteractionMode == "" {
 		req.InteractionMode = chatrun.InteractionModeExecute
 	}
@@ -250,6 +251,20 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		req.InteractionMode != chatrun.InteractionModePlan {
 		writeErr(w, http.StatusBadRequest, "UNSUPPORTED_INTERACTION_MODE", "interaction_mode must be execute or plan")
 		return
+	}
+	if (req.RevisionOfPlanID == "") != (req.ExpectedPlanVersion == 0) {
+		writeErr(w, http.StatusBadRequest, "INVALID_PLAN_REVISION", "revision plan id and version must be provided together")
+		return
+	}
+	if req.RevisionOfPlanID != "" {
+		if _, err := uuid.Parse(req.RevisionOfPlanID); err != nil || req.ExpectedPlanVersion <= 0 {
+			writeErr(w, http.StatusBadRequest, "INVALID_PLAN_REVISION", "revision plan id or version is invalid")
+			return
+		}
+		if req.InteractionMode != chatrun.InteractionModePlan {
+			writeErr(w, http.StatusBadRequest, "INVALID_PLAN_REVISION", "plan revisions require Plan mode")
+			return
+		}
 	}
 	req.FolderID = strings.TrimSpace(req.FolderID)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
@@ -519,8 +534,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			Parts:    userMessageParts(req),
 			Metadata: userMetadata(req), CreatedAt: startedAt,
 		},
-		ProjectBaseRef: projectBaseRef,
-		ProjectBaseSHA: projectBaseSHA,
+		ProjectBaseRef:              projectBaseRef,
+		ProjectBaseSHA:              projectBaseSHA,
+		RevisionPlanID:              req.RevisionOfPlanID,
+		ExpectedRevisionPlanVersion: req.ExpectedPlanVersion,
 	})
 	var live *liveRun
 	if err == nil {
@@ -603,6 +620,14 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			"QUESTION_PENDING",
 			"Answer or cancel Claude's pending question before starting another run.",
 		)
+		return
+	}
+	if errors.Is(err, chatrun.ErrPlanNotCurrent) {
+		writeErr(w, http.StatusConflict, "PLAN_NOT_CURRENT", "This plan is no longer current. Review the latest plan before revising it.")
+		return
+	}
+	if errors.Is(err, chatrun.ErrPlanState) {
+		writeErr(w, http.StatusConflict, "PLAN_STATE", "This plan can no longer be revised.")
 		return
 	}
 	if err != nil {
@@ -1226,7 +1251,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		RuntimeID: live.request.RuntimeID, SkillID: live.request.SkillID,
 		InteractionMode:      agent.InteractionMode(effectiveInteractionMode(live.request)),
 		RequireSessionResume: live.request.RequireSessionResume,
-		Prompt:               live.request.Prompt, SandboxID: live.request.SandboxID,
+		Prompt:               agentPrompt(live.request), SandboxID: live.request.SandboxID,
 		MaxTurns:            effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
 		ModelRouteID:        effectiveModelRouteID(live.request),
 		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
@@ -1555,6 +1580,17 @@ func (a *API) executeLiveRun(live *liveRun) {
 		delete(live.subs, subscriber)
 	}
 	live.mu.Unlock()
+}
+
+func agentPrompt(req chatRequest) string {
+	prompt := strings.TrimSpace(req.Prompt)
+	if strings.TrimSpace(req.RevisionOfPlanID) == "" {
+		return prompt
+	}
+	return fmt.Sprintf(
+		"Revise the current implementation plan using the user's requested changes below. Return a complete replacement plan for review.\n\nRequested changes:\n%s",
+		prompt,
+	)
 }
 
 func runtimeAgentContext(snapshot *agentprofile.Snapshot) *agent.AgentContext {
