@@ -16,6 +16,7 @@ import {
   unstable_useTriggerPopoverScopeContext,
   useComposer,
   useComposerRuntime,
+  useAttachment,
   useMessage,
   useThread,
   useThreadComposerAttachment,
@@ -41,7 +42,6 @@ import {
   ArrowDownIcon,
   Check,
   CopyIcon,
-  PaperclipIcon,
   SendHorizontalIcon,
   XIcon,
   ArrowUp as ArrowUpIcon,
@@ -91,6 +91,8 @@ import {
   RailTool,
 } from "@/components/assistant-ui/rail";
 import { type EnvironmentPreparationSnapshot } from "@/lib/environment";
+import { resolveFileType } from "@/lib/file-type";
+import { MaterialFileIcon } from "@/lib/material-file-icons";
 import {
   buildAgentTurnRenderPlan,
   finalAgentOutputText,
@@ -324,27 +326,27 @@ const ThreadWelcome: FC = () => {
               onPromptStarterDetach={handlePromptStarterDetach}
             />
           </div>
-          <div className="mt-5 min-h-10 w-full">
+          <div className="mt-4 min-h-9 w-full">
             <PromptSuggestion variant="pill">
-              <PromptSuggestion.Items className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2.5">
+              <PromptSuggestion.Items className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2">
                 {visiblePromptStarters.map((starter) => {
                   const { icon: Icon, label, iconClassName } = starter;
                   return (
                     <PromptSuggestion.Item
                       key={label}
-                      className="cocola-web-prompt-starter group !min-h-11 !w-auto !items-center !justify-start !rounded-full !border !border-border !px-3.5 !py-2 whitespace-nowrap"
+                      className="cocola-web-prompt-starter group !h-10 !min-h-10 !w-auto !items-center !justify-start !rounded-full !border !border-border !px-3 !py-1.5 whitespace-nowrap"
                       showEndIcon={false}
                       onPress={() => handlePromptStarterClick(starter)}
                     >
                       <span
                         className={cn(
-                          "cocola-web-prompt-starter-icon flex size-8 shrink-0 items-center justify-center rounded-full",
+                          "cocola-web-prompt-starter-icon flex size-7 shrink-0 items-center justify-center rounded-full",
                           iconClassName,
                         )}
                       >
-                        <Icon className="size-4" />
+                        <Icon className="size-3.5" />
                       </span>
-                      <span className="text-sm font-medium leading-tight">{label}</span>
+                      <span className="text-[13px] font-medium leading-none">{label}</span>
                     </PromptSuggestion.Item>
                   );
                 })}
@@ -391,6 +393,10 @@ const ConversationComposerInner: FC<{
   const composerAttachments = useComposer((state) => state.attachments);
   const composerText = useComposer((state) => state.text);
   const isRunning = useThread((thread) => thread.isRunning);
+  const hasFileAttachments = composerAttachments.some(
+    (attachment) => !isWikiComposerAttachment(attachment),
+  );
+  const hasComposerHeader = Boolean(selectedSkill) || hasFileAttachments;
   const promptFileSlots = promptStarter?.fileSlots ?? EMPTY_PROMPT_FILE_SLOTS;
   const missingPromptFileSlot = firstMissingPromptStarterSlot(
     promptFileSlots,
@@ -411,6 +417,7 @@ const ConversationComposerInner: FC<{
         <PromptInput
           className={cn(
             "cocola-web-composer w-full",
+            hasComposerHeader && "cocola-web-composer--with-header",
             interactionMode === "plan" &&
               "[&_[data-slot=prompt-input-shell]]:border-indigo-500/30 [&_[data-slot=prompt-input-shell]]:bg-indigo-500/[0.025] [&_[data-slot=prompt-input-shell]]:shadow-[0_12px_36px_-24px_rgba(79,70,229,0.65)]",
           )}
@@ -421,15 +428,14 @@ const ConversationComposerInner: FC<{
         >
           <PromptInput.Shell>
             <ComposerPrimitive.Root className="contents">
-              {selectedSkill ||
-              composerAttachments.some((attachment) => !isWikiComposerAttachment(attachment)) ? (
-                <PromptInput.Attachments className="flex items-center gap-2 px-4 pt-3">
+              {hasComposerHeader ? (
+                <PromptInput.Attachments className="flex flex-wrap items-center gap-2 px-4 pt-3">
                   <SelectedSkillChip />
                   <ComposerAttachments />
                 </PromptInput.Attachments>
               ) : null}
               <PromptInput.Content>
-                <div className="relative min-w-0">
+                <div className="relative min-w-0 text-left">
                   <ComposerWikiInput
                     ref={promptInputRef}
                     autoFocus={!noModel}
@@ -457,17 +463,13 @@ const ConversationComposerInner: FC<{
               </PromptInput.Content>
               <PromptInput.Toolbar>
                 <PromptInput.ToolbarStart className="min-w-0 flex-1 overflow-x-auto">
-                  <ComposerPrimitive.AddAttachment asChild>
-                    <PromptInput.Action
-                      isIconOnly
-                      aria-label="Attach file"
-                      tooltip={noModel ? "No model configured" : "Attach file"}
-                      variant="ghost"
-                      isDisabled={noModel || questionInputLocked}
-                      className="cocola-web-composer-action shrink-0 rounded-xl"
-                    >
-                      <GravityPaperclip className="size-4" />
-                    </PromptInput.Action>
+                  <ComposerPrimitive.AddAttachment
+                    aria-label="Attach file"
+                    title={noModel ? "No model configured" : "Attach file"}
+                    disabled={noModel || questionInputLocked}
+                    className="cocola-web-composer-action inline-flex size-9 shrink-0 items-center justify-center rounded-xl text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <GravityPaperclip className="size-4" />
                   </ComposerPrimitive.AddAttachment>
                   <ModelPicker />
                   <AgentPicker />
@@ -751,6 +753,9 @@ const ComposerWikiInput = forwardRef<
       promptSlotBindings,
       (attachmentId) => attachments.some((attachment) => attachment.id === attachmentId),
     );
+    const hasPreparingAttachment = attachments.some(
+      (attachment) => attachment.status.type !== "complete",
+    );
 
     const wikiAttachments = useMemo(
       () =>
@@ -959,11 +964,11 @@ const ComposerWikiInput = forwardRef<
               event.key === "Enter" &&
               !event.shiftKey &&
               !event.nativeEvent.isComposing &&
-              missingPromptFileSlot
+              (missingPromptFileSlot || hasPreparingAttachment)
             ) {
               event.preventDefault();
               event.stopPropagation();
-              openFileSlot(missingPromptFileSlot.key);
+              if (missingPromptFileSlot) openFileSlot(missingPromptFileSlot.key);
             }
           }}
           onScroll={(event) => {
@@ -972,7 +977,7 @@ const ComposerWikiInput = forwardRef<
             overlayRef.current.scrollLeft = event.currentTarget.scrollLeft;
           }}
           className={cn(
-            "prompt-input__textarea relative z-[1] block max-h-40 w-full resize-none border-none bg-transparent pb-2 text-[15px] leading-6 outline-none placeholder:text-muted focus:ring-0 disabled:cursor-not-allowed",
+            "prompt-input__textarea relative z-[1] block max-h-40 w-full resize-none border-none bg-transparent pb-2 text-left text-[15px] leading-6 outline-none placeholder:text-muted focus:ring-0 disabled:cursor-not-allowed",
             hasInlineMentions &&
               "text-transparent caret-foreground selection:bg-blue-200/60 selection:text-transparent",
           )}
@@ -1008,7 +1013,7 @@ const ComposerWikiMentionOverlay = forwardRef<
   <div
     ref={ref}
     style={textIndent ? { textIndent } : undefined}
-    className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-[5.75rem] overflow-hidden whitespace-pre-wrap break-words px-4 pb-2 pt-4 text-[15px] leading-6 text-foreground"
+    className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-[5.75rem] overflow-hidden whitespace-pre-wrap break-words px-4 pb-2 pt-4 text-left text-[15px] leading-6 text-foreground"
   >
     {segments.map((segment, index) => {
       if (segment.promptSlot) {
@@ -1402,18 +1407,35 @@ const ComposerAttachments: FC = () => (
   </div>
 );
 
+const AttachmentFileTypeIcon: FC = () => {
+  const name = useAttachment((attachment) => attachment.name);
+  const contentType = useAttachment((attachment) => attachment.contentType);
+  const icon = resolveFileType(name, contentType ?? "").icon;
+
+  return <MaterialFileIcon name={icon} className="size-4 shrink-0" />;
+};
+
 const ComposerAttachmentChip: FC = () => {
   const isWiki = useThreadComposerAttachment((attachment) => isWikiComposerAttachment(attachment));
   const name = useThreadComposerAttachment((attachment) => attachment.name);
+  const isPreparing = useThreadComposerAttachment(
+    (attachment) => attachment.status.type !== "complete",
+  );
 
   if (isWiki) return null;
 
   return (
     <AttachmentPrimitive.Root className="relative flex w-fit max-w-full self-start items-center gap-2 rounded-lg border border-border bg-surface-secondary px-3 py-1.5 text-xs text-foreground">
-      <PaperclipIcon className="size-3.5 shrink-0 text-muted" />
+      <AttachmentFileTypeIcon />
       <span className="max-w-[16rem] truncate">
         <AttachmentPrimitive.Name />
       </span>
+      {isPreparing ? (
+        <span className="flex items-center gap-1 text-[11px] text-muted" aria-live="polite">
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" />
+          Preparing
+        </span>
+      ) : null}
       <AttachmentPrimitive.Remove asChild>
         <button
           type="button"
@@ -1432,7 +1454,11 @@ const ComposerAction: FC<{
   onResolveMissingPromptFileSlot?: () => void;
 }> = ({ missingPromptFileSlot, onResolveMissingPromptFileSlot }) => {
   const { selectedModel, modelsLoaded } = useCocola();
+  const hasPreparingAttachment = useComposer((state) =>
+    state.attachments.some((attachment) => attachment.status.type !== "complete"),
+  );
   const noModel = !modelsLoaded || !selectedModel;
+  const sendDisabled = noModel || hasPreparingAttachment;
 
   return (
     <>
@@ -1442,7 +1468,7 @@ const ComposerAction: FC<{
             isIconOnly
             aria-label={`${missingPromptFileSlot.label} before sending`}
             className="cocola-web-composer-send"
-            isDisabled={noModel}
+            isDisabled={sendDisabled}
             onPress={onResolveMissingPromptFileSlot}
           >
             <ArrowUpIcon className="h-4 w-4" />
@@ -1452,7 +1478,7 @@ const ComposerAction: FC<{
             <PromptInput.Send
               aria-label="Send"
               className="cocola-web-composer-send"
-              isDisabled={noModel}
+              isDisabled={sendDisabled}
               status="ready"
             />
           </ComposerPrimitive.Send>
@@ -1485,7 +1511,7 @@ const UserMessage: FC = () => {
             components={{
               Attachment: () => (
                 <AttachmentPrimitive.Root className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-surface-secondary/60 px-3 py-1.5 text-xs text-foreground">
-                  <PaperclipIcon className="size-3.5 shrink-0 text-muted" />
+                  <AttachmentFileTypeIcon />
                   <span className="max-w-[16rem] truncate">
                     <AttachmentPrimitive.Name />
                   </span>

@@ -778,6 +778,29 @@ func TestChatDecodesAndForwardsAttachments(t *testing.T) {
 	}
 }
 
+func TestUserMessagePartsIncludeAttachmentMetadata(t *testing.T) {
+	parts := userMessageParts(chatRequest{
+		Prompt: "review this file",
+		Attachments: []attachmentDTO{
+			{Filename: "notes.md", Mime: "text/markdown", Content: []byte("hello")},
+			{Filename: "raw.bin", Content: []byte{0, 1, 2}},
+		},
+	})
+	if len(parts) != 3 {
+		t.Fatalf("want text plus two file parts, got %#v", parts)
+	}
+	first := parts[1]
+	if first.Type != convo.PartFile || first.Filename != "notes.md" ||
+		first.MimeType != "text/markdown" || first.Size != 5 {
+		t.Fatalf("first attachment part = %#v", first)
+	}
+	second := parts[2]
+	if second.Type != convo.PartFile || second.MimeType != "application/octet-stream" ||
+		second.Size != 3 {
+		t.Fatalf("second attachment part = %#v", second)
+	}
+}
+
 // TestChatRejectsAttachmentWithInvalidBase64 proves malformed content is
 // rejected before a Run is created.
 func TestChatRejectsAttachmentWithInvalidBase64(t *testing.T) {

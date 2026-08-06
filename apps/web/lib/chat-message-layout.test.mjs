@@ -33,6 +33,10 @@ const railSource = await readFile(
   new URL("../components/assistant-ui/rail.tsx", import.meta.url),
   "utf8",
 );
+const markdownSource = await readFile(
+  new URL("../components/assistant-ui/markdown-text.tsx", import.meta.url),
+  "utf8",
+);
 const globalStylesSource = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 test("conversation messages use the Cocola compatibility skeleton without replacing Cocola parts", () => {
   assert.match(threadSource, /from "@cocola\/ui-compat\/chat-message"/);
@@ -50,6 +54,9 @@ test("assistant identity remains model-aware and the thread uses the bounded pro
   assert.match(threadSource, /metadata\?\.interaction_mode === "plan"/);
   assert.match(threadSource, /<div className="h-6 w-full shrink-0" aria-hidden="true" \/>/);
   assert.match(threadSource, /cocola-web-prompt-starter/);
+  assert.match(threadSource, /cocola-web-prompt-starter group !h-10 !min-h-10/);
+  assert.match(threadSource, /cocola-web-prompt-starter-icon flex size-7/);
+  assert.doesNotMatch(threadSource, /cocola-web-prompt-starter group !min-h-11/);
   assert.match(threadSource, /cocola-chat-user-bubble/);
   assert.match(threadSource, /cocola-chat-user-bubble max-w-\[min\(72%,42rem\)\]/);
   assert.match(
@@ -57,21 +64,28 @@ test("assistant identity remains model-aware and the thread uses the bounded pro
     /ThreadPrimitive\.Viewport[\s\S]*?<ActiveExecutionDock \/>[\s\S]*?<ChatConversation\.Content/,
   );
   assert.match(threadSource, /pointer-events-none sticky top-12/);
-  assert.doesNotMatch(
-    threadSource,
-    /pointer-events-none sticky top-12[^"\n]*bg-gradient-to-b/,
-  );
+  assert.doesNotMatch(threadSource, /pointer-events-none sticky top-12[^"\n]*bg-gradient-to-b/);
   assert.match(threadSource, /max-w-\[var\(--thread-max-width\)\] pl-\[2\.375rem\]/);
-  assert.match(railSource, /rounded-2xl border border-border\/80 bg-surface px-4 py-3 shadow-surface/);
   assert.match(
     railSource,
-    /grid min-w-0 grid-cols-\[1rem_minmax\(0,1fr\)\] items-center gap-2/,
+    /rounded-2xl border border-border\/80 bg-surface px-4 py-3 shadow-surface/,
   );
+  assert.match(railSource, /grid min-w-0 grid-cols-\[1rem_minmax\(0,1fr\)\] items-center gap-2/);
   assert.match(railSource, /text-accent flex h-7 items-center justify-end/);
   assert.match(railSource, /flex h-5 items-center justify-end/);
   assert.doesNotMatch(railSource, /bg-accent-soft text-accent flex size-7/);
   assert.match(railSource, /border-2 border-foreground\/25/);
   assert.match(railSource, /overscroll-contain pr-1 pt-1/);
+});
+
+test("assistant answers inherit Inter and use the compact product text rhythm", () => {
+  assert.match(
+    markdownSource,
+    /aui-answer-markdown[^"\n]*font-sans[^"\n]*text-\[15px\][^"\n]*leading-6/,
+  );
+  assert.match(markdownSource, /\[&_p\]:my-2 /);
+  assert.match(markdownSource, /\[&_li\]:my-1 /);
+  assert.doesNotMatch(markdownSource, /aui-answer-markdown[^"\n]*leading-7/);
 });
 
 test("the empty thread preserves the HeroUI demo welcome composition", () => {
@@ -92,9 +106,24 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.doesNotMatch(threadSource, /src="\/cocola-wordmark\.svg"/);
   assert.doesNotMatch(threadSource, /Auto · choose for me/);
   assert.match(threadSource, /mt-7 w-full max-w-3xl/);
-  assert.match(threadSource, /mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2\.5/);
+  assert.match(threadSource, /mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2/);
   assert.match(threadSource, /\{visiblePromptStarters\.map\(\(starter\) => \{/);
   assert.match(threadSource, /"cocola-web-composer w-full"/);
+  assert.match(threadSource, /hasComposerHeader && "cocola-web-composer--with-header"/);
+  assert.match(
+    threadSource,
+    /<ComposerPrimitive\.AddAttachment[\s\S]*?className="cocola-web-composer-action inline-flex size-9/,
+  );
+  assert.doesNotMatch(
+    threadSource,
+    /<ComposerPrimitive\.AddAttachment asChild>[\s\S]*?<PromptInput\.Action/,
+  );
+  assert.match(threadSource, /<div className="relative min-w-0 text-left">/);
+  assert.match(threadSource, /prompt-input__textarea[^"\n]*text-left[^"\n]*text-\[15px\]/);
+  assert.match(
+    threadSource,
+    /pointer-events-none absolute inset-0[^"\n]*text-left[^"\n]*text-\[15px\]/,
+  );
   assert.match(
     threadSource,
     /iconClassName: "bg-emerald-500\/10 text-emerald-600 dark:text-emerald-300"/,
@@ -124,6 +153,10 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.match(
     demoStylesSource,
     /\.cocola-user-ui \.cocola-web-composer \.prompt-input__textarea \{[\s\S]*?min-height: 5\.75rem;[\s\S]*?margin-bottom: 3\.75rem;/,
+  );
+  assert.match(
+    demoStylesSource,
+    /\.cocola-user-ui \.cocola-web-composer--with-header \.prompt-input__textarea \{[\s\S]*?min-height: 3\.5rem;/,
   );
   assert.match(
     demoStylesSource,

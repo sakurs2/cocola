@@ -13,6 +13,18 @@ const chatProxySource = await readFile(
   new URL("../app/api/chat/route.ts", import.meta.url),
   "utf8",
 );
+const attachmentAdapterSource = await readFile(
+  new URL("./base64-attachment-adapter.ts", import.meta.url),
+  "utf8",
+);
+const runtimeProviderSource = await readFile(
+  new URL("../app/runtime-provider.tsx", import.meta.url),
+  "utf8",
+);
+const threadSource = await readFile(
+  new URL("../components/assistant-ui/thread.tsx", import.meta.url),
+  "utf8",
+);
 
 test("chat attachment preflight accepts the supported boundary", () => {
   const attachments = Array.from({ length: MAX_CHAT_ATTACHMENTS }, (_, index) => ({
@@ -55,4 +67,29 @@ test("chat proxy forwards the request stream without buffering it as text", () =
   assert.doesNotMatch(chatProxySource, /req\.text\(\)/);
   assert.match(chatProxySource, /body:\s*req\.body/);
   assert.match(chatProxySource, /duplex:\s*"half"/);
+});
+
+test("attachments are prepared before submit and remain visible in user history", () => {
+  assert.match(attachmentAdapterSource, /async \*add\(/);
+  assert.match(
+    attachmentAdapterSource,
+    /yield attachment;[\s\S]*?const prepared = await preparation/,
+  );
+  assert.match(attachmentAdapterSource, /status: \{ type: "complete" \}/);
+  assert.match(runtimeProviderSource, /message\.role === "user"[\s\S]*?attachments/);
+  assert.match(runtimeProviderSource, /const attachmentParts = \(message\.attachments \?\? \[\]\)/);
+  assert.match(
+    runtimeProviderSource,
+    /parts: \[[\s\S]*?\{ type: "text", text \},[\s\S]*?\.\.\.attachmentParts/,
+  );
+});
+
+test("composer and historical attachment chips use Cocola file-type icons", () => {
+  assert.match(threadSource, /import \{ resolveFileType \} from "@\/lib\/file-type"/);
+  assert.match(threadSource, /import \{ MaterialFileIcon \} from "@\/lib\/material-file-icons"/);
+  assert.match(
+    threadSource,
+    /const AttachmentFileTypeIcon:[\s\S]*?resolveFileType\(name, contentType \?\? ""\)\.icon/,
+  );
+  assert.equal(threadSource.match(/<AttachmentFileTypeIcon \/>/g)?.length, 2);
 });

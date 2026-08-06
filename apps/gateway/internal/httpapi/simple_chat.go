@@ -826,6 +826,16 @@ func agentInstructionsLength(snapshot *agentprofile.Snapshot) int {
 
 func userMessageParts(req chatRequest) []convo.Part {
 	parts := []convo.Part{{Type: convo.PartText, Text: req.Prompt}}
+	for index, attachment := range req.Attachments {
+		mimeType := strings.TrimSpace(attachment.Mime)
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		parts = append(parts, convo.Part{
+			Type: convo.PartFile, ID: fmt.Sprintf("user-attachment-%d", index),
+			Filename: attachment.Filename, MimeType: mimeType, Size: int64(len(attachment.Content)),
+		})
+	}
 	for _, reference := range req.WikiReferences {
 		parts = append(parts, convo.Part{
 			Type: convo.PartWikiFile, ID: reference.VersionID,

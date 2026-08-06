@@ -39,7 +39,7 @@ import {
 } from "@/lib/environment";
 import { inferAgentDurationMs } from "@/lib/agent-turn-summary.mjs";
 import { selectAgentRuntime } from "@/lib/agent-runtime-policy.mjs";
-import { validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
+import { decodedBase64Size, validateChatAttachments } from "@/lib/chat-attachment-limits.mjs";
 import {
   normalizeAgentSkillCatalog,
   type AgentConversationSnapshot,
@@ -1283,6 +1283,7 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
     if (p.type === "text") return { type: "text" as const, text: p.text };
     if (p.type === "reasoning") return { type: "reasoning" as const, text: p.text };
     if (p.type === "file") {
+      if (message.role === "user") return [];
       return {
         type: "file" as const,
         filename: p.filename,
@@ -1333,6 +1334,30 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
         : {}),
     };
   });
+  const attachments =
+    message.role === "user"
+      ? message.parts
+          .filter((part): part is UiFilePart => part.type === "file")
+          .map((part) => ({
+            id: part.id,
+            type: part.mimeType.startsWith("image/") ? "image" : "file",
+            name: part.filename,
+            contentType: part.mimeType,
+            status: { type: "complete" as const },
+            content: [
+              {
+                type: "file" as const,
+                filename: part.filename,
+                mimeType: part.mimeType,
+                data: JSON.stringify({
+                  id: part.id,
+                  url: part.downloadUrl,
+                  size: part.size,
+                }),
+              },
+            ],
+          }))
+      : undefined;
   return {
     role: message.role,
     // assistant-ui wants non-empty content; give an empty text part as placeholder
@@ -1340,6 +1365,7 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
     content: content.length > 0 ? content : [{ type: "text" as const, text: "" }],
     id: message.id,
     createdAt: new Date(message.createdAt),
+    ...(attachments?.length ? { attachments } : {}),
     metadata: {
       custom: {
         ...(message.metadata ?? {}),
@@ -2537,6 +2563,29 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           })),
       );
       validateChatAttachments(attachments);
+      const attachmentParts = (message.attachments ?? []).flatMap((attachment, attachmentIndex) =>
+        (attachment.content ?? [])
+          .filter(
+            (
+              part,
+            ): part is {
+              type: "file";
+              filename?: string;
+              data: string;
+              mimeType?: string;
+            } => part.type === "file" && typeof part.data === "string",
+          )
+          .map(
+            (part, index): UiFilePart => ({
+              type: "file",
+              id: attachment.id || `attachment-${attachmentIndex}-${index}`,
+              filename: part.filename ?? attachment.name ?? "file",
+              mimeType: part.mimeType ?? attachment.contentType ?? "application/octet-stream",
+              size: decodedBase64Size(part.data),
+              downloadUrl: "",
+            }),
+          ),
+      );
 
       if (pendingQuestion) {
         await answerQuestion(pendingQuestion, { text });
@@ -2594,6 +2643,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               role: "user",
               parts: [
                 { type: "text", text },
+                ...attachmentParts,
                 ...wikiReferences.map(
                   (reference): UiWikiFilePart => ({
                     type: "wiki-file",

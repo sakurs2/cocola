@@ -18,7 +18,12 @@
 // upload may carry over the client->gateway JSON hop. Client-side presigned
 // direct-to-OSS upload (which would lift this ceiling) is P1b/TODO.
 
-import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from "@assistant-ui/react";
+import type {
+  Attachment,
+  AttachmentAdapter,
+  CompleteAttachment,
+  PendingAttachment,
+} from "@assistant-ui/react";
 
 // Hard upload ceiling, configurable so it is not baked in (mirrors the
 // gateway's own configurable threshold, ADR-0017). NEXT_PUBLIC_ so it reaches
@@ -65,9 +70,28 @@ const ACCEPT = [
   ".css",
 ].join(",");
 
-// Browser File -> raw base64 (no `data:` prefix), chunked to avoid blowing the
-// call stack on String.fromCharCode(...bigArray).
+type PreparedAttachment = {
+  data: string;
+  mimeType: string;
+};
+
+// Browser File -> raw base64 (no `data:` prefix). FileReader lets the browser
+// perform the expensive conversion outside the submit path; the arrayBuffer
+// fallback keeps the adapter usable in non-browser tests and SSR tooling.
 async function fileToBase64(file: File): Promise<string> {
+  if (typeof FileReader !== "undefined") {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const value = typeof reader.result === "string" ? reader.result : "";
+        const separator = value.indexOf(",");
+        resolve(separator >= 0 ? value.slice(separator + 1) : value);
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Could not read attachment."));
+      reader.readAsDataURL(file);
+    });
+  }
+
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
   let binary = "";
@@ -80,8 +104,9 @@ async function fileToBase64(file: File): Promise<string> {
 
 export class Base64AttachmentAdapter implements AttachmentAdapter {
   accept = ACCEPT;
+  private readonly prepared = new Map<string, Promise<PreparedAttachment>>();
 
-  async add(state: { file: File }): Promise<PendingAttachment> {
+  async *add(state: { file: File }): AsyncGenerator<PendingAttachment, void> {
     const { file } = state;
     if (file.size > MAX_BYTES) {
       throw new Error(
@@ -92,7 +117,7 @@ export class Base64AttachmentAdapter implements AttachmentAdapter {
         ).toFixed(0)} MB inline limit is exceeded.`,
       );
     }
-    return {
+    const attachment: PendingAttachment = {
       id: crypto.randomUUID(),
       type: file.type.startsWith("image/") ? "image" : "file",
       name: file.name,
@@ -100,11 +125,39 @@ export class Base64AttachmentAdapter implements AttachmentAdapter {
       file,
       status: { type: "requires-action", reason: "composer-send" },
     };
+    const preparation = fileToBase64(file).then((data) => ({
+      data,
+      mimeType: file.type || "application/octet-stream",
+    }));
+    this.prepared.set(attachment.id, preparation);
+
+    // Make the chip visible immediately, then replace it with a complete
+    // attachment as soon as the browser finishes reading the file. This moves
+    // base64 work out of the send click, so opening a new conversation is not
+    // held behind file preparation.
+    yield attachment;
+    const prepared = await preparation;
+    yield {
+      ...attachment,
+      status: { type: "complete" },
+      content: [
+        {
+          type: "file",
+          filename: attachment.name,
+          data: prepared.data,
+          mimeType: prepared.mimeType,
+        },
+      ],
+    } as unknown as PendingAttachment;
+    this.prepared.delete(attachment.id);
   }
 
   async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-    const data = await fileToBase64(attachment.file);
-    const mimeType = attachment.contentType || attachment.file.type || "application/octet-stream";
+    const prepared = await (this.prepared.get(attachment.id) ??
+      fileToBase64(attachment.file).then((data) => ({
+        data,
+        mimeType: attachment.contentType || attachment.file.type || "application/octet-stream",
+      })));
     return {
       ...attachment,
       status: { type: "complete" },
@@ -114,14 +167,15 @@ export class Base64AttachmentAdapter implements AttachmentAdapter {
         {
           type: "file",
           filename: attachment.name,
-          data,
-          mimeType,
+          data: prepared.data,
+          mimeType: prepared.mimeType,
         },
       ],
     };
   }
 
-  async remove(): Promise<void> {
+  async remove(attachment: Attachment): Promise<void> {
+    this.prepared.delete(attachment.id);
     // Inline attachments hold no server-side resource; nothing to clean up.
   }
 }
