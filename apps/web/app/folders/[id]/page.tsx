@@ -44,6 +44,7 @@ export default function FolderPage() {
   const preparedFolder = useRef<string | null>(null);
   const preparedSession = useRef<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const deleteInFlightRef = useRef(false);
   const folder = folders.find((item) => item.id === folderID);
   const folderConversations = useMemo(
     () =>
@@ -56,7 +57,6 @@ export default function FolderPage() {
     [conversations, folderID],
   );
   const [editingConversationID, setEditingConversationID] = useState<string | null>(null);
-  const [conversationDraft, setConversationDraft] = useState("");
   const [editingFolder, setEditingFolder] = useState(false);
   const [folderDraft, setFolderDraft] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
@@ -92,8 +92,8 @@ export default function FolderPage() {
     router.push("/");
   };
 
-  const commitConversationRename = async (conversation: ConversationSummary) => {
-    const title = conversationDraft.trim();
+  const commitConversationRename = async (conversation: ConversationSummary, draft: string) => {
+    const title = draft.trim();
     setEditingConversationID(null);
     if (!title) return;
     try {
@@ -133,7 +133,8 @@ export default function FolderPage() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleteInFlightRef.current) return;
+    deleteInFlightRef.current = true;
     setDeleting(true);
     setError(null);
     try {
@@ -147,6 +148,7 @@ export default function FolderPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete item");
     } finally {
+      deleteInFlightRef.current = false;
       setDeleting(false);
     }
   };
@@ -268,6 +270,7 @@ export default function FolderPage() {
       {folderConversations.length ? (
         <ListView
           aria-label="Folder conversations"
+          dependencies={[editingConversationID]}
           items={folderConversations}
           selectionMode="none"
           variant="primary"
@@ -280,25 +283,12 @@ export default function FolderPage() {
               <ListView.ItemContent>
                 <ConversationIcon conversation={conversation} />
                 {editingConversationID === conversation.id ? (
-                  <TextField
-                    className="min-w-0 flex-1"
-                    value={conversationDraft}
-                    onChange={setConversationDraft}
-                  >
-                    <Label className="sr-only">Chat name</Label>
-                    <Input
-                      autoFocus
-                      aria-label="Chat name"
-                      className="h-9"
-                      onBlur={() => void commitConversationRename(conversation)}
-                      onKeyDown={(event) => {
-                        event.stopPropagation();
-                        if (event.key === "Enter") event.currentTarget.blur();
-                        if (event.key === "Escape") setEditingConversationID(null);
-                      }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                    />
-                  </TextField>
+                  <ConversationRenameField
+                    key={conversation.id}
+                    conversation={conversation}
+                    onCancel={() => setEditingConversationID(null)}
+                    onCommit={(draft) => void commitConversationRename(conversation, draft)}
+                  />
                 ) : (
                   <div className="flex min-w-0 flex-col">
                     <ListView.Title>{conversation.title || "Untitled"}</ListView.Title>
@@ -325,7 +315,6 @@ export default function FolderPage() {
                         const action = String(key);
                         if (action === "rename") {
                           setEditingConversationID(conversation.id);
-                          setConversationDraft(conversation.title || "Untitled");
                         } else if (action === "delete")
                           setDeleteTarget({
                             kind: "conversation",
@@ -337,26 +326,36 @@ export default function FolderPage() {
                           void moveChat(conversation.id, action.slice(5));
                       }}
                     >
-                      <Dropdown.Item id="rename" textValue="Rename">
-                        Rename
-                      </Dropdown.Item>
-                      <Dropdown.Item id="move-root" textValue="Move to Chats">
-                        Move to Chats
-                      </Dropdown.Item>
-                      {folders
-                        .filter((item) => item.id !== folder.id)
-                        .map((item) => (
-                          <Dropdown.Item
-                            key={item.id}
-                            id={`move:${item.id}`}
-                            textValue={`Move to ${item.name}`}
-                          >
-                            Move to {item.name}
-                          </Dropdown.Item>
-                        ))}
-                      <Dropdown.Item id="delete" textValue="Delete">
-                        Delete
-                      </Dropdown.Item>
+                      <Dropdown.Section>
+                        <Dropdown.Item id="rename" textValue="Rename">
+                          <Pencil className="text-muted size-4 shrink-0" />
+                          <span data-slot="label">Rename</span>
+                        </Dropdown.Item>
+                        <Dropdown.Item id="move-root" textValue="Move to Chats">
+                          <MessagesSquare className="text-muted size-4 shrink-0" />
+                          <span data-slot="label">Move to Chats</span>
+                        </Dropdown.Item>
+                        {folders
+                          .filter((item) => item.id !== folder.id)
+                          .map((item) => (
+                            <Dropdown.Item
+                              key={item.id}
+                              id={`move:${item.id}`}
+                              textValue={`Move to ${item.name}`}
+                            >
+                              <Folder className="text-muted size-4 shrink-0" />
+                              <span className="min-w-0 flex-1 truncate" data-slot="label">
+                                Move to {item.name}
+                              </span>
+                            </Dropdown.Item>
+                          ))}
+                      </Dropdown.Section>
+                      <Dropdown.Section className="border-separator mt-1 border-t pt-1">
+                        <Dropdown.Item id="delete" textValue="Delete" variant="danger">
+                          <Trash2 className="size-4 shrink-0" />
+                          <span data-slot="label">Delete</span>
+                        </Dropdown.Item>
+                      </Dropdown.Section>
                     </Dropdown.Menu>
                   </Dropdown.Popover>
                 </Dropdown>
@@ -388,7 +387,7 @@ export default function FolderPage() {
           deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"
         }
         onOpenChange={(open) => {
-          if (!open) {
+          if (!open && !deleteInFlightRef.current) {
             setDeleteTarget(null);
             setError(null);
           }
@@ -396,6 +395,58 @@ export default function FolderPage() {
         onConfirm={() => void confirmDelete()}
       />
     </div>
+  );
+}
+
+function ConversationRenameField({
+  conversation,
+  onCancel,
+  onCommit,
+}: {
+  conversation: ConversationSummary;
+  onCancel: () => void;
+  onCommit: (draft: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
+  const [draft, setDraft] = useState(conversation.title || "Untitled");
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return (
+    <TextField className="min-w-0 flex-1" value={draft} onChange={setDraft}>
+      <Label className="sr-only">Chat name</Label>
+      <Input
+        ref={inputRef}
+        aria-label="Chat name"
+        className="h-9"
+        onBlur={(event) => onCommit(event.currentTarget.value)}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (
+            composingRef.current ||
+            event.nativeEvent.isComposing ||
+            event.nativeEvent.keyCode === 229
+          )
+            return;
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") onCancel();
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+      />
+    </TextField>
   );
 }
 

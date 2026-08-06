@@ -62,6 +62,32 @@ test("delete entry points open the shared centered confirmation", () => {
   assert.doesNotMatch(wikiSource, /Close delete confirmation/);
 });
 
+test("folder chat actions remain identifiable and stable while editing or deleting", () => {
+  assert.match(
+    foldersSource,
+    /<Dropdown\.Item id="rename" textValue="Rename">[\s\S]*?<Pencil[\s\S]*?data-slot="label">Rename/,
+  );
+  assert.match(
+    foldersSource,
+    /<Dropdown\.Item id="move-root" textValue="Move to Chats">[\s\S]*?<MessagesSquare/,
+  );
+  assert.match(
+    foldersSource,
+    /<Dropdown\.Item id="delete" textValue="Delete" variant="danger">[\s\S]*?<Trash2/,
+  );
+  assert.match(foldersSource, /function ConversationRenameField/);
+  assert.match(foldersSource, /dependencies=\{\[editingConversationID\]\}/);
+  assert.match(foldersSource, /inputRef\.current\?\.select\(\)/);
+  assert.match(foldersSource, /event\.nativeEvent\.isComposing/);
+  assert.match(foldersSource, /event\.nativeEvent\.keyCode === 229/);
+  assert.match(foldersSource, /deleteInFlightRef\.current = true/);
+  assert.match(foldersSource, /!open && !deleteInFlightRef\.current/);
+  assert.match(actionDialogSource, /window\.setTimeout\(\(\) => setShowBusy\(true\), 180\)/);
+  assert.doesNotMatch(actionDialogSource, /isPending=\{showBusy\}/);
+  assert.match(actionDialogSource, /className=\{showBusy \? "invisible" : undefined\}/);
+  assert.match(actionDialogSource, /<LoaderCircle/);
+});
+
 test("model kind cards can shrink without overlapping", () => {
   assert.match(modelsSource, /sm:grid-cols-\[repeat\(2,minmax\(0,1fr\)\)\]/);
   assert.equal(modelsSource.match(/h-auto min-w-0 w-full flex-col items-stretch/g)?.length, 2);

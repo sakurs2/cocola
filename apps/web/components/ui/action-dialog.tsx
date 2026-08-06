@@ -2,7 +2,7 @@
 
 import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
-import { AlertTriangle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, LoaderCircle, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 type DialogTone = "primary" | "warning" | "danger";
@@ -45,6 +45,16 @@ export function ActionConfirmDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const [showBusy, setShowBusy] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setShowBusy(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowBusy(true), 180);
+    return () => window.clearTimeout(timer);
+  }, [busy]);
+
   return (
     <AlertDialog
       isOpen={open}
@@ -78,15 +88,33 @@ export function ActionConfirmDialog({
               )}
             </AlertDialog.Body>
             <AlertDialog.Footer>
-              <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>
+              <Button
+                aria-disabled={busy}
+                className={busy ? "pointer-events-none" : undefined}
+                variant="outline"
+                onPress={() => {
+                  if (!busy) onOpenChange(false);
+                }}
+              >
                 {cancelLabel}
               </Button>
               <Button
-                isPending={busy}
+                aria-disabled={busy}
+                aria-busy={busy}
+                aria-label={confirmLabel}
+                className={`relative ${busy ? "pointer-events-none" : ""}`}
                 variant={tone === "danger" ? "danger" : "primary"}
-                onPress={onConfirm}
+                onPress={() => {
+                  if (!busy) onConfirm();
+                }}
               >
-                {confirmLabel}
+                <span className={showBusy ? "invisible" : undefined}>{confirmLabel}</span>
+                {showBusy ? (
+                  <LoaderCircle
+                    aria-hidden="true"
+                    className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 animate-spin"
+                  />
+                ) : null}
               </Button>
             </AlertDialog.Footer>
           </AlertDialog.Dialog>
