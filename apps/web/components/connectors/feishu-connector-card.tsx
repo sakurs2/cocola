@@ -19,6 +19,7 @@ import { Segment } from "@cocola/ui-compat/segment";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { connectorResponseError } from "@/lib/connector-response-error.mjs";
 
 type FeishuConnection = {
@@ -539,34 +540,18 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
         }}
       />
 
-      <Sheet isOpen={disconnectOpen} placement="right" onOpenChange={setDisconnectOpen}>
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close disconnect confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Disconnect Feishu Bot?</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  Cocola will delete the encrypted app credential and owner binding. Conversation
-                  history remains.
-                </p>
-              </Sheet.Header>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setDisconnectOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  isPending={busy === "disconnect"}
-                  variant="danger-soft"
-                  onPress={() => void disconnect()}
-                >
-                  Disconnect
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+      <ActionConfirmDialog
+        busy={busy === "disconnect"}
+        confirmLabel="Disconnect"
+        description="Cocola will delete the encrypted app credential and owner binding. Conversation history remains."
+        error={error || null}
+        icon={Trash2}
+        open={disconnectOpen}
+        title="Disconnect Feishu Bot?"
+        tone="danger"
+        onConfirm={() => void disconnect()}
+        onOpenChange={setDisconnectOpen}
+      />
     </>
   );
 }

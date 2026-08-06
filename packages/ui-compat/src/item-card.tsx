@@ -41,6 +41,7 @@ export function ItemCardRoot<E extends keyof JSX.IntrinsicElements = "div">({
 }: ItemCardRootProps<E> & Omit<JSX.IntrinsicElements[E], keyof ItemCardRootProps<E>>) {
   const rootProps = {
     ...props,
+    children,
     className: mergeClassNames("item-card", `item-card--${variant}`, className),
     "data-slot": "item-card",
     "data-variant": variant,

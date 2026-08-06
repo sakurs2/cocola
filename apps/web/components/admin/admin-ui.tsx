@@ -6,6 +6,7 @@ import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { Button, Card, Chip, Tooltip, type ButtonProps } from "@heroui/react";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { cn } from "@/lib/utils";
 
 export function AdminPage({
@@ -372,6 +373,7 @@ export function AdminConfirmDialog({
   confirmLabel = "Confirm",
   busy = false,
   destructive = false,
+  error = null,
   onConfirm,
   className,
 }: {
@@ -382,48 +384,23 @@ export function AdminConfirmDialog({
   confirmLabel?: string;
   busy?: boolean;
   destructive?: boolean;
+  error?: string | null;
   onConfirm: () => void;
   className?: string;
 }) {
   return (
-    <Sheet
-      isOpen={open}
-      placement="right"
-      onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}
-    >
-      <Sheet.Backdrop>
-        <Sheet.Content className={cn("w-full md:w-[440px]", className)}>
-          <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close confirmation" />
-            <Sheet.Header>
-              <Sheet.Heading>{title}</Sheet.Heading>
-              <p className="text-muted text-sm leading-6">{description}</p>
-            </Sheet.Header>
-            <Sheet.Body>
-              <div
-                className={`${destructive ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"} rounded-2xl px-4 py-3 text-sm`}
-              >
-                {destructive
-                  ? "This action cannot be undone."
-                  : "Confirm this operation to continue."}
-              </div>
-            </Sheet.Body>
-            <Sheet.Footer className="gap-2">
-              <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button
-                isPending={busy}
-                variant={destructive ? "danger" : "primary"}
-                onPress={onConfirm}
-              >
-                {confirmLabel}
-              </Button>
-            </Sheet.Footer>
-          </Sheet.Dialog>
-        </Sheet.Content>
-      </Sheet.Backdrop>
-    </Sheet>
+    <ActionConfirmDialog
+      busy={busy}
+      className={className}
+      confirmLabel={confirmLabel}
+      description={description}
+      error={error}
+      open={open}
+      title={title}
+      tone={destructive ? "danger" : "primary"}
+      onConfirm={onConfirm}
+      onOpenChange={onOpenChange}
+    />
   );
 }
 

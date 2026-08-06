@@ -821,41 +821,41 @@ export default function AdminModelsPage() {
           {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
           {!editingModel ? (
             <FormGroup label="Model type">
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
                 <Button
                   variant="ghost"
                   onPress={() => setModelKind("chat")}
                   className={cn(
-                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
+                    "h-auto min-w-0 w-full flex-col items-stretch gap-1 overflow-hidden whitespace-normal rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
                     modelKind === "chat"
                       ? "border-accent/45 bg-accent/5 shadow-sm"
                       : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
                   )}
                 >
-                  <span className="flex items-center justify-between gap-3 text-sm font-semibold">
-                    Chat model{" "}
+                  <span className="flex w-full min-w-0 items-center justify-between gap-3 text-sm font-semibold">
+                    <span className="truncate">Chat model</span>
                     {modelKind === "chat" ? <Check className="size-4 text-accent" /> : null}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted">
-                    Used directly by Agent Runtimes.
+                  <span className="block w-full text-xs leading-5 text-muted">
+                    For Agent conversations.
                   </span>
                 </Button>
                 <Button
                   variant="ghost"
                   onPress={() => setModelKind("embedding")}
                   className={cn(
-                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
+                    "h-auto min-w-0 w-full flex-col items-stretch gap-1 overflow-hidden whitespace-normal rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30",
                     modelKind === "embedding"
                       ? "border-accent/45 bg-accent/5 shadow-sm"
                       : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
                   )}
                 >
-                  <span className="flex items-center justify-between gap-3 text-sm font-semibold">
-                    Embedding model
+                  <span className="flex w-full min-w-0 items-center justify-between gap-3 text-sm font-semibold">
+                    <span className="truncate">Embedding model</span>
                     {modelKind === "embedding" ? <Check className="size-4 text-accent" /> : null}
                   </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted">
-                    Shared by Memory and knowledge features; never shown to users.
+                  <span className="block w-full text-xs leading-5 text-muted">
+                    For Memory and knowledge.
                   </span>
                 </Button>
               </div>

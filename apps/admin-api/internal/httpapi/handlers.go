@@ -793,7 +793,13 @@ func (a *API) listMySkills(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+	available := make([]service.UserSkillCatalogItem, 0, len(skills))
+	for _, skill := range skills {
+		if skill.Available {
+			available = append(available, skill)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": available})
 }
 
 func (a *API) listMyAgentSkillCatalog(w http.ResponseWriter, r *http.Request) {
@@ -902,13 +908,9 @@ func (a *API) importMySkillGit(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) getMySkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	s, err := a.svc.GetSkill(r.Context(), id)
+	s, err := a.svc.GetUserSkillCatalogItem(r.Context(), actorOf(r), id)
 	if err != nil {
 		mapErr(w, err)
-		return
-	}
-	if s.Scope == "user" && s.OwnerUserID != actorOf(r) {
-		mapErr(w, service.ErrPermissionDenied)
 		return
 	}
 	writeJSON(w, http.StatusOK, s)

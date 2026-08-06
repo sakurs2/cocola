@@ -1059,6 +1059,54 @@ func TestMyAgentSkillCatalogReturnsSafeUserScopedSummary(t *testing.T) {
 	}
 }
 
+func TestMySkillDetailPreservesAdministratorDisablement(t *testing.T) {
+	mem := store.NewMemory()
+	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)
+	svc := service.New(mem, issuer, fixedClock)
+	api := New(svc, "k").WithRuntimeAuth("runtime-secret", "cocola")
+	if _, err := svc.CreateSkill(context.Background(), store.Skill{
+		ID: "admin-disabled", RuntimeID: "admin-disabled", Name: "Admin disabled",
+		Scope: "admin", SkillMD: "# Admin disabled",
+	}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	runtimeToken, _, err := issuer.Issue("alice", "", -1, time.Now().Unix())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, api.Router(), http.MethodGet, "/me/skills/admin-disabled", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Skill detail: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var detail service.UserSkillCatalogItem
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Available || detail.Enabled || detail.UnavailableReason != "disabled_by_administrator" {
+		t.Fatalf("administrator-disabled Skill detail = %+v", detail)
+	}
+
+	rec = do(t, api.Router(), http.MethodGet, "/me/skills", runtimeToken, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Skill catalog: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var catalog struct {
+		Skills []service.UserSkillCatalogItem `json:"skills"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Skills) != 0 {
+		t.Fatalf("user Skill catalog exposed administrator-disabled Skill: %+v", catalog.Skills)
+	}
+
+	rec = do(t, api.Router(), http.MethodPost, "/me/skills/admin-disabled/enable", runtimeToken, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("enable administrator-disabled Skill: want 403, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestMyEffectiveSkillsReturnsRuntimeIDForPersonalSkill(t *testing.T) {
 	mem := store.NewMemory()
 	issuer := token.NewIssuer("runtime-secret", "cocola", time.Hour)

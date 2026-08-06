@@ -2,7 +2,6 @@
 
 import { Button, Card, Chip, Dropdown, Input, Label, TextField } from "@heroui/react";
 import { ListView } from "@cocola/ui-compat/list-view";
-import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   ArrowLeft,
   Bot,
@@ -17,6 +16,7 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCocola, type ConversationSummary } from "@/app/runtime-provider";
+import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 
@@ -374,55 +374,27 @@ export default function FolderPage() {
         </Card>
       )}
 
-      <Sheet
-        isOpen={deleteTarget !== null}
-        placement="right"
+      <DeleteConfirmDialog
+        busy={deleting}
+        confirmLabel="Delete"
+        description={
+          deleteTarget?.kind === "folder"
+            ? `${deleteTarget.title} and every chat inside it will be permanently deleted.`
+            : `${deleteTarget?.title || "This conversation"} will be permanently deleted.`
+        }
+        error={error}
+        open={deleteTarget !== null}
+        title={
+          deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"
+        }
         onOpenChange={(open) => {
           if (!open) {
             setDeleteTarget(null);
             setError(null);
           }
         }}
-      >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close delete confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>
-                  {deleteTarget?.kind === "folder"
-                    ? "Delete folder and chats?"
-                    : "Delete conversation?"}
-                </Sheet.Heading>
-                <p className="text-muted text-sm">
-                  {deleteTarget?.kind === "folder"
-                    ? `${deleteTarget.title} and every chat inside it will be permanently deleted.`
-                    : `${deleteTarget?.title || "This conversation"} will be permanently deleted.`}
-                </p>
-              </Sheet.Header>
-              <Sheet.Body>
-                {error ? (
-                  <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
-                    {error}
-                  </div>
-                ) : null}
-              </Sheet.Body>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setDeleteTarget(null)}>
-                  Cancel
-                </Button>
-                <Button
-                  isPending={deleting}
-                  variant="danger-soft"
-                  onPress={() => void confirmDelete()}
-                >
-                  Delete
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+        onConfirm={() => void confirmDelete()}
+      />
     </div>
   );
 }

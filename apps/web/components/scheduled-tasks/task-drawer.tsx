@@ -5,6 +5,7 @@ import { Sheet } from "@cocola/ui-compat/sheet";
 import { CalendarClock, ChevronDown, ChevronRight, Paperclip, UserCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ModelIcon } from "@/components/ui/model-icon";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { inferModelIconSlug } from "@/lib/model-icons";
 import {
   emptyTaskForm,
@@ -466,39 +467,15 @@ export function TaskConfirmDialog({
   className?: string;
 }) {
   return (
-    <Sheet isOpen={open} placement="right" onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <Sheet.Backdrop>
-        <Sheet.Content className="w-full md:w-[440px]">
-          <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close confirmation" />
-            <Sheet.Header>
-              <Sheet.Heading>{title}</Sheet.Heading>
-              <p className="text-muted text-sm leading-6">{description}</p>
-            </Sheet.Header>
-            <Sheet.Body>
-              <div
-                className={`${destructive ? "bg-danger/10 text-danger" : "bg-accent-soft text-accent"} rounded-2xl px-4 py-3 text-sm`}
-              >
-                {destructive
-                  ? "This action cannot be undone."
-                  : "Confirm this operation to continue."}
-              </div>
-            </Sheet.Body>
-            <Sheet.Footer className="gap-2">
-              <Button variant="outline" onPress={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button
-                isPending={busy}
-                variant={destructive ? "danger" : "primary"}
-                onPress={onConfirm}
-              >
-                {confirmLabel}
-              </Button>
-            </Sheet.Footer>
-          </Sheet.Dialog>
-        </Sheet.Content>
-      </Sheet.Backdrop>
-    </Sheet>
+    <ActionConfirmDialog
+      busy={busy}
+      confirmLabel={confirmLabel}
+      description={description}
+      open={open}
+      title={title}
+      tone={destructive ? "danger" : "primary"}
+      onConfirm={onConfirm}
+      onOpenChange={onOpenChange}
+    />
   );
 }

@@ -2,13 +2,13 @@
 
 import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { Button, Card, Chip, Input, Label, TextArea, TextField } from "@heroui/react";
-import { Sheet } from "@cocola/ui-compat/sheet";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { AgentCapabilitiesEditor } from "@/components/agents/agent-capabilities-editor";
 import { HeroUIAgentModelSelect } from "@/components/agents/heroui-agent-model-select";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { FeishuConnectorCard } from "@/components/connectors/feishu-connector-card";
 import {
   AGENT_AVATAR_COLORS,
@@ -436,42 +436,18 @@ export default function AgentPage() {
         Agent version {agent.version} · Knowledge revision {agent.knowledge_revision}
       </p>
 
-      <Sheet isOpen={archiveOpen} placement="right" onOpenChange={setArchiveOpen}>
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[440px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close archive confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Archive this Agent?</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  Disconnect its Feishu bot first. Existing conversations stay in history, but this
-                  Agent cannot start or continue turns after it is archived.
-                </p>
-              </Sheet.Header>
-              <Sheet.Body>
-                {error ? (
-                  <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
-                    {error}
-                  </div>
-                ) : (
-                  <div className="bg-surface-secondary rounded-2xl px-4 py-3 text-sm">
-                    The Agent is ready to archive. This action cannot be reversed from the user
-                    workspace.
-                  </div>
-                )}
-              </Sheet.Body>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setArchiveOpen(false)}>
-                  Cancel
-                </Button>
-                <Button isPending={archiving} variant="danger-soft" onPress={() => void archive()}>
-                  Archive Agent
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+      <ActionConfirmDialog
+        busy={archiving}
+        confirmLabel="Archive Agent"
+        description="Disconnect its Feishu bot first. Existing conversations stay in history, but this Agent cannot start or continue turns after it is archived."
+        error={error || null}
+        icon={Archive}
+        open={archiveOpen}
+        title="Archive this Agent?"
+        tone="danger"
+        onConfirm={() => void archive()}
+        onOpenChange={setArchiveOpen}
+      />
     </div>
   );
 }

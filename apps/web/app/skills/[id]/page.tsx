@@ -1,10 +1,18 @@
 "use client";
 
 import { Button, Card, Chip } from "@heroui/react";
-import { Sheet } from "@cocola/ui-compat/sheet";
-import { ArrowLeft, FileText, Folder, Hash, LoaderCircle, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  FileText,
+  Folder,
+  Hash,
+  LoaderCircle,
+  Trash2,
+} from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { SkillIcon } from "@/components/ui/skill-icon";
 
 type Skill = {
@@ -19,6 +27,8 @@ type Skill = {
   file_count?: number;
   size_bytes?: number;
   skill_md?: string;
+  available?: boolean;
+  unavailable_reason?: string;
 };
 
 export default function SkillDetailPage() {
@@ -49,7 +59,7 @@ export default function SkillDetailPage() {
   }, [id]);
 
   const toggle = async () => {
-    if (!skill) return;
+    if (!skill || skill.available === false) return;
     const previous = skill;
     const nextEnabled = !skill.enabled;
     setSkill({ ...skill, enabled: nextEnabled });
@@ -117,7 +127,31 @@ export default function SkillDetailPage() {
         <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
       ) : null}
 
-      {skill ? (
+      {skill?.available === false ? (
+        <Card className="p-5">
+          <Card.Content className="flex items-start gap-3 p-0">
+            <span className="bg-warning/10 text-warning grid size-10 shrink-0 place-items-center rounded-xl">
+              <AlertTriangle className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <Card.Title>This Skill is unavailable</Card.Title>
+              <Card.Description className="mt-1">
+                {skill.unavailable_reason === "disabled_by_administrator"
+                  ? "An administrator has disabled this Skill. It cannot be opened, enabled, or added to an Agent."
+                  : "This Skill is no longer available in your workspace."}
+              </Card.Description>
+              <Button
+                className="mt-4"
+                size="sm"
+                variant="outline"
+                onPress={() => router.push("/skills")}
+              >
+                Back to Skills
+              </Button>
+            </span>
+          </Card.Content>
+        </Card>
+      ) : skill ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <Chip size="sm" variant="soft">
@@ -186,29 +220,16 @@ export default function SkillDetailPage() {
         </>
       ) : null}
 
-      <Sheet isOpen={removeOpen} placement="right" onOpenChange={setRemoveOpen}>
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close remove confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Remove this Skill?</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  This personal Skill will no longer be available to Agents or new chats.
-                </p>
-              </Sheet.Header>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setRemoveOpen(false)}>
-                  Cancel
-                </Button>
-                <Button isPending={busy} variant="danger-soft" onPress={() => void remove()}>
-                  Remove Skill
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+      <DeleteConfirmDialog
+        busy={busy}
+        confirmLabel="Remove Skill"
+        description="This personal Skill will no longer be available to Agents or new chats."
+        error={error || null}
+        open={removeOpen}
+        title="Remove this Skill?"
+        onConfirm={() => void remove()}
+        onOpenChange={setRemoveOpen}
+      />
     </div>
   );
 }

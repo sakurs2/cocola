@@ -74,6 +74,7 @@ export function AgentCapabilitiesEditor({
   const selectedIDs = useMemo(() => new Set(skillIDs), [skillIDs]);
   const catalogByID = useMemo(() => new Map(skills.map((skill) => [skill.id, skill])), [skills]);
   const displayedSkills = useMemo(() => {
+    const visibleCatalog = skills.filter((skill) => skill.available || selectedIDs.has(skill.id));
     const missing = skillIDs
       .filter((id) => !catalogByID.has(id))
       .map<AgentSkillCatalogItem>((id) => ({
@@ -86,8 +87,8 @@ export function AgentCapabilitiesEditor({
         default_enabled: false,
         unavailable_reason: "missing",
       }));
-    return [...skills, ...missing];
-  }, [catalogByID, skillIDs, skills]);
+    return [...visibleCatalog, ...missing];
+  }, [catalogByID, selectedIDs, skillIDs, skills]);
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
     if (!query) return displayedSkills;
@@ -323,17 +324,23 @@ export function AgentCapabilitiesEditor({
             {paginatedSkills.map((skill) => {
               const selected = selectedIDs.has(skill.id);
               const disabled = !skill.available && !selected;
-              const description = skill.available
-                ? skill.description ||
-                  `${skill.source === "personal" ? "Personal" : "Shared"} Skill`
-                : skill.unavailable_reason || "This Skill is no longer available.";
+              const unavailable = !skill.available;
+              const description = unavailable
+                ? unavailableSkillDescription(skill)
+                : skill.description ||
+                  `${skill.source === "personal" ? "Personal" : "Shared"} Skill`;
               return (
                 <ItemCard<"button">
                   key={skill.id}
-                  className={`relative min-h-[9.5rem] w-full overflow-hidden ${selected ? "ring-accent bg-accent-soft ring-2" : ""} ${disabled ? "cursor-not-allowed opacity-55" : "cursor-pointer"}`}
+                  className={`relative min-h-[9.5rem] w-full overflow-hidden ${selected && !unavailable ? "ring-accent bg-accent-soft ring-2" : ""} ${unavailable ? "cocola-web-agent-skill-unavailable opacity-55" : "cursor-pointer"}`}
                   render={(props) => (
                     <button
                       {...props}
+                      aria-label={
+                        unavailable && selected
+                          ? `Remove unavailable ${skill.name} Skill from this Agent`
+                          : undefined
+                      }
                       aria-pressed={selected}
                       disabled={disabled}
                       type="button"
@@ -341,7 +348,7 @@ export function AgentCapabilitiesEditor({
                     />
                   )}
                 >
-                  <PressableFeedback.Highlight />
+                  {unavailable ? null : <PressableFeedback.Highlight />}
                   <ItemCard.Icon className="bg-transparent p-0">
                     <SkillIcon name={skill.name || skill.runtime_id} />
                   </ItemCard.Icon>
@@ -352,19 +359,30 @@ export function AgentCapabilitiesEditor({
                       <Chip size="sm" variant="soft">
                         {skill.source === "personal" ? "personal" : "shared"}
                       </Chip>
-                      {!skill.available ? (
+                      {unavailable ? (
                         <Chip color="warning" size="sm" variant="soft">
-                          unavailable
+                          {skill.unavailable_reason === "disabled_by_administrator"
+                            ? "Admin disabled"
+                            : "Unavailable"}
                         </Chip>
                       ) : null}
                     </span>
                   </ItemCard.Content>
                   <ItemCard.Action>
-                    <span
-                      className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-white" : "border-separator text-transparent"}`}
-                    >
-                      <Check className="size-3.5" />
-                    </span>
+                    {unavailable && selected ? (
+                      <span
+                        className="bg-danger-soft text-danger grid size-7 place-items-center rounded-lg"
+                        title="Remove unavailable Skill from this Agent"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </span>
+                    ) : (
+                      <span
+                        className={`grid size-6 place-items-center rounded-lg border ${selected ? "border-accent bg-accent text-white" : "border-separator text-transparent"}`}
+                      >
+                        <Check className="size-3.5" />
+                      </span>
+                    )}
                   </ItemCard.Action>
                 </ItemCard>
               );
@@ -610,6 +628,16 @@ export function AgentCapabilitiesEditor({
       </Sheet>
     </>
   );
+}
+
+function unavailableSkillDescription(skill: AgentSkillCatalogItem): string {
+  if (skill.unavailable_reason === "disabled_by_administrator") {
+    return "Disabled by an administrator. Remove it from this Agent to choose a replacement.";
+  }
+  if (skill.unavailable_reason === "missing") {
+    return "This Skill no longer exists. Remove it from this Agent to continue.";
+  }
+  return "This Skill is unavailable. Remove it from this Agent to continue.";
 }
 
 function CapabilityFeedback({

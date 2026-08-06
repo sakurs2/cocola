@@ -206,6 +206,66 @@ func TestAgentSkillCatalogAndResolutionSemantics(t *testing.T) {
 	}
 }
 
+func TestUserSkillCatalogPreservesAdministratorDisablement(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemory()
+	svc := New(mem, nil, time.Now)
+	for _, skill := range []store.Skill{
+		{
+			ID: "shared", RuntimeID: "shared", Name: "Shared", Scope: "admin",
+			Enabled: true, SkillMD: "# Shared",
+		},
+		{
+			ID: "admin-disabled", RuntimeID: "admin-disabled", Name: "Disabled",
+			Scope: "admin", SkillMD: "# Disabled",
+		},
+		{
+			ID: "personal", RuntimeID: "personal", Name: "Personal", Scope: "user",
+			OwnerUserID: "alice", SkillMD: "# Personal",
+		},
+	} {
+		if _, err := svc.CreateSkill(ctx, skill, "admin"); err != nil {
+			t.Fatalf("CreateSkill(%s): %v", skill.ID, err)
+		}
+	}
+	if err := svc.SetUserSkillEnabled(ctx, "alice", "shared", false); err != nil {
+		t.Fatal(err)
+	}
+	// A stale or manually written user preference must never override the
+	// administrator's catalog-level disablement.
+	if err := mem.SetUserSkillPreference(ctx, store.UserSkillPreference{
+		UserID: "alice", SkillID: "admin-disabled", Enabled: true, UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog, err := svc.ListUserSkillCatalog(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]UserSkillCatalogItem, len(catalog))
+	for _, item := range catalog {
+		byID[item.ID] = item
+	}
+	if item := byID["shared"]; !item.Available || item.Enabled {
+		t.Fatalf("user-disabled shared Skill = %+v", item)
+	}
+	if item := byID["admin-disabled"]; item.Available || item.Enabled ||
+		item.UnavailableReason != "disabled_by_administrator" {
+		t.Fatalf("administrator-disabled Skill = %+v", item)
+	}
+	if item := byID["personal"]; !item.Available || item.Enabled {
+		t.Fatalf("default-off personal Skill = %+v", item)
+	}
+	detail, err := svc.GetUserSkillCatalogItem(ctx, "alice", "admin-disabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Available || detail.Enabled || detail.UnavailableReason != "disabled_by_administrator" {
+		t.Fatalf("administrator-disabled Skill detail = %+v", detail)
+	}
+}
+
 func TestEnabledSkillRequiresMaterializablePayload(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemory()

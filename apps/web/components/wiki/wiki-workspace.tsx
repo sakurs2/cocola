@@ -35,6 +35,7 @@ import {
 import { ReadonlyFilePreview } from "@/components/assistant-ui/file-preview";
 import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { cn } from "@/lib/utils";
+import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { WikiMarkdownEditor } from "@/components/wiki/wiki-markdown-editor";
 
 type WikiNode = {
@@ -748,49 +749,25 @@ export function WikiWorkspace() {
         </Sheet.Backdrop>
       </Sheet>
 
-      <Sheet
-        isOpen={deleteTarget !== null}
-        placement="right"
+      <DeleteConfirmDialog
+        busy={busy}
+        confirmLabel="Delete"
+        description={
+          deleteTarget?.kind === "folder"
+            ? `${deleteTarget.name} and everything inside it will be permanently deleted.`
+            : `${deleteTarget?.name || "This file"} will be permanently deleted.`
+        }
+        error={deleteError}
+        open={deleteTarget !== null}
+        title={deleteTarget?.kind === "folder" ? "Delete folder?" : "Delete file?"}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setDeleteTarget(null);
             setDeleteError(null);
           }
         }}
-      >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close delete confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>
-                  {deleteTarget?.kind === "folder" ? "Delete folder?" : "Delete file?"}
-                </Sheet.Heading>
-                <p className="text-muted text-sm">
-                  {deleteTarget?.kind === "folder"
-                    ? `${deleteTarget.name} and everything inside it will be permanently deleted.`
-                    : `${deleteTarget?.name || "This file"} will be permanently deleted.`}
-                </p>
-              </Sheet.Header>
-              <Sheet.Body>
-                {deleteError ? (
-                  <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
-                    {deleteError}
-                  </div>
-                ) : null}
-              </Sheet.Body>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setDeleteTarget(null)}>
-                  Cancel
-                </Button>
-                <Button isPending={busy} variant="danger-soft" onPress={() => void confirmDelete()}>
-                  Delete
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+        onConfirm={() => void confirmDelete()}
+      />
 
       <Sheet
         isOpen={discardDialogOpen}

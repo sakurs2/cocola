@@ -1,9 +1,9 @@
 "use client";
 
 import { Button, Card } from "@heroui/react";
-import { Sheet } from "@cocola/ui-compat/sheet";
 import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import {
   WorkspacePageFrame,
   WorkspacePageHeader,
@@ -149,43 +149,18 @@ export default function ConnectorsPage() {
         </Card>
       </section>
 
-      <Sheet
-        isOpen={disconnectOpen}
-        placement="right"
-        onOpenChange={(open) => !busy && setDisconnectOpen(open)}
-      >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[440px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close GitHub disconnect confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Disconnect GitHub?</Sheet.Heading>
-                <p className="text-muted text-sm leading-6">
-                  Existing Projects remain available, but Cocola will no longer be able to access
-                  their GitHub repositories.
-                </p>
-              </Sheet.Header>
-              <Sheet.Body>
-                <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
-                  You can reconnect the GitHub App later.
-                </div>
-              </Sheet.Body>
-              <Sheet.Footer className="gap-2">
-                <Button
-                  isDisabled={busy}
-                  variant="outline"
-                  onPress={() => setDisconnectOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button isPending={busy} variant="danger" onPress={() => void disconnect()}>
-                  Disconnect GitHub
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+      <ActionConfirmDialog
+        busy={busy}
+        confirmLabel="Disconnect GitHub"
+        description="Existing Projects remain available, but Cocola will no longer be able to access their GitHub repositories. You can reconnect the GitHub App later."
+        error={error || null}
+        icon={Trash2}
+        open={disconnectOpen}
+        title="Disconnect GitHub?"
+        tone="danger"
+        onConfirm={() => void disconnect()}
+        onOpenChange={setDisconnectOpen}
+      />
     </WorkspacePageFrame>
   );
 }

@@ -21,6 +21,7 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useCocola, type ProjectSummary } from "@/app/runtime-provider";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import {
   ProjectBaseBranchPicker,
   ProjectBranchBadge,
@@ -729,31 +730,22 @@ export default function ProjectPage() {
         </Sheet.Backdrop>
       </Sheet>
 
-      <Sheet isOpen={archiveOpen} placement="right" onOpenChange={setArchiveOpen}>
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close archive confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Archive this Project?</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  {project.repository_provider === "github"
-                    ? "The GitHub repository will not be deleted."
-                    : "Its existing local workspace remains available for review."}
-                </p>
-              </Sheet.Header>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setArchiveOpen(false)}>
-                  Cancel
-                </Button>
-                <Button isPending={busy} variant="danger-soft" onPress={() => void archive()}>
-                  Archive Project
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+      <ActionConfirmDialog
+        busy={busy}
+        confirmLabel="Archive Project"
+        description={
+          project.repository_provider === "github"
+            ? "The GitHub repository will not be deleted."
+            : "Its existing local workspace remains available for review."
+        }
+        error={error || null}
+        icon={Archive}
+        open={archiveOpen}
+        title="Archive this Project?"
+        tone="danger"
+        onConfirm={() => void archive()}
+        onOpenChange={setArchiveOpen}
+      />
     </div>
   );
 }

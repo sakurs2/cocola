@@ -6,7 +6,19 @@ const capabilitiesSource = readFileSync(
   new URL("../components/agents/agent-capabilities-editor.tsx", import.meta.url),
   "utf8",
 );
+const itemCardSource = readFileSync(
+  new URL("../../../packages/ui-compat/src/item-card.tsx", import.meta.url),
+  "utf8",
+);
 const skillsPageSource = readFileSync(new URL("../app/skills/page.tsx", import.meta.url), "utf8");
+const skillDetailSource = readFileSync(
+  new URL("../app/skills/[id]/page.tsx", import.meta.url),
+  "utf8",
+);
+const adminSkillsPageSource = readFileSync(
+  new URL("../app/admin/skills/page.tsx", import.meta.url),
+  "utf8",
+);
 const mcpsPageSource = readFileSync(new URL("../app/mcps/page.tsx", import.meta.url), "utf8");
 const demoStyles = readFileSync(new URL("../app/cocola-web-demo.css", import.meta.url), "utf8");
 const globalStyles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
@@ -24,6 +36,7 @@ test("Agent capabilities use a compact Knowledge empty state and a two-column Sk
   );
   assert.match(knowledgeSection, /No Knowledge sources yet\./);
   assert.doesNotMatch(knowledgeSection, /min-h-24/);
+  assert.match(itemCardSource, /const rootProps = \{[\s\S]*?children,/);
 });
 
 test("user workspace primary actions keep white text on a theme-colored background", () => {
@@ -45,19 +58,46 @@ test("Skills catalog exposes bounded pagination controls", () => {
 });
 
 test("Skills cards keep isolated state actions and catalog hover motion", () => {
-  const toggleAction = skillsPageSource.slice(
-    skillsPageSource.indexOf("const setSkillEnabled"),
-    skillsPageSource.indexOf("const deleteSkill"),
+  const adminToggleAction = adminSkillsPageSource.slice(
+    adminSkillsPageSource.indexOf("const setSkillEnabled"),
+    adminSkillsPageSource.indexOf("const deleteSkill"),
   );
 
-  assert.doesNotMatch(toggleAction, /setWorking\(/);
+  assert.doesNotMatch(adminToggleAction, /setWorking\(/);
+  assert.match(adminSkillsPageSource, /working=\{actionSkillId === skill\.id\}/);
   assert.match(skillsPageSource, /cocola-web-skill-card/);
   assert.match(skillsPageSource, /className="cocola-web-catalog-card-icon"/);
-  assert.match(globalStyles, /\.cocola-user-ui \.cocola-web-skill-card:hover,[\s\S]*?translateY\(-3px\) scale\(1\.005\)/);
-  assert.match(globalStyles, /\.cocola-user-ui \.cocola-web-skill-card:hover \.cocola-web-catalog-card-icon,[\s\S]*?rotate\(-2deg\) scale\(1\.06\)/);
+  assert.match(
+    globalStyles,
+    /\.cocola-user-ui \.cocola-web-skill-card:hover,[\s\S]*?translateY\(-3px\) scale\(1\.005\)/,
+  );
+  assert.match(
+    globalStyles,
+    /\.cocola-web-skill-card:hover \.cocola-web-catalog-card-icon,[\s\S]*?rotate\(-2deg\) scale\(1\.06\)/,
+  );
   assert.match(skillsPageSource, /xl:grid-cols-4/);
-  assert.match(skillsPageSource, /<Switch[\s\S]*?isSelected=\{skill\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control>[\s\S]*?<Switch\.Thumb \/>/);
+  assert.match(
+    skillsPageSource,
+    /<Switch[\s\S]*?isSelected=\{skill\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control>[\s\S]*?<Switch\.Thumb \/>/,
+  );
   assert.doesNotMatch(skillsPageSource, /cocola-web-skill-(?:enable|disable)-action/);
+});
+
+test("administrator-disabled Skills stay out of the user catalog but remain repairable on Agents", () => {
+  assert.match(
+    skillsPageSource,
+    /const availableSkills = useMemo\([\s\S]*?skill\.available !== false/,
+  );
+  assert.match(
+    capabilitiesSource,
+    /skills\.filter\([\s\S]*?skill\.available \|\| selectedIDs\.has\(skill\.id\)/,
+  );
+  assert.match(capabilitiesSource, /Disabled by an administrator\. Remove it from this Agent/);
+  assert.match(capabilitiesSource, /cocola-web-agent-skill-unavailable opacity-55/);
+  assert.match(capabilitiesSource, /unavailable \? null : <PressableFeedback\.Highlight \/>/);
+  assert.match(capabilitiesSource, /Remove unavailable \$\{skill\.name\} Skill from this Agent/);
+  assert.match(skillDetailSource, /skill\?\.available === false/);
+  assert.match(skillDetailSource, /An administrator has disabled this Skill/);
 });
 
 test("Skills cards do not repeat enabled state in the card header", () => {
@@ -74,10 +114,7 @@ test("MCP cards use a single Switch control without repeating enabled state", ()
     mcpsPageSource,
     /<Switch[\s\S]*?isSelected=\{mcp\.effective_enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control>[\s\S]*?<Switch\.Thumb \/>/,
   );
-  assert.doesNotMatch(
-    mcpsPageSource,
-    /color=\{mcp\.effective_enabled \? "success" : "warning"\}/,
-  );
+  assert.doesNotMatch(mcpsPageSource, /color=\{mcp\.effective_enabled \? "success" : "warning"\}/);
   assert.doesNotMatch(
     mcpsPageSource,
     /variant=\{mcp\.effective_enabled \? "outline" : "primary"\}/,

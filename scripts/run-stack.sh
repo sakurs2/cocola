@@ -580,6 +580,10 @@ free_port "$WEB_PORT" web
     export AUTH_SECRET="$AUTH_SECRET"
     export COCOLA_PUBLIC_ORIGINS="$COCOLA_PUBLIC_ORIGINS"
     export COCOLA_WEB_HOST="$WEB_HOST"
+    # Next's long-lived dev compiler can retain several generations of route
+    # bundles. Keep the default above V8's 4 GiB limit while allowing callers
+    # to supply their own Node options.
+    export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
     $SETSID node server.mjs --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")

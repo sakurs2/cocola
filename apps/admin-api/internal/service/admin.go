@@ -917,7 +917,13 @@ func (a *Admin) ListEffectiveSkills(ctx context.Context, userID string) ([]store
 	return out, nil
 }
 
-func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]store.Skill, error) {
+type UserSkillCatalogItem struct {
+	store.Skill
+	Available         bool   `json:"available"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
+}
+
+func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]UserSkillCatalogItem, error) {
 	adminSkills, err := a.store.ListSkills(ctx, false)
 	if err != nil {
 		return nil, err
@@ -930,7 +936,7 @@ func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]stor
 	for _, pref := range prefs {
 		prefMap[pref.SkillID] = pref.Enabled
 	}
-	out := make([]store.Skill, 0)
+	out := make([]UserSkillCatalogItem, 0, len(adminSkills))
 	for _, s := range adminSkills {
 		s, err = attachSkillResultContract(s)
 		if err != nil {
@@ -939,10 +945,16 @@ func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]stor
 		if s.Scope != "" && s.Scope != "admin" {
 			continue
 		}
+		available, reason := agentSkillAvailability(s, true)
 		if enabled, ok := prefMap[s.ID]; ok {
-			s.Enabled = enabled
+			s.Enabled = s.Enabled && enabled
 		}
-		out = append(out, s)
+		if !available {
+			s.Enabled = false
+		}
+		out = append(out, UserSkillCatalogItem{
+			Skill: s, Available: available, UnavailableReason: reason,
+		})
 	}
 	userSkills, err := a.store.ListSkillsForUser(ctx, userID)
 	if err != nil {
@@ -952,8 +964,29 @@ func (a *Admin) ListUserSkillCatalog(ctx context.Context, userID string) ([]stor
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, userSkills...)
+	for _, s := range userSkills {
+		available, reason := agentSkillAvailability(s, false)
+		if !available {
+			s.Enabled = false
+		}
+		out = append(out, UserSkillCatalogItem{
+			Skill: s, Available: available, UnavailableReason: reason,
+		})
+	}
 	return out, nil
+}
+
+func (a *Admin) GetUserSkillCatalogItem(ctx context.Context, userID, skillID string) (UserSkillCatalogItem, error) {
+	catalog, err := a.ListUserSkillCatalog(ctx, userID)
+	if err != nil {
+		return UserSkillCatalogItem{}, err
+	}
+	for _, item := range catalog {
+		if item.ID == skillID {
+			return item, nil
+		}
+	}
+	return UserSkillCatalogItem{}, ErrNotFound
 }
 
 type AgentSkillCatalogItem struct {
@@ -1304,6 +1337,9 @@ func (a *Admin) SetUserSkillEnabled(ctx context.Context, userID, skillID string,
 	s, err := a.store.GetSkill(ctx, skillID)
 	if err != nil {
 		return err
+	}
+	if enabled && (s.Scope == "" || s.Scope == "admin") && !s.Enabled {
+		return ErrPermissionDenied
 	}
 	if enabled {
 		candidate := s

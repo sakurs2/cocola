@@ -42,7 +42,12 @@ import {
   Wand2,
   Zap,
 } from "lucide-react";
-import { AdminPage, AdminPageHeader, AdminPagination } from "@/components/admin/admin-ui";
+import {
+  AdminConfirmDialog,
+  AdminPage,
+  AdminPageHeader,
+  AdminPagination,
+} from "@/components/admin/admin-ui";
 
 type Skill = {
   id: string;
@@ -133,6 +138,7 @@ export default function AdminSkillsPage() {
   const [working, setWorking] = useState(false);
   const [gitScanning, setGitScanning] = useState(false);
   const [actionSkillId, setActionSkillId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -284,7 +290,6 @@ export default function AdminSkillsPage() {
   const setSkillEnabled = async (skill: Skill) => {
     const previous = skills;
     setActionSkillId(skill.id);
-    setWorking(true);
     setError(null);
     setSkills((current) =>
       current.map((item) => (item.id === skill.id ? { ...item, enabled: !skill.enabled } : item)),
@@ -300,7 +305,6 @@ export default function AdminSkillsPage() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setActionSkillId(null);
-      setWorking(false);
     }
   };
 
@@ -315,6 +319,7 @@ export default function AdminSkillsPage() {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(await readError(res));
+      setDeleteTarget(null);
       await load(false);
     } catch (err) {
       setSkills(previous);
@@ -484,8 +489,11 @@ export default function AdminSkillsPage() {
               skill={skill}
               href={`/admin/skills/${encodeURIComponent(skill.id)}`}
               onToggle={() => setSkillEnabled(skill)}
-              onDelete={() => deleteSkill(skill)}
-              working={working && actionSkillId === skill.id}
+              onDelete={() => {
+                setError(null);
+                setDeleteTarget(skill);
+              }}
+              working={actionSkillId === skill.id}
             />
           ))
         ) : (
@@ -505,6 +513,24 @@ export default function AdminSkillsPage() {
           onPageChange={setPage}
         />
       )}
+      <AdminConfirmDialog
+        busy={deleteTarget !== null && working && actionSkillId === deleteTarget.id}
+        confirmLabel="Remove Skill"
+        description={`${deleteTarget ? displaySkillName(deleteTarget) : "This Skill"} will be permanently removed from the shared catalog.`}
+        destructive
+        error={error}
+        open={deleteTarget !== null}
+        title="Remove this Skill?"
+        onConfirm={() => {
+          if (deleteTarget) void deleteSkill(deleteTarget);
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setError(null);
+          }
+        }}
+      />
     </AdminPage>
   );
 }

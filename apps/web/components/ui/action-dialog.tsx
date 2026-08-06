@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { AlertTriangle, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
@@ -10,6 +10,12 @@ const toneClass: Record<DialogTone, string> = {
   primary: "bg-accent-soft text-accent",
   warning: "bg-warning/10 text-warning",
   danger: "bg-danger/10 text-danger",
+};
+
+const toneStatus: Record<DialogTone, "accent" | "warning" | "danger"> = {
+  primary: "accent",
+  warning: "warning",
+  danger: "danger",
 };
 
 export function ActionConfirmDialog({
@@ -22,6 +28,7 @@ export function ActionConfirmDialog({
   error = null,
   tone = "warning",
   icon: Icon = AlertTriangle,
+  className,
   onOpenChange,
   onConfirm,
 }: {
@@ -34,42 +41,43 @@ export function ActionConfirmDialog({
   error?: string | null;
   tone?: DialogTone;
   icon?: LucideIcon;
+  className?: string;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
   return (
-    <Sheet isOpen={open} placement="right" onOpenChange={(next) => !busy && onOpenChange(next)}>
-      <Sheet.Backdrop>
-        <Sheet.Content className="w-full md:w-[440px]">
-          <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close confirmation" />
-            <Sheet.Header>
-              <span className="flex items-center gap-3">
-                <span
-                  className={`${toneClass[tone]} flex size-10 shrink-0 items-center justify-center rounded-2xl`}
-                >
-                  <Icon className="size-5" />
-                </span>
-                <span>
-                  <Sheet.Heading>{title}</Sheet.Heading>
-                  <span className="text-muted mt-1 block text-sm leading-6">{description}</span>
-                </span>
-              </span>
-            </Sheet.Header>
-            <Sheet.Body>
+    <AlertDialog
+      isOpen={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
+      <AlertDialog.Backdrop isDismissable={!busy} isKeyboardDismissDisabled={busy}>
+        <AlertDialog.Container className={className} placement="center" size="sm">
+          <AlertDialog.Dialog>
+            <AlertDialog.Header className="items-start">
+              <AlertDialog.Icon status={toneStatus[tone]}>
+                <Icon className="size-5" />
+              </AlertDialog.Icon>
+              <div className="min-w-0">
+                <AlertDialog.Heading>{title}</AlertDialog.Heading>
+                <p className="mt-1 text-sm leading-6 text-muted">{description}</p>
+              </div>
+            </AlertDialog.Header>
+            <AlertDialog.Body>
               {error ? (
-                <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
+                <div className="rounded-xl bg-danger/10 px-3 py-2.5 text-sm text-danger">
                   {error}
                 </div>
               ) : (
-                <div className={`${toneClass[tone]} rounded-2xl px-4 py-3 text-sm`}>
+                <div className={`${toneClass[tone]} rounded-xl px-3 py-2.5 text-sm`}>
                   {tone === "danger"
                     ? "This action cannot be undone."
                     : "Confirm this operation to continue."}
                 </div>
               )}
-            </Sheet.Body>
-            <Sheet.Footer className="gap-2">
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
               <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>
                 {cancelLabel}
               </Button>
@@ -80,11 +88,11 @@ export function ActionConfirmDialog({
               >
                 {confirmLabel}
               </Button>
-            </Sheet.Footer>
-          </Sheet.Dialog>
-        </Sheet.Content>
-      </Sheet.Backdrop>
-    </Sheet>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
+    </AlertDialog>
   );
 }
 

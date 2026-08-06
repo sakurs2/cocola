@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import {
   WorkspacePageAction,
   WorkspacePageFrame,
@@ -46,6 +47,8 @@ type Skill = {
   source_type?: string;
   source_path?: string;
   file_count?: number;
+  available?: boolean;
+  unavailable_reason?: string;
 };
 
 type Candidate = Skill & {
@@ -68,16 +71,21 @@ export default function SkillsPage() {
   const [working, setWorking] = useState(false);
   const [gitScanning, setGitScanning] = useState(false);
   const [actionSkillId, setActionSkillId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skillQuery, setSkillQuery] = useState("");
   const [skillPage, setSkillPage] = useState(1);
 
+  const availableSkills = useMemo(
+    () => skills.filter((skill) => skill.available !== false),
+    [skills],
+  );
   const filteredSkills = useMemo(() => {
     const query = skillQuery.trim().toLowerCase();
     return query
-      ? skills.filter((skill) => displaySkillName(skill).toLowerCase().includes(query))
-      : skills;
-  }, [skillQuery, skills]);
+      ? availableSkills.filter((skill) => displaySkillName(skill).toLowerCase().includes(query))
+      : availableSkills;
+  }, [availableSkills, skillQuery]);
   const sharedSkills = filteredSkills.filter((skill) => skill.scope !== "user");
   const personalSkills = filteredSkills.filter((skill) => skill.scope === "user");
   const skillCatalogPage = paginateCatalog(
@@ -238,6 +246,7 @@ export default function SkillsPage() {
         method: "DELETE",
       });
       if (!response.ok) throw new Error(await readError(response));
+      setDeleteTarget(null);
     } catch (cause) {
       setSkills(previous);
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -255,7 +264,7 @@ export default function SkillsPage() {
             Upload zip
           </WorkspacePageAction>
         }
-        description={`${skills.length} effective skills are currently loaded for this user.`}
+        description={`${availableSkills.length} skills are currently in your workspace catalog.`}
         icon={<Sparkles className="size-5" />}
         title="Skills"
       />
@@ -377,7 +386,7 @@ export default function SkillsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <WorkspaceSectionHeader
           description={`${filteredSkills.length} workspace capabilities managed by the platform.`}
-          title="Available skills"
+          title="Skills catalog"
         />
         <WorkspaceSearch
           placeholder="Search skills by name"
@@ -410,7 +419,10 @@ export default function SkillsPage() {
               skills={visiblePersonalSkills}
               title="My skills"
               total={personalSkills.length}
-              onDelete={deleteSkill}
+              onDelete={(skill) => {
+                setError(null);
+                setDeleteTarget(skill);
+              }}
               onToggle={setSkillEnabled}
             />
           ) : null}
@@ -456,6 +468,23 @@ export default function SkillsPage() {
           ) : null}
         </EmptyState>
       )}
+      <DeleteConfirmDialog
+        busy={deleteTarget !== null && actionSkillId === deleteTarget.id}
+        confirmLabel="Remove Skill"
+        description={`${deleteTarget ? displaySkillName(deleteTarget) : "This personal Skill"} will be permanently removed from your workspace.`}
+        error={error}
+        open={deleteTarget !== null}
+        title="Remove this Skill?"
+        onConfirm={() => {
+          if (deleteTarget) void deleteSkill(deleteTarget);
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setError(null);
+          }
+        }}
+      />
     </WorkspacePageFrame>
   );
 }
@@ -562,33 +591,38 @@ function SkillCard({
   onDelete?: () => void;
   onToggle: () => void;
 }) {
-  return (
+  const details = (
+    <>
+      <SkillIcon
+        className="cocola-web-catalog-card-icon"
+        name={displaySkillName(skill) || skill.id}
+      />
+      <span className="text-foreground mt-3 block truncate font-semibold">
+        {displaySkillName(skill)}
+      </span>
+      <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
+        {skill.description || "No description"}
+      </span>
+      <span className="mt-3 flex flex-wrap gap-1.5">
+        <Chip color={skill.scope === "user" ? "accent" : "default"} size="sm" variant="soft">
+          {skill.scope === "user" ? "Personal" : "Shared"}
+        </Chip>
+        {skill.file_count ? (
+          <Chip size="sm" variant="soft">
+            {skill.file_count} files
+          </Chip>
+        ) : null}
+      </span>
+    </>
+  );
+  const card = (
     <Card className="cocola-web-catalog-card cocola-web-skill-card h-full min-h-[13rem] p-4">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <Link
           className="group min-w-0 no-underline"
           href={`/skills/${encodeURIComponent(skill.id)}`}
         >
-          <SkillIcon
-            className="cocola-web-catalog-card-icon"
-            name={displaySkillName(skill) || skill.id}
-          />
-          <span className="text-foreground mt-3 block truncate font-semibold">
-            {displaySkillName(skill)}
-          </span>
-          <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
-            {skill.description || "No description"}
-          </span>
-          <span className="mt-3 flex flex-wrap gap-1.5">
-            <Chip color={skill.scope === "user" ? "accent" : "default"} size="sm" variant="soft">
-              {skill.scope === "user" ? "Personal" : "Shared"}
-            </Chip>
-            {skill.file_count ? (
-              <Chip size="sm" variant="soft">
-                {skill.file_count} files
-              </Chip>
-            ) : null}
-          </span>
+          {details}
         </Link>
         <div className="border-separator mt-auto flex items-center justify-end gap-2 border-t pt-3">
           {onDelete ? (
@@ -619,6 +653,7 @@ function SkillCard({
       </Card.Content>
     </Card>
   );
+  return card;
 }
 
 async function readError(response: Response) {
