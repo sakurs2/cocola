@@ -89,29 +89,25 @@ function LoginForm() {
               <Label>Username or email</Label>
               <Input autoComplete="username" autoFocus />
             </TextField>
-            <TextField
-              className="relative"
-              isRequired
-              value={password}
-              variant="secondary"
-              onChange={setPassword}
-            >
+            <TextField isRequired value={password} variant="secondary" onChange={setPassword}>
               <Label>Password</Label>
-              <Input
-                autoComplete="current-password"
-                className="pr-11"
-                type={showPassword ? "text" : "password"}
-              />
-              <Button
-                isIconOnly
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                className="absolute bottom-1.5 right-1.5"
-                size="sm"
-                variant="ghost"
-                onPress={() => setShowPassword((value) => !value)}
-              >
-                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </Button>
+              <div className="relative">
+                <Input
+                  autoComplete="current-password"
+                  className="w-full pr-11"
+                  type={showPassword ? "text" : "password"}
+                />
+                <Button
+                  isIconOnly
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-1 my-auto"
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setShowPassword((value) => !value)}
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              </div>
             </TextField>
             {error ? (
               <div

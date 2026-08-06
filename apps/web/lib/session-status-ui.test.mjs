@@ -12,10 +12,15 @@ const shellPageSource = await readFile(
   "utf8",
 );
 
-test("expanded session skills scroll inside a definite desktop panel height", () => {
-  assert.match(chatPageSource, /md:min-h-0 md:w-80 md:shrink-0 md:self-stretch/);
-  assert.doesNotMatch(chatPageSource, /md:self-start md:max-h-/);
-  assert.match(statusPanelSource, /min-h-0 flex-1 overflow-auto/);
+test("session status fits its content until expanded details need an internal scroll", () => {
+  assert.match(
+    chatPageSource,
+    /max-h-\[calc\(100svh-4rem\)\][^\n]*md:max-h-\[min\(36rem,calc\(100svh-5rem\)\)\]/,
+  );
+  assert.match(chatPageSource, /md:w-80 md:shrink-0 md:self-start/);
+  assert.doesNotMatch(chatPageSource, /md:self-stretch/);
+  assert.match(statusPanelSource, /flex max-h-\[inherit\] flex-col/);
+  assert.match(statusPanelSource, /min-h-0 flex-1 overflow-y-auto/);
 });
 
 test("the session panel cannot reserve welcome-screen width without an active conversation", () => {

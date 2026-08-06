@@ -78,6 +78,9 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.match(threadSource, /selectedAgent\?\.name \?\? "None"/);
   assert.match(threadSource, /<Dropdown\.Item id="none" textValue="None">/);
   assert.match(threadSource, /avatarKey=\{agent\.avatar_key\}/);
+  assert.doesNotMatch(threadSource, /PlanModeContextStrip/);
+  assert.match(threadSource, /<PlanModeIndicator \/>/);
+  assert.match(threadSource, /PLAN_MODE_COPY\.initialPlaceholder/);
   assert.match(demoStylesSource, /\.prompt-input__shell \{[\s\S]*?var\(--border\) 88%/);
   assert.match(
     demoStylesSource,

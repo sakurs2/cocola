@@ -15,7 +15,6 @@ import {
   isRetryablePlanExecutionStatus,
   latestInteractionMode,
   normalizePlanStatus,
-  planComposerContext,
   planExecutionRequestKey,
   shouldAwaitPlanStop,
 } from "./plan-mode.mjs";
@@ -74,8 +73,6 @@ test("Plan Mode product copy is stable and English", () => {
   });
   assert.deepEqual(PLAN_GATE_COPY, {
     eyebrow: "Plan mode",
-    composerDescription: "Claude will analyze the task. Nothing runs until you approve.",
-    revisionDescription: "Describe what should change. Your workspace remains unchanged.",
     noChanges: "No workspace changes have been made.",
     approveNotice: "Approving this plan will let Claude make changes in your workspace.",
     continueNotice: "Continue this approved plan or create a new one.",
@@ -120,17 +117,6 @@ test("Plan Mode product copy is stable and English", () => {
       "The workspace changed after this plan was created. Create a new plan before executing.",
     modelUnavailable: "The model used for this plan is no longer available. Create a new plan.",
     executionFailed: "Could not start plan execution. Try again.",
-  });
-});
-
-test("Plan Mode composer context distinguishes planning from revision", () => {
-  assert.deepEqual(planComposerContext(null), {
-    label: "Plan mode",
-    description: "Claude will analyze the task. Nothing runs until you approve.",
-  });
-  assert.deepEqual(planComposerContext(2), {
-    label: "Revising Plan v2",
-    description: "Describe what should change. Your workspace remains unchanged.",
   });
 });
 

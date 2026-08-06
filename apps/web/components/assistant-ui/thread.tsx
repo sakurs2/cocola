@@ -109,7 +109,6 @@ import {
   PLAN_MODE_COMMAND,
   PLAN_MODE_COPY,
   isPlanModeCommandAvailable,
-  planComposerContext,
 } from "@/lib/plan-mode.mjs";
 import {
   fileMatchesPromptStarterSlot,
@@ -382,7 +381,6 @@ const ConversationComposerInner: FC<{
     modelsLoaded,
     runtimeConfigError,
     interactionMode,
-    revisingPlanId,
     pendingQuestion,
     questionInputLocked,
   } = useCocola();
@@ -397,24 +395,6 @@ const ConversationComposerInner: FC<{
     ),
   );
   const contextualBranchControl = useProjectComposerBranchControl();
-  const revisingPlanVersion = useThread((thread) => {
-    if (!revisingPlanId) return null;
-    for (let messageIndex = thread.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const content = thread.messages[messageIndex]?.content ?? [];
-      for (let partIndex = content.length - 1; partIndex >= 0; partIndex -= 1) {
-        const part = content[partIndex];
-        if (
-          part?.type === "data" &&
-          part.name === "plan" &&
-          String(part.data.planId) === revisingPlanId
-        ) {
-          const version = Number(part.data.version);
-          return Number.isInteger(version) && version > 0 ? version : null;
-        }
-      }
-    }
-    return null;
-  });
   const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
   const promptInputRef = useRef<ComposerWikiInputHandle>(null);
@@ -451,9 +431,6 @@ const ConversationComposerInner: FC<{
         >
           <PromptInput.Shell>
             <ComposerPrimitive.Root className="contents">
-              {selectedRuntime?.id === "claude-code" && interactionMode === "plan" ? (
-                <PlanModeContextStrip revisingPlanVersion={revisingPlanVersion} />
-              ) : null}
               {selectedSkill ||
               composerAttachments.some((attachment) => !isWikiComposerAttachment(attachment)) ? (
                 <PromptInput.Attachments className="flex items-center gap-2 px-4 pt-3">
@@ -1087,25 +1064,6 @@ const ComposerWikiMentionOverlay = forwardRef<
 ));
 
 ComposerWikiMentionOverlay.displayName = "ComposerWikiMentionOverlay";
-
-const PlanModeContextStrip: FC<{ revisingPlanVersion: number | null }> = ({
-  revisingPlanVersion,
-}) => {
-  const context = planComposerContext(revisingPlanVersion);
-  return (
-    <div className="-mx-3 -mt-3 mb-1 flex min-w-0 items-center gap-2.5 rounded-t-[15px] border-b border-indigo-500/15 bg-indigo-500/[0.065] px-3 py-2.5">
-      <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white shadow-sm">
-        <PlanModeIcon className="size-3.5" aria-hidden="true" />
-      </span>
-      <div className="min-w-0">
-        <div className="truncate text-xs font-semibold text-indigo-700">{context.label}</div>
-        <div className="truncate text-[11px] leading-4 text-indigo-700/70">
-          {context.description}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const ComposerSlashMenu: FC = () => {
   const {

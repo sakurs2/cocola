@@ -159,7 +159,7 @@ function Workspace() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              className="fixed inset-x-2 bottom-2 top-14 z-30 overflow-hidden rounded-2xl border border-border bg-surface/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:min-h-0 md:w-80 md:shrink-0 md:self-stretch"
+              className="fixed inset-x-2 top-14 z-30 max-h-[calc(100svh-4rem)] overflow-hidden rounded-2xl border border-border bg-surface/95 shadow-xl backdrop-blur-xl md:static md:inset-auto md:z-auto md:m-2 md:ml-0 md:max-h-[min(36rem,calc(100svh-5rem))] md:w-80 md:shrink-0 md:self-start"
             >
               <SessionStatusPanel
                 status={environmentStatus}

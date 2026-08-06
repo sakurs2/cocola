@@ -66,7 +66,7 @@ export function SessionStatusPanel({
   ].filter(Boolean);
 
   return (
-    <div className="flex h-full flex-col font-sans">
+    <div className="flex max-h-[inherit] flex-col font-sans">
       <header className="flex min-h-14 items-center gap-3 px-4">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-foreground">Session status</div>
@@ -94,7 +94,7 @@ export function SessionStatusPanel({
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 pb-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">
         {status.components.length === 0 && status.phase !== "ready" ? (
           <div className="flex items-start gap-3 text-sm text-muted">
             <EnvironmentPhaseIcon status={status} className="mt-0.5 size-4 shrink-0" />
