@@ -24,7 +24,8 @@ test("Agent Skills use fixed cards, paginate the catalog, and preserve unavailab
   assert.match(capabilitiesSource, /<Card\.Title>Skills<\/Card\.Title>/);
   assert.match(capabilitiesSource, /Using default Skills/);
   assert.match(capabilitiesSource, /Using a custom Skill set/);
-  assert.match(capabilitiesSource, />\s*unavailable\s*<\/Chip>/);
+  assert.match(capabilitiesSource, /skill\.unavailable_reason === "disabled_by_administrator"/);
+  assert.match(capabilitiesSource, /\? "Admin disabled"\s*: "Unavailable"/);
   assert.match(capabilitiesSource, /<SkillIcon name=/);
   assert.match(capabilitiesSource, /skill\.source === "personal" \? "personal" : "shared"/);
   assert.match(capabilitiesSource, /const SKILLS_PER_PAGE = 6/);
@@ -48,7 +49,7 @@ test("Skill lists search by name only with consistent input copy", () => {
   );
   assert.match(
     skillsPageSource,
-    /skills\.filter\(\(skill\) => displaySkillName\(skill\)\.toLowerCase\(\)\.includes\(query\)\)/,
+    /availableSkills\.filter\(\(skill\) => displaySkillName\(skill\)\.toLowerCase\(\)\.includes\(query\)\)/,
   );
   assert.match(capabilitiesSource, /setSkillPage\(1\)/);
 });
