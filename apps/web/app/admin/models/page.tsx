@@ -47,7 +47,6 @@ type ModelProtocol = "anthropic-messages" | "openai-responses" | "openai-embeddi
 type View = "models" | "providers";
 type ModelKind = "chat" | "embedding";
 type ModelIconType = "simple-icons" | "image";
-type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 type LLMProvider = {
   id: string;
@@ -78,7 +77,6 @@ type LLMModel = {
   is_default: boolean;
   sort_order: number;
   embedding_dimension: number;
-  reasoning_efforts: ReasoningEffort[];
   created_at: string;
   updated_at: string;
 };
@@ -107,7 +105,6 @@ type ModelForm = {
   visible: boolean;
   is_default: boolean;
   sort_order: string;
-  reasoning_efforts: ReasoningEffort[];
 };
 
 type EmbeddingForm = {
@@ -152,21 +149,7 @@ const EMPTY_MODEL: ModelForm = {
   visible: true,
   is_default: false,
   sort_order: "0",
-  reasoning_efforts: [],
 };
-
-const REASONING_EFFORT_OPTIONS: Array<{
-  value: ReasoningEffort;
-  label: string;
-  description: string;
-}> = [
-  { value: "minimal", label: "Minimal", description: "Codex only" },
-  { value: "low", label: "Low", description: "Fast preset" },
-  { value: "medium", label: "Medium", description: "Deep fallback" },
-  { value: "high", label: "High", description: "Deep preset" },
-  { value: "xhigh", label: "XHigh", description: "Codex Max" },
-  { value: "max", label: "Max", description: "Claude Max" },
-];
 
 const EMPTY_EMBEDDING: EmbeddingForm = {
   model: "",
@@ -345,7 +328,6 @@ export default function AdminModelsPage() {
       visible: model.visible,
       is_default: model.is_default,
       sort_order: String(model.sort_order),
-      reasoning_efforts: Array.isArray(model.reasoning_efforts) ? model.reasoning_efforts : [],
     });
     setFormError("");
     setModelDrawerOpen(true);
@@ -419,7 +401,6 @@ export default function AdminModelsPage() {
         visible: modelForm.visible,
         is_default: modelForm.is_default,
         sort_order: Number.parseInt(modelForm.sort_order || "0", 10) || 0,
-        reasoning_efforts: modelForm.reasoning_efforts,
       };
       const url = editingModel
         ? `/api/admin/models/${encodeURIComponent(editingModel)}`
@@ -971,17 +952,7 @@ export default function AdminModelsPage() {
                 <SelectControl
                   className={inputClass}
                   value={modelForm.provider_id}
-                  onValueChange={(value) => {
-                    const providerType = providers.find((provider) => provider.id === value)?.type;
-                    const supported = new Set(reasoningEffortsForProvider(providerType));
-                    setModelForm({
-                      ...modelForm,
-                      provider_id: value,
-                      reasoning_efforts: modelForm.reasoning_efforts.filter((effort) =>
-                        supported.has(effort),
-                      ),
-                    });
-                  }}
+                  onValueChange={(value) => setModelForm({ ...modelForm, provider_id: value })}
                   options={[
                     { value: "", label: "Select provider" },
                     ...providers
@@ -1041,52 +1012,6 @@ export default function AdminModelsPage() {
                   placeholder="gpt-5"
                 />
               </Field>
-
-              <FormGroup
-                label="Reasoning effort"
-                hint="Advertise only levels supported by this upstream model."
-              >
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {REASONING_EFFORT_OPTIONS.filter((option) =>
-                    reasoningEffortsForProvider(selectedProvider?.type).includes(option.value),
-                  ).map((option) => {
-                    const selected = modelForm.reasoning_efforts.includes(option.value);
-                    return (
-                      <Button
-                        key={option.value}
-                        type="button"
-                        variant="ghost"
-                        onPress={() =>
-                          setModelForm({
-                            ...modelForm,
-                            reasoning_efforts: selected
-                              ? modelForm.reasoning_efforts.filter(
-                                  (effort) => effort !== option.value,
-                                )
-                              : [...modelForm.reasoning_efforts, option.value],
-                          })
-                        }
-                        className={cn(
-                          "h-auto min-w-0 items-start justify-between rounded-xl border px-3 py-2 text-left",
-                          selected
-                            ? "border-accent/45 bg-accent/5"
-                            : "border-border bg-background hover:bg-surface-secondary/35",
-                        )}
-                      >
-                        <span className="grid gap-0.5">
-                          <span className="text-xs font-semibold">{option.label}</span>
-                          <span className="text-[11px] font-normal text-muted">
-                            {option.description}
-                          </span>
-                        </span>
-                        {selected ? (
-                          <Check className="mt-0.5 size-3.5 shrink-0 text-accent" />
-                        ) : null}
-                      </Button>
-                    );
-                  })}
-                </div>
-              </FormGroup>
 
               <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
                 <Toggle
@@ -1629,12 +1554,6 @@ function FormGroup({
       {children}
     </div>
   );
-}
-
-function reasoningEffortsForProvider(type?: ProviderType): ReasoningEffort[] {
-  if (type === "anthropic") return ["low", "medium", "high", "xhigh", "max"];
-  if (type === "openai_responses") return ["minimal", "low", "medium", "high", "xhigh"];
-  return [];
 }
 
 function Toggle({
