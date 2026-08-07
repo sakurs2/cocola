@@ -244,6 +244,11 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	req.RuntimeID = strings.TrimSpace(req.RuntimeID)
 	req.InteractionMode = strings.TrimSpace(req.InteractionMode)
 	req.RevisionOfPlanID = strings.TrimSpace(req.RevisionOfPlanID)
+	req.ReasoningEffort = strings.TrimSpace(req.ReasoningEffort)
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeErr(w, http.StatusBadRequest, "UNSUPPORTED_REASONING_EFFORT", "reasoning_effort is not supported")
+		return
+	}
 	if req.InteractionMode == "" {
 		req.InteractionMode = chatrun.InteractionModeExecute
 	}
@@ -514,6 +519,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		ID: runID, RootSpanID: rootSpanID, ConversationID: req.SessionID,
 		ConversationTitle: titleForConversation(req), UserID: identity.UserID,
 		Source: source, ModelRouteID: effectiveModelRouteID(req), ModelAlias: strings.TrimSpace(req.ModelAlias),
+		ReasoningEffort: req.ReasoningEffort,
 		ClientRequestID: requestID, InteractionMode: req.InteractionMode, Status: chatrun.StatusRunning,
 		StartedAt: startedAt, LastActivityAt: startedAt,
 	}
@@ -1264,6 +1270,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		Prompt:               agentPrompt(live.request), SandboxID: live.request.SandboxID,
 		MaxTurns:            effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
 		ModelRouteID:        effectiveModelRouteID(live.request),
+		ReasoningEffort:     live.request.ReasoningEffort,
 		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
 		MemoryContext:       memoryContext,
 		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
@@ -1464,6 +1471,7 @@ func (a *API) executeLiveRun(live *liveRun) {
 		planCandidate = &chatrun.PlanCandidate{
 			ID: uuid.NewString(), RuntimeID: live.request.RuntimeID,
 			ModelRouteID: effectiveModelRouteID(live.request), ModelAlias: live.request.ModelAlias,
+			ReasoningEffort: live.request.ReasoningEffort,
 			ContentMarkdown: planContent, WorkspaceRevision: workspaceRevision,
 		}
 	}
@@ -1472,7 +1480,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		questionCandidate = &chatrun.QuestionCandidate{
 			ID: uuid.NewString(), RuntimeID: live.request.RuntimeID,
 			ModelRouteID: effectiveModelRouteID(live.request), ModelAlias: live.request.ModelAlias,
-			SkillID: live.request.SkillID, InteractionMode: effectiveInteractionMode(live.request),
+			ReasoningEffort: live.request.ReasoningEffort,
+			SkillID:         live.request.SkillID, InteractionMode: effectiveInteractionMode(live.request),
 			Text: questionText, Options: questionOptions,
 		}
 	}

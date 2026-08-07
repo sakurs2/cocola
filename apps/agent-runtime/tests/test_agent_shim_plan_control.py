@@ -142,6 +142,16 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
     }
 
 
+def test_reasoning_effort_maps_to_claude_agent_options(monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", _fake_sdk(captured))
+    module = _load_shim("cocola_agent_shim_reasoning_effort")
+
+    module._build_options({"prompt": "solve it", "reasoning_effort": "max"})
+
+    assert captured["options"]["effort"] == "max"
+
+
 async def test_plan_permission_callback_never_grants_additional_permissions():
     module = _load_shim("cocola_agent_shim_plan_permission_callback")
     control = module._CocolaRunControl()

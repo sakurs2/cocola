@@ -59,6 +59,7 @@ class ModelRoute:
     visible: bool = True
     is_default: bool = False
     embedding_dimension: int = 0
+    reasoning_efforts: tuple[str, ...] = ()
 
 
 class Registry:

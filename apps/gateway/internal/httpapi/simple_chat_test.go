@@ -726,7 +726,7 @@ func TestPlanModeCreatesAndExecutesDurablePlanWithoutUserMessage(t *testing.T) {
 
 	planning := httptest.NewRecorder()
 	handler.ServeHTTP(planning, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
-		`{"prompt":"plan the change","session_id":"conversation-plan","client_request_id":"plan-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","interaction_mode":"plan"}`,
+		`{"prompt":"plan the change","session_id":"conversation-plan","client_request_id":"plan-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","reasoning_effort":"max","interaction_mode":"plan"}`,
 	)))
 	if planning.Code != http.StatusOK || !strings.Contains(planning.Body.String(), `"kind":"plan_ready"`) {
 		t.Fatalf("plan response = %d %s", planning.Code, planning.Body.String())
@@ -780,6 +780,7 @@ func TestPlanModeCreatesAndExecutesDurablePlanWithoutUserMessage(t *testing.T) {
 		queries[1].InteractionMode != agent.InteractionModeExecute ||
 		queries[1].SessionID != queries[0].SessionID ||
 		queries[1].ModelRouteID != "route-1" ||
+		queries[0].ReasoningEffort != "max" || queries[1].ReasoningEffort != "max" ||
 		!strings.Contains(queries[1].Prompt, `"content_markdown":"## Plan`) {
 		t.Fatalf("plan queries = %+v", queries)
 	}
@@ -838,7 +839,7 @@ func TestQuestionModePersistsAnswerAndResumesTheSameSession(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
-		`{"prompt":"create a service","session_id":"conversation-question","client_request_id":"question-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","skill_id":"backend","interaction_mode":"execute"}`,
+		`{"prompt":"create a service","session_id":"conversation-question","client_request_id":"question-request","runtime_id":"claude-code","model_route_id":"route-1","model_alias":"sonnet","reasoning_effort":"high","skill_id":"backend","interaction_mode":"execute"}`,
 	)))
 	if first.Code != http.StatusOK ||
 		!strings.Contains(first.Body.String(), `"kind":"question_ready"`) ||
@@ -891,6 +892,7 @@ func TestQuestionModePersistsAnswerAndResumesTheSameSession(t *testing.T) {
 		queries[1].SessionID != queries[0].SessionID ||
 		queries[1].RuntimeID != queries[0].RuntimeID ||
 		queries[1].ModelRouteID != queries[0].ModelRouteID ||
+		queries[0].ReasoningEffort != "high" || queries[1].ReasoningEffort != "high" ||
 		queries[1].SkillID != "backend" ||
 		queries[1].InteractionMode != queries[0].InteractionMode {
 		t.Fatalf("question continuation queries = %+v", queries)

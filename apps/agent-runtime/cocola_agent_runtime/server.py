@@ -1739,6 +1739,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             working_directory=working_directory,
             max_turns=request.max_turns or 30,
             model_route_id=model_route_id,
+            reasoning_effort=(str(getattr(request, "reasoning_effort", "") or "").strip() or None),
             allowed_skill_ids=[skill["id"] for skill in loaded_skills],
             selected_skill_id=selected_skill_id,
             selected_skill_result_contract=selected_skill_result_contract,

@@ -1052,15 +1052,22 @@ func (p *Postgres) DeleteLLMProvider(ctx context.Context, id string) error {
 	return nil
 }
 
-const llmModelCols = `id, alias, provider_id, protocol, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, embedding_dimension, created_at, updated_at`
+const llmModelCols = `id, alias, provider_id, protocol, real_model, label, icon_type, icon_slug, icon_url, enabled, visible, is_default, sort_order, embedding_dimension, reasoning_efforts, created_at, updated_at`
 
 func scanLLMModelRoute(row pgx.Row) (LLMModelRoute, error) {
 	var route LLMModelRoute
 	err := row.Scan(&route.ID, &route.Alias, &route.ProviderID, &route.Protocol, &route.RealModel, &route.Label,
 		&route.IconType, &route.IconSlug, &route.IconURL, &route.Enabled,
 		&route.Visible, &route.IsDefault, &route.SortOrder, &route.EmbeddingDimension,
-		&route.CreatedAt, &route.UpdatedAt)
+		&route.ReasoningEfforts, &route.CreatedAt, &route.UpdatedAt)
 	return route, err
+}
+
+func persistedReasoningEfforts(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute) error {
@@ -1075,11 +1082,12 @@ func (p *Postgres) CreateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 		}
 	}
 	const q = `INSERT INTO llm_model_routes (` + llmModelCols + `)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
 	_, err = tx.Exec(ctx, q,
 		route.ID, route.Alias, route.ProviderID, route.Protocol, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
-		route.IsDefault, route.SortOrder, route.EmbeddingDimension, route.CreatedAt, route.UpdatedAt)
+		route.IsDefault, route.SortOrder, route.EmbeddingDimension, persistedReasoningEfforts(route.ReasoningEfforts),
+		route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}
@@ -1132,12 +1140,14 @@ func (p *Postgres) UpdateLLMModelRoute(ctx context.Context, route LLMModelRoute)
 	const q = `UPDATE llm_model_routes
 		SET alias=$2, provider_id=$3, protocol=$4, real_model=$5, label=$6, icon_type=$7,
 		    icon_slug=$8, icon_url=$9, enabled=$10, visible=$11, is_default=$12,
-		    sort_order=$13, embedding_dimension=$14, created_at=$15, updated_at=$16
+		    sort_order=$13, embedding_dimension=$14, reasoning_efforts=$15,
+		    created_at=$16, updated_at=$17
 		WHERE id=$1`
 	ct, err := tx.Exec(ctx, q,
 		route.ID, route.Alias, route.ProviderID, route.Protocol, route.RealModel, route.Label,
 		route.IconType, route.IconSlug, route.IconURL, route.Enabled, route.Visible,
-		route.IsDefault, route.SortOrder, route.EmbeddingDimension, route.CreatedAt, route.UpdatedAt)
+		route.IsDefault, route.SortOrder, route.EmbeddingDimension, persistedReasoningEfforts(route.ReasoningEfforts),
+		route.CreatedAt, route.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}

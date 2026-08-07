@@ -130,6 +130,7 @@ def _build_from_dict(spec: dict) -> Registry:
             visible=_cfg_bool(rcfg.get("visible", True)),
             is_default=_cfg_bool(rcfg.get("is_default", False)),
             embedding_dimension=int(rcfg.get("embedding_dimension", 0)),
+            reasoning_efforts=tuple(str(value) for value in rcfg.get("reasoning_efforts", ())),
         )
 
     default_alias = spec.get("default_alias", "")

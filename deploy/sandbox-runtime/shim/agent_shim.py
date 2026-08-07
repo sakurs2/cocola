@@ -168,6 +168,11 @@ def _build_options(
     # without a RAM snapshot.
     if req.get("resume"):
         kwargs["resume"] = req["resume"]
+    reasoning_effort = str(req.get("reasoning_effort") or "").strip()
+    if reasoning_effort:
+        if reasoning_effort not in {"low", "medium", "high", "xhigh", "max"}:
+            raise ValueError(f"unsupported Claude reasoning effort: {reasoning_effort}")
+        kwargs["effort"] = reasoning_effort
     control = run_control
     if control is not None:
         mcp_servers = (

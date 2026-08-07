@@ -88,6 +88,10 @@ def _build_payload(req: ChatRequest, *, stream: bool) -> dict:
         payload["tools"] = req.params.tools
     if req.params.tool_choice is not None:
         payload["tool_choice"] = req.params.tool_choice
+    if req.params.thinking is not None:
+        payload["thinking"] = req.params.thinking
+    if req.params.output_config is not None:
+        payload["output_config"] = req.params.output_config
     return payload
 
 

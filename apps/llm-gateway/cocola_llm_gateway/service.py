@@ -37,7 +37,7 @@ from cocola_llm_gateway.billing.ledger import Ledger, UsageRecord
 from cocola_llm_gateway.conversation_trace import ConversationTraceStore, TraceContext, utc_now
 from cocola_llm_gateway.middleware import RateLimiter, ResiliencePolicy, ResilientStreamer
 from cocola_llm_gateway.quota import Enforcer, QuotaStatus
-from cocola_llm_gateway.registry import Registry
+from cocola_llm_gateway.registry import ModelRoute, Registry
 from cocola_llm_gateway.types import (
     ChatMessage,
     ChatParams,
@@ -185,6 +185,22 @@ class GatewayService:
             self._registry = registry
             route, _ = registry.resolve_responses(requested_alias)
             return route.real_model
+        finally:
+            await self._registry_source.release_registry(registry)
+
+    async def validate_chat_request(self, req: ChatRequest, requested_alias: str | None) -> None:
+        registry = await self._registry_source.acquire_registry()
+        try:
+            route, _ = registry.resolve_chat(requested_alias)
+            validate_reasoning_effort(route, anthropic_reasoning_effort(req))
+        finally:
+            await self._registry_source.release_registry(registry)
+
+    async def validate_responses_request(self, payload: dict, requested_alias: str) -> None:
+        registry = await self._registry_source.acquire_registry()
+        try:
+            route, _ = registry.resolve_responses(requested_alias)
+            validate_reasoning_effort(route, responses_reasoning_effort(payload))
         finally:
             await self._registry_source.release_registry(registry)
 
@@ -370,6 +386,7 @@ class GatewayService:
         try:
             self._registry = registry
             route, provider = registry.resolve(alias)
+            validate_reasoning_effort(route, anthropic_reasoning_effort(req))
         except BaseException:
             await self._registry_source.release_registry(registry)
             raise
@@ -453,6 +470,7 @@ class GatewayService:
         try:
             self._registry = registry
             route, provider = registry.resolve_responses(requested_alias)
+            validate_reasoning_effort(route, responses_reasoning_effort(payload))
             upstream_payload = {**payload, "model": route.real_model, "stream": False}
             response = await self._responses_create_with_retry(provider, upstream_payload)
             usage = responses_usage(response)
@@ -508,6 +526,7 @@ class GatewayService:
         try:
             self._registry = registry
             route, provider = registry.resolve_responses(requested_alias)
+            validate_reasoning_effort(route, responses_reasoning_effort(payload))
             upstream_payload = {**payload, "model": route.real_model, "stream": True}
             async for chunk in self._responses_stream_with_retry(provider, upstream_payload):
                 if not saw_first_chunk:
@@ -775,6 +794,41 @@ def _memory_responses_payload(payload: dict, real_model: str) -> dict:
                 }
             }
     return out
+
+
+def anthropic_reasoning_effort(req: ChatRequest) -> str:
+    output_config = req.params.output_config
+    if output_config is None or output_config.get("effort") is None:
+        return ""
+    effort = output_config.get("effort")
+    if not isinstance(effort, str):
+        raise CocolaError(ErrorCode.INVALID_ARGUMENT, "reasoning effort must be a string")
+    return effort.strip()
+
+
+def responses_reasoning_effort(payload: dict) -> str:
+    reasoning = payload.get("reasoning")
+    if reasoning is None:
+        return ""
+    if not isinstance(reasoning, dict):
+        raise CocolaError(ErrorCode.INVALID_ARGUMENT, "reasoning must be an object")
+    effort = reasoning.get("effort")
+    if effort is None:
+        return ""
+    if not isinstance(effort, str):
+        raise CocolaError(ErrorCode.INVALID_ARGUMENT, "reasoning effort must be a string")
+    return effort.strip()
+
+
+def validate_reasoning_effort(route: ModelRoute, effort: str) -> None:
+    if not effort:
+        return
+    allowed = {"minimal", "low", "medium", "high", "xhigh", "max"}
+    if effort not in allowed or effort not in route.reasoning_efforts:
+        raise CocolaError(
+            ErrorCode.INVALID_ARGUMENT,
+            f"reasoning effort '{effort}' is not supported by model route '{route.alias}'",
+        )
 
 
 def _responses_output_text(payload: dict) -> str:

@@ -67,6 +67,7 @@ type Run struct {
 	Source            string     `json:"source"`
 	ModelRouteID      string     `json:"model_route_id,omitempty"`
 	ModelAlias        string     `json:"model_alias,omitempty"`
+	ReasoningEffort   string     `json:"reasoning_effort,omitempty"`
 	ClientRequestID   string     `json:"client_request_id,omitempty"`
 	InteractionMode   string     `json:"interaction_mode"`
 	PlanID            string     `json:"plan_id,omitempty"`
@@ -121,6 +122,7 @@ type Plan struct {
 	RuntimeID         string     `json:"runtime_id"`
 	ModelRouteID      string     `json:"model_route_id"`
 	ModelAlias        string     `json:"model_alias"`
+	ReasoningEffort   string     `json:"reasoning_effort,omitempty"`
 	ContentMarkdown   string     `json:"content_markdown"`
 	WorkspaceRevision string     `json:"workspace_revision,omitempty"`
 	ApprovedBy        string     `json:"approved_by,omitempty"`
@@ -134,6 +136,7 @@ type PlanCandidate struct {
 	RuntimeID         string
 	ModelRouteID      string
 	ModelAlias        string
+	ReasoningEffort   string
 	ContentMarkdown   string
 	WorkspaceRevision string
 }
@@ -149,6 +152,7 @@ type Question struct {
 	RuntimeID       string                 `json:"runtime_id"`
 	ModelRouteID    string                 `json:"model_route_id"`
 	ModelAlias      string                 `json:"model_alias"`
+	ReasoningEffort string                 `json:"reasoning_effort,omitempty"`
 	SkillID         string                 `json:"skill_id,omitempty"`
 	Text            string                 `json:"question"`
 	Options         []convo.QuestionOption `json:"options"`
@@ -164,6 +168,7 @@ type QuestionCandidate struct {
 	RuntimeID       string
 	ModelRouteID    string
 	ModelAlias      string
+	ReasoningEffort string
 	SkillID         string
 	InteractionMode string
 	Text            string

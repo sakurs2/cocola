@@ -235,6 +235,7 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult
 			ID: candidate.ID, ConversationID: run.ConversationID, Version: version,
 			Status: PlanStatusReady, SourceRunID: run.ID, RuntimeID: candidate.RuntimeID,
 			ModelRouteID: candidate.ModelRouteID, ModelAlias: candidate.ModelAlias,
+			ReasoningEffort:   candidate.ReasoningEffort,
 			ContentMarkdown:   candidate.ContentMarkdown,
 			WorkspaceRevision: candidate.WorkspaceRevision, CreatedAt: now, UpdatedAt: now,
 		}
@@ -270,8 +271,9 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult
 			Status: QuestionStatusPending, SourceRunID: run.ID,
 			InteractionMode: normalizeInteractionMode(candidate.InteractionMode),
 			RuntimeID:       candidate.RuntimeID, ModelRouteID: candidate.ModelRouteID,
-			ModelAlias: candidate.ModelAlias, SkillID: candidate.SkillID,
-			Text: candidate.Text, Options: append([]convo.QuestionOption(nil), candidate.Options...),
+			ModelAlias: candidate.ModelAlias, ReasoningEffort: candidate.ReasoningEffort,
+			SkillID: candidate.SkillID,
+			Text:    candidate.Text, Options: append([]convo.QuestionOption(nil), candidate.Options...),
 			CreatedAt: now, UpdatedAt: now,
 		}
 		m.questions[value.ID] = value
@@ -445,6 +447,7 @@ func (m *Memory) StartQuestionAnswer(
 	run.ConversationID = in.ConversationID
 	run.UserID = in.UserID
 	run.InteractionMode = normalizeInteractionMode(question.InteractionMode)
+	run.ReasoningEffort = question.ReasoningEffort
 	m.runs[run.ID] = run
 	if err := m.convo.InsertMessage(ctx, in.UserMessage); err != nil {
 		delete(m.runs, run.ID)
@@ -655,6 +658,7 @@ func (m *Memory) StartPlanExecution(
 	run.UserID = in.UserID
 	run.InteractionMode = InteractionModeExecute
 	run.PlanID = plan.ID
+	run.ReasoningEffort = plan.ReasoningEffort
 	m.runs[run.ID] = run
 	_ = m.updatePlanMessageStatus(ctx, plan)
 	return PlanExecutionResult{

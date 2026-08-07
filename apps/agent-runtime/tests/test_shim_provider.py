@@ -172,6 +172,25 @@ def test_plan_mode_maps_to_native_claude_permission_mode():
     assert request["permission_mode"] == "plan"
 
 
+def test_request_forwards_reasoning_effort_to_the_sandbox_shim():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+
+    request = json.loads(
+        provider._build_request(
+            "solve it",
+            AgentOptions(
+                user_id="U1",
+                session_id="S1",
+                sandbox_id="box-1",
+                reasoning_effort="high",
+            ),
+            None,
+        )
+    )
+
+    assert request["reasoning_effort"] == "high"
+
+
 def test_execute_request_sends_optional_structured_result_policy_explicitly():
     provider = InSandboxShimProvider(StaticSandboxExecutor())
 

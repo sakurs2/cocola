@@ -99,7 +99,7 @@ class PostgresRegistrySource:
             SELECT
                 p.id, p.type, p.base_url, p.api_key_ciphertext,
                 r.id, r.alias, r.protocol, r.real_model, r.label, r.icon_type, r.icon_slug,
-                r.icon_url, r.visible, r.is_default, r.embedding_dimension
+                r.icon_url, r.visible, r.is_default, r.embedding_dimension, r.reasoning_efforts
             FROM llm_model_routes r
             JOIN llm_providers p ON p.id = r.provider_id
             WHERE p.enabled = TRUE AND r.enabled = TRUE
@@ -140,6 +140,7 @@ class PostgresRegistrySource:
                 visible,
                 is_default,
                 embedding_dimension,
+                reasoning_efforts,
             ) = row
             if provider_type == "fake":
                 raise CocolaError(
@@ -169,6 +170,7 @@ class PostgresRegistrySource:
                 "visible": visible,
                 "is_default": is_default,
                 "embedding_dimension": embedding_dimension,
+                "reasoning_efforts": list(reasoning_efforts or ()),
             }
             if is_default and not default_alias:
                 default_alias = route_id

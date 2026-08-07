@@ -33,6 +33,7 @@ class AgentOptions:
     system_prompt: str | None = None
     max_turns: int = 30
     model_route_id: str | None = None
+    reasoning_effort: str | None = None
     # Runtime-native Skill names exposed to the current Agent. An explicit
     # list is passed to the SDK so stale or unrelated on-disk Skills remain
     # undiscoverable even if a previous turn used a different configuration.

@@ -28,7 +28,7 @@ AGENT_KNOWLEDGE_SOURCE_STATE_TEMPORARILY_UNAVAILABLE: AgentKnowledgeSourceState
 AGENT_KNOWLEDGE_SOURCE_STATE_UNAVAILABLE: AgentKnowledgeSourceState
 
 class QueryRequest(_message.Message):
-    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references", "agent_context", "agent_knowledge_context")
+    __slots__ = ("user_id", "session_id", "prompt", "sandbox_id", "max_turns", "attachments", "runtime_id", "skill_id", "allow_workspace_reset", "memory_context", "project_context", "interaction_mode", "require_session_resume", "wiki_references", "agent_context", "agent_knowledge_context", "reasoning_effort")
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -45,6 +45,7 @@ class QueryRequest(_message.Message):
     WIKI_REFERENCES_FIELD_NUMBER: _ClassVar[int]
     AGENT_CONTEXT_FIELD_NUMBER: _ClassVar[int]
     AGENT_KNOWLEDGE_CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    REASONING_EFFORT_FIELD_NUMBER: _ClassVar[int]
     user_id: str
     session_id: str
     prompt: str
@@ -61,7 +62,8 @@ class QueryRequest(_message.Message):
     wiki_references: _containers.RepeatedCompositeFieldContainer[WikiReference]
     agent_context: AgentContext
     agent_knowledge_context: AgentKnowledgeContext
-    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ..., agent_context: _Optional[_Union[AgentContext, _Mapping]] = ..., agent_knowledge_context: _Optional[_Union[AgentKnowledgeContext, _Mapping]] = ...) -> None: ...
+    reasoning_effort: str
+    def __init__(self, user_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., sandbox_id: _Optional[str] = ..., max_turns: _Optional[int] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., runtime_id: _Optional[str] = ..., skill_id: _Optional[str] = ..., allow_workspace_reset: bool = ..., memory_context: _Optional[str] = ..., project_context: _Optional[_Union[ProjectContext, _Mapping]] = ..., interaction_mode: _Optional[_Union[InteractionMode, str]] = ..., require_session_resume: bool = ..., wiki_references: _Optional[_Iterable[_Union[WikiReference, _Mapping]]] = ..., agent_context: _Optional[_Union[AgentContext, _Mapping]] = ..., agent_knowledge_context: _Optional[_Union[AgentKnowledgeContext, _Mapping]] = ..., reasoning_effort: _Optional[str] = ...) -> None: ...
 
 class ProjectContext(_message.Message):
     __slots__ = ("project_id", "repository_id", "clone_url", "default_branch", "base_sha", "task_branch", "git_author_name", "git_author_email", "repository_provider", "repository_full_name", "credential_mode", "base_ref")

@@ -55,7 +55,8 @@ var traceAttributeAllowlist = map[string]bool{
 	"conversation_id": true, "error_code": true, "error_type": true,
 	"event_count": true, "event_kind": true, "inline_count": true,
 	"mcp_count": true, "mcp_names": true, "model_route_id": true, "model_alias": true,
-	"object_count": true, "part_count": true, "prompt_count": true,
+	"reasoning_effort": true,
+	"object_count":     true, "part_count": true, "prompt_count": true,
 	"prompt_ids": true, "prompt_versions": true, "restored": true,
 	"resumed": true, "reused": true, "sandbox_id": true, "session_id": true,
 	"runtime_id":  true,
@@ -625,6 +626,7 @@ type chatRequest struct {
 	MaxTurns                             int32                          `json:"max_turns"`
 	ModelRouteID                         string                         `json:"model_route_id"`
 	ModelAlias                           string                         `json:"model_alias"`
+	ReasoningEffort                      string                         `json:"reasoning_effort"`
 	ModelLabel                           string                         `json:"model_label"`
 	ModelProvider                        string                         `json:"model_provider"`
 	ModelFamily                          string                         `json:"model_family"`
@@ -708,6 +710,7 @@ func (a *API) startConversationRun(ctx context.Context, id auth.Identity, req ch
 			"conversation_id":  run.ConversationID,
 			"chat_type":        source,
 			"model_alias":      run.ModelAlias,
+			"reasoning_effort": strings.TrimSpace(req.ReasoningEffort),
 			"agent_id":         req.AgentID,
 			"agent_version":    agentSnapshotVersion(req.AgentSnapshot),
 			"content_length":   agentInstructionsLength(req.AgentSnapshot),
@@ -776,6 +779,7 @@ func assistantMetadata(req chatRequest) map[string]any {
 	if alias := strings.TrimSpace(req.ModelAlias); alias != "" {
 		out["model_alias"] = alias
 	}
+	out["reasoning_effort"] = strings.TrimSpace(req.ReasoningEffort)
 	if label := strings.TrimSpace(req.ModelLabel); label != "" {
 		out["model_label"] = label
 	}
@@ -831,6 +835,15 @@ func effectiveModelRouteID(req chatRequest) string {
 	// Existing routes were migrated with id=alias, so old browser tabs and
 	// scheduled tasks remain valid after a unified stack upgrade.
 	return strings.TrimSpace(req.ModelAlias)
+}
+
+func validReasoningEffort(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
 }
 
 // registerArtifact records a file event's private object-store key, then

@@ -65,6 +65,8 @@ class AnthropicRequest(BaseModel):
     # ADR-0010: opaque tool definitions / choice, preserved for passthrough.
     tools: list[dict[str, Any]] = Field(default_factory=list)
     tool_choice: dict[str, Any] | None = None
+    thinking: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None
 
     model_config = {"extra": "ignore"}
 
@@ -146,6 +148,8 @@ def to_chat_request(
         stream=req.stream,
         tools=list(req.tools),
         tool_choice=req.tool_choice,
+        thinking=req.thinking,
+        output_config=req.output_config,
     )
     meta = dict(metadata or {})
     meta.setdefault("requested_model", req.model)

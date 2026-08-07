@@ -61,6 +61,7 @@ class FakeRequest:
     prompt: str = "hi"
     sandbox_id: str = ""
     max_turns: int = 0
+    reasoning_effort: str = ""
     runtime_id: str = "claude-code"
     skill_id: str = ""
     allow_workspace_reset: bool = False
@@ -1763,11 +1764,18 @@ async def test_query_stops_when_admin_prompt_policy_is_unavailable():
 
 async def test_query_maps_request_fields_to_options():
     prov = ListProvider([AgentEvent(kind="done", data={})])
-    req = FakeRequest(user_id="emp-9", session_id="sess-7", sandbox_id="box-1", max_turns=5)
+    req = FakeRequest(
+        user_id="emp-9",
+        session_id="sess-7",
+        sandbox_id="box-1",
+        max_turns=5,
+        reasoning_effort="high",
+    )
     await AgentRuntimeServicer(prov).Query(req, FakeContext())
     o = prov.seen_options
     assert o.user_id == "emp-9" and o.session_id == "sess-7"
     assert o.sandbox_id == "box-1" and o.max_turns == 5
+    assert o.reasoning_effort == "high"
 
 
 async def test_project_query_uses_isolated_project_worktree():

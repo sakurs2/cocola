@@ -74,6 +74,11 @@ import {
   type UiStructuredResultPart,
 } from "@/lib/rich-message-normalization";
 import { normalizeModelIconConfig, type ModelIconConfig } from "@/lib/model-icons";
+import {
+  reasoningPresetForEffort,
+  reasoningPresetOptions,
+  resolveReasoningEffort,
+} from "@/lib/reasoning-effort.mjs";
 
 export type {
   QuestionAnswer,
@@ -362,8 +367,11 @@ export type ModelOption = {
   iconSlug?: string;
   icon: ModelIconConfig;
   protocols: string[];
+  reasoningEfforts: string[];
   isDefault: boolean;
 };
+
+export type ReasoningPreset = "auto" | "fast" | "deep" | "max";
 
 export type AgentRuntimeOption = {
   id: string;
@@ -404,6 +412,7 @@ export type UiMessageMetadata = {
   model_family?: string;
   model_icon_slug?: string;
   model_icon?: ModelIconConfig;
+  reasoning_effort?: string;
   duration_ms?: number;
 };
 
@@ -485,6 +494,9 @@ type CocolaContextValue = {
   selectedModel: ModelOption | null;
   modelsLoaded: boolean;
   setSelectedModelID: (id: string) => void;
+  reasoningPreset: ReasoningPreset;
+  reasoningOptions: Array<{ id: ReasoningPreset; available: boolean }>;
+  setReasoningPreset: (preset: ReasoningPreset) => void;
   agents: AgentProfile[];
   agentsLoaded: boolean;
   selectedAgent: AgentProfile | AgentConversationSnapshot | null;
@@ -659,6 +671,7 @@ function normalizeMetadata(raw: UiMessageMetadata | undefined): UiMessageMetadat
     ...(typeof raw.model_provider === "string" ? { model_provider: raw.model_provider } : {}),
     ...(typeof raw.model_family === "string" ? { model_family: raw.model_family } : {}),
     ...(typeof raw.model_icon_slug === "string" ? { model_icon_slug: raw.model_icon_slug } : {}),
+    ...(typeof raw.reasoning_effort === "string" ? { reasoning_effort: raw.reasoning_effort } : {}),
     ...(icon ? { model_icon: icon } : {}),
     ...(duration !== undefined ? { duration_ms: duration } : {}),
   };
@@ -836,6 +849,16 @@ function latestSessionStatus(messages: UiMessage[]): EnvironmentStatus | null {
   );
 }
 
+function latestReasoningPreset(messages: UiMessage[]): ReasoningPreset {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const effort = messages[index]?.metadata?.reasoning_effort;
+    if (typeof effort === "string") {
+      return reasoningPresetForEffort(effort) as ReasoningPreset;
+    }
+  }
+  return "auto";
+}
+
 function withSessionStatus(
   statuses: Record<string, EnvironmentStatus>,
   sessionId: string,
@@ -871,6 +894,9 @@ function normalizeModelOption(raw: unknown): ModelOption | null {
     icon: normalizedIcon,
     protocols: Array.isArray(row.protocols)
       ? row.protocols.filter((value): value is string => typeof value === "string")
+      : [],
+    reasoningEfforts: Array.isArray(row.reasoning_efforts)
+      ? row.reasoning_efforts.filter((value): value is string => typeof value === "string")
       : [],
     isDefault: row.is_default === true,
   };
@@ -1405,6 +1431,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactPreview | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelID, setSelectedModelID] = useState("");
+  const [reasoningPresets, setReasoningPresets] = useState<Record<string, ReasoningPreset>>({});
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [agentsLoaded, setAgentsLoaded] = useState(false);
@@ -1490,6 +1517,19 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       compatibleModels.find((model) => model.id === selectedModelID) ?? compatibleModels[0] ?? null
     );
   }, [compatibleModels, selectedAgent, selectedModelID]);
+  const reasoningPreset = reasoningPresets[sessionId] ?? "auto";
+  const reasoningOptions = useMemo(
+    () =>
+      reasoningPresetOptions(selectedModel?.reasoningEfforts ?? []) as Array<{
+        id: ReasoningPreset;
+        available: boolean;
+      }>,
+    [selectedModel],
+  );
+  const reasoningEffort = resolveReasoningEffort(
+    reasoningPreset,
+    selectedModel?.reasoningEfforts ?? [],
+  );
   const selectedSkill = useMemo(() => {
     const selectedID = selectedSkillIds[sessionId] ?? "";
     return skills.find((skill) => skill.id === selectedID) ?? null;
@@ -1555,11 +1595,26 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
   const selectModelID = useCallback(
     (id: string) => {
-      if (questionInputLocked || selectedAgent) return;
+      if (
+        questionInputLocked ||
+        selectedAgent ||
+        !compatibleModels.some((model) => model.id === id)
+      )
+        return;
       setSelectedModelID(id);
       preferredModelIdRef.current = id;
     },
-    [questionInputLocked, selectedAgent],
+    [compatibleModels, questionInputLocked, selectedAgent],
+  );
+
+  const setReasoningPreset = useCallback(
+    (preset: ReasoningPreset) => {
+      if (isRunning || questionInputLocked) return;
+      const option = reasoningOptions.find((candidate) => candidate.id === preset);
+      if (!option?.available) return;
+      setReasoningPresets((previous) => ({ ...previous, [sessionId]: preset }));
+    },
+    [isRunning, questionInputLocked, reasoningOptions, sessionId],
   );
 
   const setSelectedAgentID = useCallback(
@@ -1630,6 +1685,16 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       preferredModelIdRef.current = selectedModel.id;
     }
   }, [selectedAgent, selectedModel, selectedModelID]);
+
+  useEffect(() => {
+    if (
+      reasoningPreset === "auto" ||
+      resolveReasoningEffort(reasoningPreset, selectedModel?.reasoningEfforts ?? [])
+    ) {
+      return;
+    }
+    setReasoningPresets((previous) => ({ ...previous, [sessionId]: "auto" }));
+  }, [reasoningPreset, selectedModel, sessionId]);
 
   useEffect(() => {
     const conversation = conversations.find((item) => item.id === sessionId);
@@ -2628,6 +2693,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         ...(model.family ? { model_family: model.family } : {}),
         ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
         model_icon: model.icon,
+        reasoning_effort: reasoningEffort,
       };
       const userMessageId = genId();
       const assistantId = genId();
@@ -2753,6 +2819,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...(model.family ? { model_family: model.family } : {}),
           ...(model.iconSlug ? { model_icon_slug: model.iconSlug } : {}),
           model_icon: model.icon,
+          reasoning_effort: reasoningEffort,
           ...(folderHint ? { folder_id: folderHint } : {}),
           ...(projectHint ? { project_id: projectHint } : {}),
           ...(projectBaseRef ? { project_base_ref: projectBaseRef } : {}),
@@ -2969,6 +3036,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       pendingQuestion,
       answerQuestion,
       selectedModel,
+      reasoningEffort,
       selectedRuntime,
       selectedAgent,
       selectedSkill,
@@ -3257,6 +3325,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           [id]: latestInteractionMode(cached),
         }));
         setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(cached)));
+        setReasoningPresets((previous) => ({
+          ...previous,
+          [id]: latestReasoningPreset(cached),
+        }));
         void connectActiveRun(id);
         return;
       }
@@ -3277,6 +3349,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           [id]: latestInteractionMode(loaded),
         }));
         setEnvironmentStatuses((prev) => withSessionStatus(prev, id, latestSessionStatus(loaded)));
+        setReasoningPresets((previous) => ({
+          ...previous,
+          [id]: latestReasoningPreset(loaded),
+        }));
         void connectActiveRun(id);
       } catch {
         // ignore — leave the current thread untouched on failure
@@ -3352,6 +3428,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
     );
     setRevisingPlanIds((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
+    );
+    setReasoningPresets((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([id]) => !removed.has(id))),
     );
     setSelectedAgentIds((prev) =>
@@ -3782,6 +3861,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModel,
       modelsLoaded: modelsLoaded && runtimesLoaded && productConfigLoaded,
       setSelectedModelID: selectModelID,
+      reasoningPreset,
+      reasoningOptions,
+      setReasoningPreset,
       agents,
       agentsLoaded,
       selectedAgent,
@@ -3843,6 +3925,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       selectedModelID,
       selectedModel,
       selectModelID,
+      reasoningPreset,
+      reasoningOptions,
+      setReasoningPreset,
       agents,
       agentsLoaded,
       selectedAgent,

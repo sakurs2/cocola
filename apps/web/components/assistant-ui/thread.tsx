@@ -45,6 +45,7 @@ import {
   SendHorizontalIcon,
   XIcon,
   ArrowUp as ArrowUpIcon,
+  Hourglass,
   Map as PlanModeIcon,
   Sparkles,
 } from "lucide-react";
@@ -1298,21 +1299,38 @@ const ModelPicker: FC = () => {
     modelsLoaded,
     questionInputLocked,
     selectedAgent,
+    reasoningPreset,
+    reasoningOptions,
+    setReasoningPreset,
   } = useCocola();
+  const isRunning = useThread((thread) => thread.isRunning);
   const noModel = !modelsLoaded || !selectedModel;
-  const pickerDisabled = noModel || questionInputLocked || Boolean(selectedAgent);
+  const pickerDisabled = noModel || questionInputLocked;
+  const reasoningCopy = {
+    auto: { label: "Auto", description: "Use the model default" },
+    fast: { label: "Fast", description: "Quick response" },
+    deep: { label: "Deep", description: "Balanced speed and quality" },
+    max: { label: "Max", description: "For complex problems" },
+  } as const;
 
   return (
     <Dropdown>
       <Dropdown.Trigger
         aria-label={
-          selectedAgent ? "Agent model" : noModel ? "No model configured" : "Select model"
+          selectedAgent
+            ? "Agent model and reasoning"
+            : noModel
+              ? "No model configured"
+              : "Select model and reasoning"
         }
         className="cocola-web-composer-selector cocola-web-select-trigger inline-flex h-9 max-w-[14rem] min-w-0 items-center gap-2 rounded-xl border border-transparent px-2.5 text-xs font-medium"
         isDisabled={pickerDisabled}
       >
         <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
-        <span className="truncate">{selectedModel?.label ?? "No model"}</span>
+        <span className="truncate">
+          {selectedModel?.label ?? "No model"}
+          {selectedModel ? ` · ${reasoningCopy[reasoningPreset].label}` : ""}
+        </span>
         {pickerDisabled ? null : <GravityChevronDown className="text-muted size-3 shrink-0" />}
       </Dropdown.Trigger>
       <Dropdown.Popover className="min-w-60" placement="top start">
@@ -1320,8 +1338,62 @@ const ModelPicker: FC = () => {
           aria-label="Select model"
           selectedKeys={selectedModelID ? [selectedModelID] : []}
           selectionMode="single"
-          onAction={(key) => setSelectedModelID(String(key))}
+          disabledKeys={selectedAgent ? models.map((model) => model.id) : []}
+          onAction={(key) => {
+            const id = String(key);
+            if (models.some((model) => model.id === id)) setSelectedModelID(id);
+          }}
         >
+          <Dropdown.SubmenuTrigger>
+            <Dropdown.Item id="reasoning" textValue="Reasoning">
+              <Label className="flex min-w-0 items-center gap-2">
+                <span className="bg-accent/10 text-accent grid size-6 shrink-0 place-items-center rounded-lg">
+                  <Hourglass className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">Reasoning</span>
+                  <span className="block truncate text-[11px] font-normal text-muted">
+                    {reasoningCopy[reasoningPreset].label}
+                  </span>
+                </span>
+                <Dropdown.SubmenuIndicator />
+              </Label>
+            </Dropdown.Item>
+            <Dropdown.Popover className="min-w-64" placement="end bottom">
+              <Dropdown.Menu
+                aria-label="Select reasoning effort"
+                selectedKeys={[reasoningPreset]}
+                selectionMode="single"
+                onAction={(key) =>
+                  setReasoningPreset(String(key) as "auto" | "fast" | "deep" | "max")
+                }
+              >
+                {reasoningOptions.map((option) => {
+                  const copy = reasoningCopy[option.id];
+                  return (
+                    <Dropdown.Item
+                      key={option.id}
+                      id={option.id}
+                      textValue={copy.label}
+                      isDisabled={!option.available || isRunning || questionInputLocked}
+                    >
+                      <Label className="flex min-w-0 items-center gap-3 py-0.5">
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium">{copy.label}</span>
+                          <span className="block text-xs font-normal text-muted">
+                            {copy.description}
+                          </span>
+                        </span>
+                        {reasoningPreset === option.id ? (
+                          <Check className="size-4 shrink-0" />
+                        ) : null}
+                      </Label>
+                    </Dropdown.Item>
+                  );
+                })}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown.SubmenuTrigger>
           {models.map((model) => (
             <Dropdown.Item key={model.id} id={model.id} textValue={model.label}>
               <Label className="flex min-w-0 items-center gap-2">

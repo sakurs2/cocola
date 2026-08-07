@@ -207,6 +207,10 @@ def create_app(
             user_id=identity.user_id,
             session_id=request.headers.get("x-cocola-session", "").strip() or identity.user_id,
         )
+        try:
+            await service.validate_chat_request(chat_req, requested_alias)
+        except CocolaError as exc:
+            return _err(exc.code, exc.message)
         wants_stream = bool(body.get("stream", False))
 
         if wants_stream:
@@ -256,6 +260,7 @@ def create_app(
             return _responses_err(401, str(exc), error_type="authentication_error")
         try:
             await service.resolve_responses_model(requested_alias)
+            await service.validate_responses_request(body, requested_alias)
         except CocolaError as exc:
             return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
         try:
@@ -284,6 +289,8 @@ def create_app(
                     upstream_status=exc.status,
                 )
                 return _responses_upstream_err(exc)
+            except CocolaError as exc:
+                return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
             except Exception as exc:  # noqa: BLE001 - sanitized provider errors only
                 log.warning("responses upstream failed", error_type=type(exc).__name__)
                 return _responses_err(503, "upstream Responses request failed")
@@ -306,6 +313,9 @@ def create_app(
             )
             await event_stream.aclose()
             return _responses_upstream_err(exc)
+        except CocolaError as exc:
+            await event_stream.aclose()
+            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
         except Exception as exc:  # noqa: BLE001 - no response headers sent yet
             log.warning("responses stream start failed", error_type=type(exc).__name__)
             await event_stream.aclose()

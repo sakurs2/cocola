@@ -201,6 +201,7 @@ func TestMemoryPlanExecutionStopsAndContinuesWithoutUserMessage(t *testing.T) {
 	planning.Run.InteractionMode = InteractionModePlan
 	planning.Run.ModelRouteID = "route-1"
 	planning.Run.ModelAlias = "sonnet"
+	planning.Run.ReasoningEffort = "max"
 	if _, err := store.Start(ctx, planning); err != nil {
 		t.Fatal(err)
 	}
@@ -208,12 +209,12 @@ func TestMemoryPlanExecutionStopsAndContinuesWithoutUserMessage(t *testing.T) {
 		RunID: "plan-run-1", UserID: "user-1", Status: StatusSuccess,
 		PlanCandidate: &PlanCandidate{
 			ID: "11111111-1111-4111-8111-111111111111", RuntimeID: "claude-code",
-			ModelRouteID: "route-1", ModelAlias: "sonnet",
+			ModelRouteID: "route-1", ModelAlias: "sonnet", ReasoningEffort: "max",
 			ContentMarkdown: "## Plan\n\n- Implement",
 		},
 	})
 	if err != nil || created.Plan == nil || created.Plan.Version != 1 ||
-		created.Plan.Status != PlanStatusReady {
+		created.Plan.Status != PlanStatusReady || created.Plan.ReasoningEffort != "max" {
 		t.Fatalf("created plan = %+v, %v", created, err)
 	}
 
@@ -241,7 +242,7 @@ func TestMemoryPlanExecutionStopsAndContinuesWithoutUserMessage(t *testing.T) {
 		ExpectedVersion: 1, PlanID: created.Plan.ID, ApprovedAt: executionStartedAt,
 	})
 	if err != nil || !started.Created || started.Plan.Status != PlanStatusExecuting ||
-		started.Run.PlanID != created.Plan.ID {
+		started.Run.PlanID != created.Plan.ID || started.Run.ReasoningEffort != "max" {
 		t.Fatalf("execution start = %+v, %v", started, err)
 	}
 	stopped, err := store.Finalize(ctx, FinalizeInput{

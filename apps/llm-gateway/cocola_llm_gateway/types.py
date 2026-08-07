@@ -63,6 +63,11 @@ class ChatParams(BaseModel):
     # Default empty/None keeps text-only providers and existing tests unchanged.
     tools: list[dict[str, Any]] = Field(default_factory=list)
     tool_choice: dict[str, Any] | None = None
+    # Anthropic reasoning controls are kept as typed top-level containers and
+    # forwarded only by the Anthropic adapter. The route registry validates the
+    # effective effort before any upstream request is opened.
+    thinking: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None
 
 
 class ChatRequest(BaseModel):

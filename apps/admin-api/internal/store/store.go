@@ -192,6 +192,7 @@ type LLMModelRoute struct {
 	IsDefault          bool      `json:"is_default"`
 	SortOrder          int       `json:"sort_order"`
 	EmbeddingDimension int       `json:"embedding_dimension,omitempty"`
+	ReasoningEfforts   []string  `json:"reasoning_efforts"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -215,15 +216,16 @@ type LLMModelIcon struct {
 }
 
 type PublicLLMModel struct {
-	ID        string       `json:"id"`
-	Alias     string       `json:"alias"`
-	Label     string       `json:"label"`
-	Provider  string       `json:"provider"`
-	Family    string       `json:"family"`
-	IconSlug  string       `json:"icon_slug"`
-	Icon      LLMModelIcon `json:"icon"`
-	Protocols []string     `json:"protocols"`
-	IsDefault bool         `json:"is_default"`
+	ID               string       `json:"id"`
+	Alias            string       `json:"alias"`
+	Label            string       `json:"label"`
+	Provider         string       `json:"provider"`
+	Family           string       `json:"family"`
+	IconSlug         string       `json:"icon_slug"`
+	Icon             LLMModelIcon `json:"icon"`
+	Protocols        []string     `json:"protocols"`
+	ReasoningEfforts []string     `json:"reasoning_efforts"`
+	IsDefault        bool         `json:"is_default"`
 }
 
 // ScheduledTask is always owned by one user. OwnerType remains internal during

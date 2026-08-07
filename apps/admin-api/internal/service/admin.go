@@ -1463,6 +1463,7 @@ type LLMModelInput struct {
 	IsDefault          bool
 	SortOrder          int
 	EmbeddingDimension int
+	ReasoningEfforts   []string
 	Actor              string
 }
 
@@ -1595,8 +1596,12 @@ func (a *Admin) CreateLLMModel(ctx context.Context, in LLMModelInput) (store.LLM
 		}
 		route.Visible = false
 		route.IsDefault = false
+		route.ReasoningEfforts = []string{}
 	} else {
 		route.EmbeddingDimension = 0
+		if !validReasoningEffortsForProtocol(route.Protocol, route.ReasoningEfforts) {
+			return store.LLMModelRoute{}, ErrInvalidArg
+		}
 	}
 	if err := a.store.CreateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
@@ -1632,8 +1637,12 @@ func (a *Admin) UpdateLLMModel(ctx context.Context, id string, in LLMModelInput)
 		}
 		route.Visible = false
 		route.IsDefault = false
+		route.ReasoningEfforts = []string{}
 	} else {
 		route.EmbeddingDimension = 0
+		if !validReasoningEffortsForProtocol(route.Protocol, route.ReasoningEfforts) {
+			return store.LLMModelRoute{}, ErrInvalidArg
+		}
 	}
 	if err := a.store.UpdateLLMModelRoute(ctx, route); err != nil {
 		return store.LLMModelRoute{}, err
@@ -1756,6 +1765,13 @@ func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput
 	route.SortOrder = in.SortOrder
 	if in.EmbeddingDimension != 0 || create {
 		route.EmbeddingDimension = in.EmbeddingDimension
+	}
+	if in.ReasoningEfforts != nil || create {
+		efforts, ok := normalizeReasoningEfforts(in.ReasoningEfforts)
+		if !ok {
+			return store.LLMModelRoute{}, ErrInvalidArg
+		}
+		route.ReasoningEfforts = efforts
 	}
 	route.UpdatedAt = a.now().UTC()
 	if route.ProviderID == "" || route.RealModel == "" || !validIcon(route) {
@@ -1957,16 +1973,53 @@ func publicLLMModel(route store.LLMModelRoute, providerType string) store.Public
 		icon.Slug = iconSlug
 	}
 	return store.PublicLLMModel{
-		ID:        route.ID,
-		Alias:     route.Alias,
-		Label:     route.Label,
-		Provider:  provider,
-		Family:    family,
-		IconSlug:  iconSlug,
-		Icon:      icon,
-		Protocols: []string{modelProtocol(providerType)},
-		IsDefault: route.IsDefault,
+		ID:               route.ID,
+		Alias:            route.Alias,
+		Label:            route.Label,
+		Provider:         provider,
+		Family:           family,
+		IconSlug:         iconSlug,
+		Icon:             icon,
+		Protocols:        []string{modelProtocol(providerType)},
+		ReasoningEfforts: append([]string(nil), route.ReasoningEfforts...),
+		IsDefault:        route.IsDefault,
 	}
+}
+
+func normalizeReasoningEfforts(values []string) ([]string, bool) {
+	allowed := map[string]bool{
+		"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, raw := range values {
+		value := strings.ToLower(strings.TrimSpace(raw))
+		if !allowed[value] {
+			return nil, false
+		}
+		if !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return out, true
+}
+
+func validReasoningEffortsForProtocol(protocol string, values []string) bool {
+	allowed := map[string]map[string]bool{
+		"anthropic-messages": {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
+		"openai-responses":   {"minimal": true, "low": true, "medium": true, "high": true, "xhigh": true},
+	}
+	protocolEfforts, ok := allowed[protocol]
+	if !ok {
+		return len(values) == 0
+	}
+	for _, value := range values {
+		if !protocolEfforts[value] {
+			return false
+		}
+	}
+	return true
 }
 
 func modelProtocol(providerType string) string {

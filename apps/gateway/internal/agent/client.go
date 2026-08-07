@@ -66,6 +66,7 @@ type Query struct {
 	MemoryContext        string
 	MaxTurns             int32
 	ModelRouteID         string
+	ReasoningEffort      string
 	TraceID              string
 	ParentSpanID         string
 	Source               string
@@ -397,6 +398,7 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		InteractionMode:      interactionModeProto(q.InteractionMode),
 		RequireSessionResume: q.RequireSessionResume,
 		WikiReferences:       wikiReferences,
+		ReasoningEffort:      q.ReasoningEffort,
 	}
 	if q.Project != nil {
 		request.ProjectContext = projectContextProto(*q.Project)

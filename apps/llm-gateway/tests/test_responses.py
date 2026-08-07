@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from cocola_common import ErrorCode
+from cocola_common import CocolaError, ErrorCode
 from cocola_llm_gateway.auth.jwt import Identity
 from cocola_llm_gateway.billing.memory import MemoryLedger
 from cocola_llm_gateway.middleware import ResiliencePolicy
@@ -65,6 +65,7 @@ def _service(
     *,
     policy: ResiliencePolicy | None = None,
     trace_store: FakeTraceStore | None = None,
+    reasoning_efforts: tuple[str, ...] = (),
 ):
     route = ModelRoute(
         alias="codex-model",
@@ -72,6 +73,7 @@ def _service(
         real_model="gpt-real",
         pricing=Pricing(input_per_1k=1, output_per_1k=2),
         protocols=("openai-responses",),
+        reasoning_efforts=reasoning_efforts,
     )
     registry = Registry(
         providers={},
@@ -86,6 +88,22 @@ def _service(
         policy=policy or ResiliencePolicy(timeout_s=1, max_retries=1, backoff_base_s=0),
         trace_store=trace_store,
     ), ledger
+
+
+async def test_responses_rejects_effort_not_supported_by_the_route():
+    provider = FakeResponsesProvider()
+    service, _ = _service(provider, reasoning_efforts=("low", "high"))
+
+    with pytest.raises(CocolaError) as error:
+        await service.responses_create(
+            {"model": "codex-model", "input": "hello", "reasoning": {"effort": "xhigh"}},
+            requested_alias="codex-model",
+            identity=Identity(user_id="user-1"),
+            session_id="conversation-1",
+        )
+
+    assert error.value.code is ErrorCode.INVALID_ARGUMENT
+    assert provider.payloads == []
 
 
 def _client(app):

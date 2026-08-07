@@ -534,7 +534,7 @@ func TestChatForwardsModelRouteID(t *testing.T) {
 	req := httptest.NewRequest(
 		"POST",
 		"/v1/chat",
-		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_route_id":"route-1","model_alias":"claude-sonnet"}`),
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_route_id":"route-1","model_alias":"claude-sonnet","reasoning_effort":"high"}`),
 	)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -544,6 +544,27 @@ func TestChatForwardsModelRouteID(t *testing.T) {
 	}
 	if fs.gotQuery.ModelRouteID != "route-1" {
 		t.Fatalf("model route id not forwarded, got %q", fs.gotQuery.ModelRouteID)
+	}
+	if fs.gotQuery.ReasoningEffort != "high" {
+		t.Fatalf("reasoning effort not forwarded, got %q", fs.gotQuery.ReasoningEffort)
+	}
+}
+
+func TestChatRejectsUnsupportedReasoningEffort(t *testing.T) {
+	fs := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
+	h := newAPI(t, fs)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","reasoning_effort":"ultra"}`),
+	))
+	if rec.Code != http.StatusBadRequest ||
+		!strings.Contains(rec.Body.String(), "UNSUPPORTED_REASONING_EFFORT") {
+		t.Fatalf("invalid reasoning effort = %d %s", rec.Code, rec.Body.String())
+	}
+	if fs.gotQuery.SessionID != "" {
+		t.Fatalf("invalid reasoning effort reached runtime: %+v", fs.gotQuery)
 	}
 }
 
@@ -610,7 +631,7 @@ func TestChatPersistsAssistantModelMetadata(t *testing.T) {
 	req := httptest.NewRequest(
 		"POST",
 		"/v1/chat",
-		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet","model_label":"Claude Sonnet","model_provider":"anthropic","model_family":"claude","model_icon_slug":"anthropic","model_icon":{"type":"lobe-icons","slug":"anthropic"}}`),
+		strings.NewReader(`{"prompt":"hi","session_id":"s1","model_alias":"claude-sonnet","model_label":"Claude Sonnet","model_provider":"anthropic","model_family":"claude","model_icon_slug":"anthropic","model_icon":{"type":"lobe-icons","slug":"anthropic"},"reasoning_effort":"max"}`),
 	)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -633,6 +654,9 @@ func TestChatPersistsAssistantModelMetadata(t *testing.T) {
 		assistant.Metadata["model_family"] != "claude" ||
 		assistant.Metadata["model_icon_slug"] != "anthropic" {
 		t.Fatalf("model identity metadata = %#v", assistant.Metadata)
+	}
+	if assistant.Metadata["reasoning_effort"] != "max" {
+		t.Fatalf("reasoning metadata = %#v", assistant.Metadata)
 	}
 	icon, ok := assistant.Metadata["model_icon"].(map[string]string)
 	if !ok || icon["slug"] != "anthropic" {

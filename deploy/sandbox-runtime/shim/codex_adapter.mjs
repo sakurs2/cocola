@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Codex } from "@openai/codex-sdk";
+import { withCodexReasoningEffort } from "./codex_reasoning.mjs";
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 
@@ -124,13 +125,16 @@ const run = async (request) => {
     baseUrl: `${gatewayRoot}/v1`,
     config,
   });
-  const threadOptions = {
-    model: request.model || process.env.CODEX_MODEL,
-    workingDirectory: request.cwd || process.env.COCOLA_AGENT_CWD || "/workspace",
-    skipGitRepoCheck: true,
-    sandboxMode: "danger-full-access",
-    approvalPolicy: "never",
-  };
+  const threadOptions = withCodexReasoningEffort(
+    {
+      model: request.model || process.env.CODEX_MODEL,
+      workingDirectory: request.cwd || process.env.COCOLA_AGENT_CWD || "/workspace",
+      skipGitRepoCheck: true,
+      sandboxMode: "danger-full-access",
+      approvalPolicy: "never",
+    },
+    request.reasoning_effort,
+  );
   const thread = request.resume
     ? codex.resumeThread(request.resume, threadOptions)
     : codex.startThread(threadOptions);

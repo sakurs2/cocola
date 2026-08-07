@@ -60,6 +60,7 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 
 	err = client.Stream(context.Background(), Query{
 		UserID: "user", SessionID: "session", Prompt: "read it",
+		ReasoningEffort:       "high",
 		SkillBrokerCredential: "skill-run-credential",
 		LarkCredential: LarkRuntimeCredential{
 			Status: RuntimeCredentialReadyForTest, AppID: "app-id", Brand: "feishu",
@@ -104,6 +105,9 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := <-recording.requests
+	if request.ReasoningEffort != "high" {
+		t.Fatalf("ReasoningEffort = %q", request.ReasoningEffort)
+	}
 	if len(request.WikiReferences) != 1 {
 		t.Fatalf("request = %#v", request)
 	}

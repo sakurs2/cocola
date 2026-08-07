@@ -4,6 +4,7 @@ from cocola_llm_gateway.anthropic_codec import (
     to_chat_request,
 )
 from cocola_llm_gateway.types import StreamEvent, StreamEventType, Usage
+from cocola_llm_gateway.upstream.anthropic import _build_payload
 
 
 async def _events(seq):
@@ -24,6 +25,21 @@ def test_to_chat_request_lifts_system_and_keeps_alias():
     assert req.messages[0].role == "system"
     assert req.messages[0].content == "be terse"
     assert req.user_id == "U1"
+
+
+def test_to_chat_request_preserves_reasoning_controls_for_upstream():
+    body = {
+        "model": "claude-sonnet",
+        "messages": [{"role": "user", "content": "hi"}],
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": "high"},
+    }
+
+    req = to_chat_request(body, resolved_model="real-model")
+    payload = _build_payload(req, stream=True)
+
+    assert payload["thinking"] == {"type": "adaptive"}
+    assert payload["output_config"] == {"effort": "high"}
 
 
 def test_to_chat_request_flattens_block_content():

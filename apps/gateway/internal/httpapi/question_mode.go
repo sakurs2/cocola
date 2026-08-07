@@ -170,6 +170,7 @@ func (a *API) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		ID: runID, RootSpanID: traceevents.NewSpanID(), ConversationID: conversationID,
 		ConversationTitle: conversation.Title, UserID: identity.UserID, Source: "interactive",
 		ModelRouteID: question.ModelRouteID, ModelAlias: question.ModelAlias,
+		ReasoningEffort: question.ReasoningEffort,
 		ClientRequestID: input.ClientRequestID, InteractionMode: question.InteractionMode,
 		Status: chatrun.StatusRunning, StartedAt: startedAt, LastActivityAt: startedAt,
 	}
@@ -177,7 +178,8 @@ func (a *API) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		Prompt: answerText, SessionID: conversationID, RuntimeID: question.RuntimeID,
 		InteractionMode: question.InteractionMode, ModelRouteID: question.ModelRouteID,
 		ModelAlias: question.ModelAlias, ConversationTitle: conversation.Title,
-		ProjectID: conversation.ProjectID, SkillID: question.SkillID,
+		ReasoningEffort: question.ReasoningEffort,
+		ProjectID:       conversation.ProjectID, SkillID: question.SkillID,
 		ClientRequestID: input.ClientRequestID, RequireSessionResume: true,
 		QuestionID:         question.ID,
 		AgentID:            conversation.AgentID,

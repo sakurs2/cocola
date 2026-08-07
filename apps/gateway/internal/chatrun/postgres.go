@@ -39,7 +39,7 @@ func (p *Postgres) RuntimeSetting(ctx context.Context, key string) (json.RawMess
 }
 
 const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
-	user_id, source, model_route_id, model_alias, client_request_id, interaction_mode,
+	user_id, source, model_route_id, model_alias, reasoning_effort, client_request_id, interaction_mode,
 	COALESCE(plan_id::text, ''), status, started_at,
 	completed_at, last_activity_at, error_code, duration_ms, tool_call_count, llm_call_count`
 
@@ -52,8 +52,8 @@ func scanRun(row pgx.Row) (Run, error) {
 	var run Run
 	if err := row.Scan(
 		&run.ID, &run.RootSpanID, &run.ConversationID, &run.ConversationTitle,
-		&run.UserID, &run.Source, &run.ModelRouteID, &run.ModelAlias, &run.ClientRequestID,
-		&run.InteractionMode, &run.PlanID, &run.Status,
+		&run.UserID, &run.Source, &run.ModelRouteID, &run.ModelAlias, &run.ReasoningEffort,
+		&run.ClientRequestID, &run.InteractionMode, &run.PlanID, &run.Status,
 		&run.StartedAt, &run.CompletedAt, &run.LastActivityAt, &run.ErrorCode,
 		&run.DurationMS, &run.ToolCallCount, &run.LLMCallCount,
 	); err != nil {
@@ -288,13 +288,13 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
-		user_email, source, model_route_id, model_alias, client_request_id, interaction_mode,
+		user_email, source, model_route_id, model_alias, reasoning_effort, client_request_id, interaction_mode,
 		status, started_at,
 		last_activity_at, detail_status)
-		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,'running',$11,$11,'available')`,
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11,'running',$12,$12,'available')`,
 		in.Run.ID, in.Run.RootSpanID, in.Run.ConversationID, in.Run.ConversationTitle,
-		in.Run.UserID, in.Run.Source, in.Run.ModelRouteID, in.Run.ModelAlias, in.Run.ClientRequestID,
-		normalizeInteractionMode(in.Run.InteractionMode), in.Run.StartedAt)
+		in.Run.UserID, in.Run.Source, in.Run.ModelRouteID, in.Run.ModelAlias, in.Run.ReasoningEffort,
+		in.Run.ClientRequestID, normalizeInteractionMode(in.Run.InteractionMode), in.Run.StartedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -423,7 +423,7 @@ func upsertMessage(ctx context.Context, tx pgx.Tx, message convo.Message) error 
 }
 
 const planColumns = `p.id::text, p.conversation_id, p.version, p.status,
-	p.source_run_id, p.runtime_id, p.model_route_id, p.model_alias,
+	p.source_run_id, p.runtime_id, p.model_route_id, p.model_alias, p.reasoning_effort,
 	p.content_markdown, p.workspace_revision, p.approved_by, p.approved_at,
 	p.created_at, p.updated_at`
 
@@ -431,7 +431,7 @@ func scanPlan(row pgx.Row) (Plan, error) {
 	var plan Plan
 	if err := row.Scan(
 		&plan.ID, &plan.ConversationID, &plan.Version, &plan.Status,
-		&plan.SourceRunID, &plan.RuntimeID, &plan.ModelRouteID, &plan.ModelAlias,
+		&plan.SourceRunID, &plan.RuntimeID, &plan.ModelRouteID, &plan.ModelAlias, &plan.ReasoningEffort,
 		&plan.ContentMarkdown, &plan.WorkspaceRevision, &plan.ApprovedBy, &plan.ApprovedAt,
 		&plan.CreatedAt, &plan.UpdatedAt,
 	); err != nil {
@@ -484,7 +484,7 @@ func updatePlanMessageStatus(ctx context.Context, tx pgx.Tx, plan Plan) error {
 
 const questionColumns = `q.id::text, q.conversation_id, q.version, q.status,
 	q.source_run_id, COALESCE(q.answer_run_id, ''), q.interaction_mode,
-	q.runtime_id, q.model_route_id, q.model_alias, q.skill_id, q.question_text,
+	q.runtime_id, q.model_route_id, q.model_alias, q.reasoning_effort, q.skill_id, q.question_text,
 	q.options_json, q.answer_json, q.answered_by, q.answered_at,
 	q.created_at, q.updated_at`
 
@@ -495,7 +495,8 @@ func scanQuestion(row pgx.Row) (Question, error) {
 	if err := row.Scan(
 		&question.ID, &question.ConversationID, &question.Version, &question.Status,
 		&question.SourceRunID, &question.AnswerRunID, &question.InteractionMode,
-		&question.RuntimeID, &question.ModelRouteID, &question.ModelAlias, &question.SkillID,
+		&question.RuntimeID, &question.ModelRouteID, &question.ModelAlias, &question.ReasoningEffort,
+		&question.SkillID,
 		&question.Text, &optionsJSON, &answerJSON, &question.AnsweredBy,
 		&question.AnsweredAt, &question.CreatedAt, &question.UpdatedAt,
 	); err != nil {
@@ -716,7 +717,8 @@ func (p *Postgres) StartPlanExecution(
 		JOIN llm_providers p ON p.id=r.provider_id
 		WHERE r.id=$1 AND r.protocol='anthropic-messages'
 			AND r.enabled=TRUE AND r.visible=TRUE AND p.enabled=TRUE
-	)`, plan.ModelRouteID).Scan(&modelAvailable); err != nil {
+			AND ($2='' OR $2=ANY(r.reasoning_efforts))
+	)`, plan.ModelRouteID, plan.ReasoningEffort).Scan(&modelAvailable); err != nil {
 		return PlanExecutionResult{}, err
 	}
 	if !modelAvailable {
@@ -735,13 +737,15 @@ func (p *Postgres) StartPlanExecution(
 	run.UserID = in.UserID
 	run.InteractionMode = InteractionModeExecute
 	run.PlanID = plan.ID
+	run.ReasoningEffort = plan.ReasoningEffort
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
-		user_email, source, model_route_id, model_alias, client_request_id,
+		user_email, source, model_route_id, model_alias, reasoning_effort, client_request_id,
 		interaction_mode, plan_id, status, started_at, last_activity_at, detail_status)
-		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,'execute',$10::uuid,'running',$11,$11,'available')`,
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,'execute',$11::uuid,'running',$12,$12,'available')`,
 		run.ID, run.RootSpanID, run.ConversationID, run.ConversationTitle, run.UserID,
-		run.Source, run.ModelRouteID, run.ModelAlias, run.ClientRequestID, run.PlanID, run.StartedAt)
+		run.Source, run.ModelRouteID, run.ModelAlias, plan.ReasoningEffort,
+		run.ClientRequestID, run.PlanID, run.StartedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -882,7 +886,8 @@ func (p *Postgres) StartQuestionAnswer(
 		JOIN llm_providers p ON p.id=r.provider_id
 		WHERE r.id=$1 AND r.protocol='anthropic-messages'
 			AND r.enabled=TRUE AND r.visible=TRUE AND p.enabled=TRUE
-	)`, question.ModelRouteID).Scan(&modelAvailable); err != nil {
+			AND ($2='' OR $2=ANY(r.reasoning_efforts))
+	)`, question.ModelRouteID, question.ReasoningEffort).Scan(&modelAvailable); err != nil {
 		return QuestionAnswerResult{}, err
 	}
 	if !modelAvailable {
@@ -900,14 +905,15 @@ func (p *Postgres) StartQuestionAnswer(
 	run.ConversationID = in.ConversationID
 	run.UserID = in.UserID
 	run.InteractionMode = normalizeInteractionMode(question.InteractionMode)
+	run.ReasoningEffort = question.ReasoningEffort
 	_, err = tx.Exec(ctx, `INSERT INTO conversation_runs (
 		trace_id, root_span_id, conversation_id, conversation_title, user_id,
-		user_email, source, model_route_id, model_alias, client_request_id,
+		user_email, source, model_route_id, model_alias, reasoning_effort, client_request_id,
 		interaction_mode, status, started_at, last_activity_at, detail_status)
-		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,'running',$11,$11,'available')`,
+		VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11,'running',$12,$12,'available')`,
 		run.ID, run.RootSpanID, run.ConversationID, run.ConversationTitle, run.UserID,
-		run.Source, run.ModelRouteID, run.ModelAlias, run.ClientRequestID,
-		run.InteractionMode, run.StartedAt)
+		run.Source, run.ModelRouteID, run.ModelAlias, question.ReasoningEffort,
+		run.ClientRequestID, run.InteractionMode, run.StartedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -1176,16 +1182,17 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 			ID: candidate.ID, ConversationID: run.ConversationID, Version: version,
 			Status: PlanStatusReady, SourceRunID: run.ID, RuntimeID: candidate.RuntimeID,
 			ModelRouteID: candidate.ModelRouteID, ModelAlias: candidate.ModelAlias,
+			ReasoningEffort:   candidate.ReasoningEffort,
 			ContentMarkdown:   candidate.ContentMarkdown,
 			WorkspaceRevision: candidate.WorkspaceRevision, CreatedAt: now, UpdatedAt: now,
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO conversation_plans (
 			id, conversation_id, version, status, source_run_id, runtime_id,
-			model_route_id, model_alias, content_markdown, workspace_revision,
+			model_route_id, model_alias, reasoning_effort, content_markdown, workspace_revision,
 			created_at, updated_at)
-			VALUES ($1::uuid,$2,$3,'ready',$4,$5,$6,$7,$8,$9,$10,$10)`,
+			VALUES ($1::uuid,$2,$3,'ready',$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
 			plan.ID, plan.ConversationID, plan.Version, plan.SourceRunID, plan.RuntimeID,
-			plan.ModelRouteID, plan.ModelAlias, plan.ContentMarkdown,
+			plan.ModelRouteID, plan.ModelAlias, plan.ReasoningEffort, plan.ContentMarkdown,
 			plan.WorkspaceRevision, now)
 		if err != nil {
 			return FinalizeResult{}, err
@@ -1224,18 +1231,20 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 			Status: QuestionStatusPending, SourceRunID: run.ID,
 			InteractionMode: normalizeInteractionMode(candidate.InteractionMode),
 			RuntimeID:       candidate.RuntimeID, ModelRouteID: candidate.ModelRouteID,
-			ModelAlias: candidate.ModelAlias, SkillID: candidate.SkillID,
-			Text: candidate.Text, Options: append([]convo.QuestionOption(nil), candidate.Options...),
+			ModelAlias: candidate.ModelAlias, ReasoningEffort: candidate.ReasoningEffort,
+			SkillID: candidate.SkillID,
+			Text:    candidate.Text, Options: append([]convo.QuestionOption(nil), candidate.Options...),
 			CreatedAt: now, UpdatedAt: now,
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO conversation_questions (
 			id, conversation_id, version, status, source_run_id, interaction_mode,
-			runtime_id, model_route_id, model_alias, skill_id, question_text,
+			runtime_id, model_route_id, model_alias, reasoning_effort, skill_id, question_text,
 			options_json, created_at, updated_at)
-			VALUES ($1::uuid,$2,$3,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$12)`,
+			VALUES ($1::uuid,$2,$3,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)`,
 			question.ID, question.ConversationID, question.Version, question.SourceRunID,
 			question.InteractionMode, question.RuntimeID, question.ModelRouteID,
-			question.ModelAlias, question.SkillID, question.Text, optionsJSON, now)
+			question.ModelAlias, question.ReasoningEffort, question.SkillID, question.Text,
+			optionsJSON, now)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {

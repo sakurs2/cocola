@@ -146,13 +146,14 @@ func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 		t.Fatalf("create provider: %v", err)
 	}
 	sonnet, err := svc.CreateLLMModel(ctx, LLMModelInput{
-		Alias:      "sonnet",
-		ProviderID: "anthropic",
-		RealModel:  "claude-sonnet",
-		Label:      "Claude Sonnet",
-		IconType:   IconSimpleIcons,
-		IconSlug:   "anthropic",
-		IsDefault:  true,
+		Alias:            "sonnet",
+		ProviderID:       "anthropic",
+		RealModel:        "claude-sonnet",
+		Label:            "Claude Sonnet",
+		IconType:         IconSimpleIcons,
+		IconSlug:         "anthropic",
+		IsDefault:        true,
+		ReasoningEfforts: []string{"low", "high", "max"},
 	})
 	if err != nil {
 		t.Fatalf("create model: %v", err)
@@ -183,9 +184,49 @@ func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 	if len(public[0].Protocols) != 1 || public[0].Protocols[0] != "anthropic-messages" {
 		t.Fatalf("public model protocols = %+v", public[0].Protocols)
 	}
+	if strings.Join(public[0].ReasoningEfforts, ",") != "low,high,max" {
+		t.Fatalf("public model reasoning efforts = %+v", public[0].ReasoningEfforts)
+	}
 
 	if _, err := svc.SetDefaultLLMModel(ctx, hidden.ID, "admin"); !errors.Is(err, ErrInvalidArg) {
 		t.Fatalf("hidden default want ErrInvalidArg, got %v", err)
+	}
+}
+
+func TestLLMModelReasoningEffortsAreNormalizedAndProtocolScoped(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
+	key := "test-only-key"
+	for _, provider := range []LLMProviderInput{
+		{ID: "claude", Name: "Claude", Type: ProviderAnthropic, BaseURL: "https://a.invalid", APIKey: &key},
+		{ID: "codex", Name: "Codex", Type: ProviderOpenAIResponses, BaseURL: "https://o.invalid/v1", APIKey: &key},
+	} {
+		if _, err := svc.CreateLLMProvider(ctx, provider); err != nil {
+			t.Fatalf("create provider %s: %v", provider.ID, err)
+		}
+	}
+	claude, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "claude", ProviderID: "claude", RealModel: "claude-real", Label: "Claude",
+		IconType: IconSimpleIcons, IconSlug: "anthropic",
+		ReasoningEfforts: []string{" HIGH ", "low", "high", "max"},
+	})
+	if err != nil {
+		t.Fatalf("create Claude route: %v", err)
+	}
+	if strings.Join(claude.ReasoningEfforts, ",") != "high,low,max" {
+		t.Fatalf("normalized efforts = %+v", claude.ReasoningEfforts)
+	}
+	if _, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "bad-claude", ProviderID: "claude", RealModel: "claude-real", Label: "Claude",
+		IconType: IconSimpleIcons, IconSlug: "anthropic", ReasoningEfforts: []string{"minimal"},
+	}); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("Claude minimal effort want ErrInvalidArg, got %v", err)
+	}
+	if _, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "bad-codex", ProviderID: "codex", RealModel: "gpt-real", Label: "Codex",
+		IconType: IconSimpleIcons, IconSlug: "openai", ReasoningEfforts: []string{"max"},
+	}); !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("Codex max effort want ErrInvalidArg, got %v", err)
 	}
 }
 

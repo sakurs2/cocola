@@ -57,6 +57,9 @@ message QueryRequest {
   // Owner-authorized Knowledge resolved from the Agent's current configuration
   // at the beginning of this turn. Unlike AgentContext it is intentionally live.
   AgentKnowledgeContext agent_knowledge_context = 16;
+  // Model-native effort selected for this turn. Empty delegates to the model
+  // default; non-empty values are validated against the selected model route.
+  string reasoning_effort = 17;
 }
 
 enum InteractionMode {
