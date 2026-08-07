@@ -42,6 +42,7 @@ type ToolPart = {
   toolCallId?: string;
   toolName?: string;
   argsText?: string;
+  toolOutput?: string;
   result?: string;
   isError?: boolean;
   outcome?: string;
@@ -432,6 +433,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
       <RailTool
         toolName={part.toolName || "tool"}
         argsText={part.argsText}
+        liveOutput={part.toolOutput}
         result={part.result}
         isError={part.isError}
         outcome={part.outcome}

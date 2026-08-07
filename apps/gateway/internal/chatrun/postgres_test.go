@@ -64,10 +64,13 @@ func TestPostgresStartFinalizeParity(t *testing.T) {
 	final.Parts = []convo.Part{{Type: convo.PartText, Text: "complete"}}
 	final.Metadata = map[string]any{"partial": false}
 	final.CreatedAt = draft.CreatedAt.Add(time.Second)
+	if _, err := store.pool.Exec(ctx, `UPDATE conversation_runs SET llm_call_count=7 WHERE trace_id=$1`, runID); err != nil {
+		t.Fatal(err)
+	}
 	run, err := store.Finalize(ctx, FinalizeInput{
 		RunID: runID, UserID: "user-1", Status: StatusSuccess, AssistantMessage: &final,
 	})
-	if err != nil || run.Run.Status != StatusSuccess {
+	if err != nil || run.Run.Status != StatusSuccess || run.Run.LLMCallCount != 7 {
 		t.Fatalf("finalize = %+v, %v", run, err)
 	}
 	run, err = store.Finalize(ctx, FinalizeInput{

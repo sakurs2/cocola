@@ -53,6 +53,7 @@ LOG_DIR="$ROOT/.run-logs"
 FORWARD_PID_FILE="$LOG_DIR/opensandbox-dev-forward.pid"
 STACK_PID_FILE="$LOG_DIR/dev-stack.pid"
 SETUP_LOG="$LOG_DIR/dev-setup.log"
+OWNED_FORWARD_PID=""
 
 log() { printf '\033[1;36m[dev]\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m[dev:err]\033[0m %s\n' "$*" >&2; }
@@ -305,10 +306,12 @@ delete_sandbox_workloads() {
 }
 
 stop_forward() {
-  if [[ -f "$FORWARD_PID_FILE" ]]; then
-    local pid
+  local pid="${1:-}"
+  if [[ -z "$pid" ]] && [[ -f "$FORWARD_PID_FILE" ]]; then
     pid="$(cat "$FORWARD_PID_FILE" 2>/dev/null || true)"
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  fi
+  if [[ -n "$pid" ]]; then
+    if kill -0 "$pid" 2>/dev/null; then
       kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
       local i
       for ((i = 0; i < 25; i++)); do
@@ -323,6 +326,8 @@ stop_forward() {
       fi
       wait "$pid" 2>/dev/null || true
     fi
+  fi
+  if [[ -f "$FORWARD_PID_FILE" ]] && [[ "$(cat "$FORWARD_PID_FILE" 2>/dev/null || true)" == "$pid" ]]; then
     rm -f "$FORWARD_PID_FILE"
   fi
 }
@@ -342,7 +347,7 @@ stop_stack() {
 graceful_stop() {
   trap '' INT TERM
   stop_stack
-  stop_forward
+  stop_forward "$OWNED_FORWARD_PID"
   rm -f "$STACK_PID_FILE"
   exit 0
 }
@@ -353,7 +358,8 @@ start_forward() {
   (
     $SETSID kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
   ) >"$LOG_DIR/opensandbox-dev-forward.log" 2>&1 &
-  echo "$!" >"$FORWARD_PID_FILE"
+  OWNED_FORWARD_PID="$!"
+  echo "$OWNED_FORWARD_PID" >"$FORWARD_PID_FILE"
 
   local i
   for ((i=1; i<=90; i++)); do
@@ -385,7 +391,7 @@ up() {
 
   log "starting application services"
   trap graceful_stop INT TERM
-  trap 'rm -f "$STACK_PID_FILE"; stop_forward' EXIT
+  trap 'rm -f "$STACK_PID_FILE"; stop_forward "$OWNED_FORWARD_PID"' EXIT
   (
     COCOLA_OPENSANDBOX_MANAGED=0 \
       COCOLA_OPENSANDBOX_URL="http://127.0.0.1:${SERVER_PORT}/v1" \

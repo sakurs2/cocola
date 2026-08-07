@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
+	"github.com/google/uuid"
 )
 
 // apiKeyHeader is the OpenSandbox authentication header.
@@ -101,6 +102,8 @@ const (
 // execEventBuffer sizes the Exec result channel so a fast-producing SSE stream
 // does not block on a momentarily slow consumer.
 const execEventBuffer = 32
+
+const executionStopGrace = 2 * time.Second
 
 // Guest path contract: these MUST match the brain image
 // (deploy/sandbox-runtime/Dockerfile). The in-container paths are a shared
@@ -416,6 +419,21 @@ type runCommandRequest struct {
 	Envs    map[string]string `json:"envs,omitempty"`
 }
 
+func executionMarker(executionID string) string {
+	return "/tmp/cocola-execution-" + executionID + ".pgid"
+}
+
+// wrapExecution starts the complete execd command in its own session and records
+// that process-group id in a root-owned marker. Cancelling an HTTP stream only
+// closes the transport in OpenSandbox; it does not terminate the guest process.
+// The marker gives terminateExecution a precise target without killing unrelated
+// workspace processes such as code-server or a user preview server.
+func wrapExecution(command, marker string) string {
+	script := "marker=$1; echo $$ > \"$marker\"; " +
+		"trap 'rm -f \"$marker\"' EXIT; " + command
+	return "setsid sh -c " + shellQuote(script) + " sh " + shellQuote(marker)
+}
+
 // ssePayload is the JSON object carried by each execd SSE/NDJSON event. Only the
 // fields cocola needs to drive ExecEvent are decoded. Both the spec-nested error
 // object and the legacy flat ename/evalue form are tolerated, mirroring the
@@ -646,6 +664,9 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		b64 := base64.StdEncoding.EncodeToString(req.Stdin)
 		command = fmt.Sprintf("printf %%s '%s' | base64 -d | %s", b64, command)
 	}
+	executionID := uuid.NewString()
+	marker := executionMarker(executionID)
+	command = wrapExecution(command, marker)
 
 	cwd := req.Cwd
 	if cwd == "" {
@@ -715,8 +736,61 @@ func (p *Provider) Exec(ctx context.Context, sid string, req provider.ExecReques
 		defer cancel()
 		defer resp.Body.Close()
 		bridgeExecSSE(runCtx, resp.Body, out)
+		if runCtx.Err() != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), executionStopGrace+3*time.Second)
+			defer stopCancel()
+			_ = p.terminateExecution(stopCtx, execdURL, headers, marker)
+		}
 	}()
 	return out, nil
+}
+
+// terminateExecution stops one guest process group after its caller cancels or
+// its deadline expires. It is intentionally best-effort: the original Exec
+// error remains authoritative, while cleanup is idempotent and safe if the
+// process exited between cancellation and this follow-up command.
+func (p *Provider) terminateExecution(
+	ctx context.Context,
+	execdURL string,
+	headers map[string]string,
+	marker string,
+) error {
+	graceTenths := int(executionStopGrace / (100 * time.Millisecond))
+	script := fmt.Sprintf(
+		"marker=%s; if [ -r \"$marker\" ]; then pgid=$(cat \"$marker\"); "+
+			"case \"$pgid\" in ''|*[!0-9]*) ;; *) "+
+			"kill -TERM -- \"-$pgid\" 2>/dev/null || true; "+
+			"i=0; while kill -0 -- \"-$pgid\" 2>/dev/null && [ \"$i\" -lt %d ]; do "+
+			"sleep 0.1; i=$((i+1)); done; "+
+			"kill -KILL -- \"-$pgid\" 2>/dev/null || true ;; esac; "+
+			"rm -f \"$marker\"; fi",
+		shellQuote(marker), graceTenths,
+	)
+	body, err := json.Marshal(runCommandRequest{Command: script, Cwd: guestDaemonCWD})
+	if err != nil {
+		return fmt.Errorf("opensandbox: marshal execution cleanup: %w", err)
+	}
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, execdURL+"/command", bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("opensandbox: new execution cleanup request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := p.stream.Do(req)
+	if err != nil {
+		return fmt.Errorf("opensandbox: execution cleanup: %w", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("opensandbox: execution cleanup: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // Pause maps to the lifecycle POST /sandboxes/{id}/pause endpoint, which freezes

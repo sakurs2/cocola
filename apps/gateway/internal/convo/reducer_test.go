@@ -2,6 +2,7 @@ package convo
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,30 @@ func TestReducerAggregation(t *testing.T) {
 	}
 	if p[3].Type != PartFile || p[3].ID != "a1" || p[3].Size != 42 {
 		t.Fatalf("file part failed: %+v", p[3])
+	}
+}
+
+func TestReducerKeepsBoundedLiveToolOutput(t *testing.T) {
+	r := NewReducer()
+	r.Apply("tool_output", map[string]string{
+		"tool_use_id": "t1", "content": "early\n", "name": "Bash", "input": `{"command":"train"}`,
+	})
+	r.Apply("tool_use", map[string]string{"id": "t1", "name": "Bash"})
+	r.Apply("tool_output", map[string]string{"tool_use_id": "t1", "content": "first\n"})
+	r.Apply("tool_output", map[string]string{
+		"tool_use_id": "t1",
+		"content":     strings.Repeat("x", maxToolOutputBytes),
+	})
+
+	parts := r.Parts()
+	if len(parts) != 1 || len(parts[0].ToolOutput) != maxToolOutputBytes {
+		t.Fatalf("bounded tool output = %+v", parts)
+	}
+	if strings.Contains(parts[0].ToolOutput, "first") {
+		t.Fatalf("tool output should retain only the newest %d bytes", maxToolOutputBytes)
+	}
+	if parts[0].ToolName != "Bash" {
+		t.Fatalf("early tool output should be merged with later tool_use: %+v", parts[0])
 	}
 }
 

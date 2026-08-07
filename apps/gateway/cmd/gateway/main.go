@@ -15,7 +15,7 @@
 //	                        (default :9091, serving /metrics and /healthz)
 //	COCOLA_PG_DSN           required Postgres DSN for conversations and chat runs
 //	COCOLA_AGENT_MAX_TURNS maximum model turns in one Agent run (default 200)
-//	COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS maximum wall time for one tool step (default 600)
+//	COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS hard runtime limit for one tool execution (default 3600)
 //	COCOLA_AGENT_RUNTIME_DEFAULT_ID default runtime for new work (default claude-code)
 //	COCOLA_AGENT_RUNTIME_PICKER_ENABLED expose experimental runtime choices (default false)
 //	COCOLA_WIKI_MAX_FILE_BYTES maximum bytes accepted for one Wiki file (default 20MiB)
@@ -154,7 +154,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	toolTimeoutSecs, err := boundedEnvInt("COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", 600, 30, 86400)
+	toolTimeoutSecs, err := boundedEnvInt("COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", 3600, 30, 86400)
 	if err != nil {
 		log.Fatal(err.Error())
 	}

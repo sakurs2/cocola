@@ -1268,7 +1268,7 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 	}
 	_, err = tx.Exec(ctx, `UPDATE conversation_runs SET status=$2, error_code=$3,
 		completed_at=$4, last_activity_at=$4, duration_ms=GREATEST(0, EXTRACT(EPOCH FROM ($4-started_at))*1000)::bigint,
-		tool_call_count=$5, llm_call_count=$6,
+		tool_call_count=$5, llm_call_count=GREATEST(llm_call_count,$6),
 		updated_at=now() WHERE trace_id=$1 AND status='running'`,
 		in.RunID, in.Status, in.ErrorCode, now, in.ToolCallCount, in.LLMCallCount)
 	if err != nil {
@@ -1316,7 +1316,9 @@ func (p *Postgres) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResu
 	run.Status = in.Status
 	run.ErrorCode = in.ErrorCode
 	run.ToolCallCount = in.ToolCallCount
-	run.LLMCallCount = in.LLMCallCount
+	if in.LLMCallCount > run.LLMCallCount {
+		run.LLMCallCount = in.LLMCallCount
+	}
 	run.DurationMS = now.Sub(run.StartedAt).Milliseconds()
 	run.CompletedAt = &now
 	run.LastActivityAt = now

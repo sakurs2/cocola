@@ -98,6 +98,7 @@ type UiToolCall = {
   toolCallId: string;
   toolName: string;
   argsText: string;
+  toolOutput?: string;
   result?: string;
   isError?: boolean;
   outcome?: "success" | "permission_denied" | "unavailable" | "failed" | "timeout";
@@ -976,6 +977,63 @@ function fillToolResult(
   );
 }
 
+const MAX_TOOL_OUTPUT_CHARS = 64 * 1024;
+
+function upsertToolUse(
+  parts: UiPart[],
+  toolUseId: string,
+  toolName: string,
+  argsText: string,
+): UiPart[] {
+  const index = parts.findIndex(
+    (part) => part.type === "tool-call" && part.toolCallId === toolUseId,
+  );
+  if (index < 0) {
+    return [
+      ...parts,
+      {
+        type: "tool-call",
+        toolCallId: toolUseId || genId(),
+        toolName: toolName || "tool",
+        argsText,
+      },
+    ];
+  }
+  return parts.map((part, partIndex) =>
+    partIndex === index && part.type === "tool-call"
+      ? { ...part, toolName: toolName || "tool", argsText }
+      : part,
+  );
+}
+
+function appendToolOutput(
+  parts: UiPart[],
+  toolUseId: string,
+  chunk: string,
+  toolName: string,
+  argsText: string,
+): UiPart[] {
+  if (!toolUseId || !chunk) return parts;
+  let matched = false;
+  const next = parts.map((part) => {
+    if (part.type !== "tool-call" || part.toolCallId !== toolUseId) return part;
+    matched = true;
+    const output = `${part.toolOutput ?? ""}${chunk}`;
+    return {
+      ...part,
+      toolOutput: output.slice(-MAX_TOOL_OUTPUT_CHARS),
+    };
+  });
+  if (matched) return next;
+  return appendToolOutput(
+    upsertToolUse(parts, toolUseId, toolName, argsText),
+    toolUseId,
+    chunk,
+    toolName,
+    argsText,
+  );
+}
+
 function upsertEnvironmentPreparation(
   parts: UiPart[],
   environment: EnvironmentPreparationSnapshot,
@@ -1181,15 +1239,15 @@ function reducePart(parts: UiPart[], ev: AgentEvent): UiPart[] {
     case "thinking":
       return appendTo(parts, "reasoning", d.thinking ?? "");
     case "tool_use":
-      return [
-        ...parts,
-        {
-          type: "tool-call",
-          toolCallId: d.id || genId(),
-          toolName: d.name || "tool",
-          argsText: d.input ?? "",
-        },
-      ];
+      return upsertToolUse(parts, d.id ?? "", d.name ?? "", d.input ?? "");
+    case "tool_output":
+      return appendToolOutput(
+        parts,
+        d.tool_use_id ?? "",
+        d.content ?? "",
+        d.name ?? "",
+        d.input ?? "",
+      );
     case "tool_result":
       return fillToolResult(
         parts,
@@ -1343,9 +1401,9 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
         data: { items: p.items },
       };
     }
-    // tool-call. We pass only argsText (the raw JSON string from the wire) —
-    // the renderer displays it verbatim, so there is no need to parse into the
-    // typed `args` (and parsing back would fight ReadonlyJSONObject typing).
+    // tool-call. argsText remains raw JSON while live output is carried as an
+    // artifact so assistant-ui keeps the call in its running state until the
+    // distinct tool_result arrives.
     return {
       type: "tool-call" as const,
       toolCallId: p.toolCallId,
@@ -1355,7 +1413,14 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
         ? {
             result: p.result,
             isError: p.isError,
-            artifact: { cocolaToolOutcome: p.outcome },
+          }
+        : {}),
+      ...(p.outcome || p.toolOutput
+        ? {
+            artifact: {
+              ...(p.outcome ? { cocolaToolOutcome: p.outcome } : {}),
+              ...(p.toolOutput ? { cocolaLiveOutput: p.toolOutput } : {}),
+            },
           }
         : {}),
     };
@@ -1450,6 +1515,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const [revisingPlanIds, setRevisingPlanIds] = useState<Record<string, string>>({});
   const abortMap = useRef<Map<string, AbortController>>(new Map());
   const runCursors = useRef<Map<string, RunCursor>>(new Map());
+  const cancellingRuns = useRef<Set<string>>(new Set());
   const planExecutionRequestIds = useRef<Map<string, string>>(new Map());
   const questionAnswerRequestIds = useRef<Map<string, string>>(new Map());
   const restoredRuns = useRef(false);
@@ -2062,6 +2128,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       setRunning(cursor.conversationId, false);
       abortMap.current.delete(cursor.conversationId);
       runCursors.current.delete(cursor.conversationId);
+      cancellingRuns.current.delete(cursor.conversationId);
       writeRunCursors(runCursors.current);
       if (
         cursor.conversationId !== sessionIdRef.current &&
@@ -2070,6 +2137,29 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         setUnreadCompletedIds((prev) => new Set(prev).add(cursor.conversationId));
       }
       refreshConversations();
+      // The live summary is best-effort, while the stored Run contains the
+      // authoritative LLM/tool counts. Reconcile the message after every
+      // terminal event so timeout/cancel paths cannot leave a stale zero-count
+      // summary in the current thread.
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/conversations/${encodeURIComponent(cursor.conversationId)}/messages`,
+            { cache: "no-store" },
+          );
+          if (!response.ok) return;
+          const loaded = normalizeWireMessages(await response.json());
+          setConvMessages((previous) => ({
+            ...previous,
+            [cursor.conversationId]: loaded,
+          }));
+          setEnvironmentStatuses((previous) =>
+            withSessionStatus(previous, cursor.conversationId, latestSessionStatus(loaded)),
+          );
+        } catch {
+          // Keep the terminal live snapshot when durable reconciliation fails.
+        }
+      })();
     },
     [refreshConversations, setRunning],
   );
@@ -3243,9 +3333,10 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   );
 
   const onCancel = useCallback(async () => {
-    const ctrl = abortMap.current.get(sessionId);
     const cursor = runCursors.current.get(sessionId);
     if (cursor?.runId) {
+      if (cancellingRuns.current.has(sessionId)) return;
+      cancellingRuns.current.add(sessionId);
       try {
         const response = await fetch(`/api/chat/runs/${encodeURIComponent(cursor.runId)}`, {
           method: "DELETE",
@@ -3256,6 +3347,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!response.ok) throw new Error(`cancel failed (${response.status})`);
       } catch (error) {
+        cancellingRuns.current.delete(sessionId);
         applyEvent(sessionId, cursor.assistantId, {
           kind: "error",
           data: { error: error instanceof Error ? error.message : String(error) },
@@ -3265,15 +3357,20 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       if (shouldAwaitPlanStop(cursor)) {
         return;
       }
-      runCursors.current.delete(sessionId);
-      writeRunCursors(runCursors.current);
+      // Keep following the Run until Gateway persists and streams its
+      // authoritative cancelled terminal state. Aborting locally here used to
+      // strand stale counters and partial tool state in the conversation.
+      return;
     }
-    ctrl?.abort();
+    // The initial POST may still be waiting for response headers, so no Run ID
+    // is available yet. Cancelling that request propagates its context through
+    // Gateway and is the only server-side cancellation handle at this stage.
+    abortMap.current.get(sessionId)?.abort();
     abortMap.current.delete(sessionId);
     setRunning(sessionId, false);
-    setEnvironmentStatuses((prev) => {
-      if (prev[sessionId]?.phase !== "preparing") return prev;
-      const next = { ...prev };
+    setEnvironmentStatuses((previous) => {
+      if (previous[sessionId]?.phase !== "preparing") return previous;
+      const next = { ...previous };
       delete next[sessionId];
       return next;
     });

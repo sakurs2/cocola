@@ -25,7 +25,7 @@ import { ChatConversation } from "@cocola/ui-compat/chat-conversation";
 import { ChatMessage } from "@cocola/ui-compat/chat-message";
 import { PromptInput } from "@cocola/ui-compat/prompt-input";
 import { PromptSuggestion } from "@cocola/ui-compat/prompt-suggestion";
-import { Button, Dropdown, Label } from "@heroui/react";
+import { Button, Dropdown, Label, Spinner } from "@heroui/react";
 import {
   BookOpen as GravityBookOpen,
   Bulb,
@@ -47,6 +47,7 @@ import {
   ArrowUp as ArrowUpIcon,
   Hourglass,
   Map as PlanModeIcon,
+  Square,
   Sparkles,
 } from "lucide-react";
 import {
@@ -1557,15 +1558,36 @@ const ComposerAction: FC<{
         )}
       </ThreadPrimitive.If>
       <ThreadPrimitive.If running>
-        <ComposerPrimitive.Cancel asChild>
-          <PromptInput.Send
-            aria-label="Stop"
-            className="cocola-web-composer-send"
-            status="streaming"
-          />
-        </ComposerPrimitive.Cancel>
+        <ComposerStopButton />
       </ThreadPrimitive.If>
     </>
+  );
+};
+
+const ComposerStopButton: FC = () => {
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    if (!stopping) return;
+    const timer = window.setTimeout(() => setStopping(false), 8000);
+    return () => window.clearTimeout(timer);
+  }, [stopping]);
+  return (
+    <ComposerPrimitive.Cancel asChild>
+      <Button
+        isIconOnly
+        aria-label={stopping ? "Stopping current run" : "Stop current run"}
+        className="cocola-web-composer-send"
+        isDisabled={stopping}
+        size="sm"
+        onPress={() => setStopping(true)}
+      >
+        {stopping ? (
+          <Spinner color="current" size="sm" />
+        ) : (
+          <Square className="size-3.5 fill-current" aria-hidden="true" />
+        )}
+      </Button>
+    </ComposerPrimitive.Cancel>
   );
 };
 
@@ -1830,9 +1852,14 @@ const ReasoningPart: FC<ReasoningMessagePartProps> = ({ text, status }) => (
   </AgentTurnPart>
 );
 
-// Tool call rendering delegates to the shared rail layer. The gateway streams
-// tool_use (name + input) and a bare tool_result (id + is_error); RailTool turns
-// that into a light status row with input-derived chips and web-result cards.
+const toolOutputFromArtifact = (artifact: unknown): string | undefined => {
+  if (!artifact || typeof artifact !== "object") return undefined;
+  const output = (artifact as Record<string, unknown>).cocolaLiveOutput;
+  return typeof output === "string" ? output : undefined;
+};
+
+// Tool call rendering delegates to the shared rail layer. Live tool_output
+// deltas stay in the artifact until tool_result marks the call complete.
 const ToolFallback: FC<ToolCallMessagePartProps> = ({
   toolName,
   argsText,
@@ -1848,6 +1875,7 @@ const ToolFallback: FC<ToolCallMessagePartProps> = ({
       result={result}
       isError={isError}
       outcome={toolOutcomeFromArtifact(artifact, isError)}
+      liveOutput={toolOutputFromArtifact(artifact)}
       running={status.type === "running" || status.type === "requires-action"}
     />
   </AgentTurnPart>

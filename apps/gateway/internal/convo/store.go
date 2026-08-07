@@ -96,6 +96,7 @@ type Part struct {
 	ToolCallID  string  `json:"toolCallId,omitempty"`
 	ToolName    string  `json:"toolName,omitempty"`
 	ArgsText    string  `json:"argsText,omitempty"`
+	ToolOutput  string  `json:"toolOutput,omitempty"`
 	Result      *string `json:"result,omitempty"`
 	IsError     bool    `json:"isError,omitempty"`
 	ToolOutcome string  `json:"outcome,omitempty"`

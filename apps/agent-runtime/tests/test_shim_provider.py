@@ -41,6 +41,14 @@ def test_model_env_formats_traceparent_as_an_http_header():
     assert not env["ANTHROPIC_CUSTOM_HEADERS"].startswith("{")
 
 
+def test_model_env_unbuffers_python_child_processes():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+
+    env = provider._model_env(AgentOptions(user_id="U1", session_id="S1"))
+
+    assert env["PYTHONUNBUFFERED"] == "1"
+
+
 def test_model_env_injects_skill_broker_only_for_current_agent_process():
     provider = InSandboxShimProvider(StaticSandboxExecutor())
     env = provider._model_env(
@@ -111,6 +119,13 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
         {"type": "start", "ts": 1.0},
         {"type": "text", "text": "Let me check the weather."},
         {"type": "tool_use", "id": "tu_1", "name": "Bash", "input": {"cmd": "date"}},
+        {
+            "type": "tool_output",
+            "tool_use_id": "tu_1",
+            "name": "Bash",
+            "input": {"cmd": "date"},
+            "content": "Fri\n",
+        },
         {"type": "tool_result", "tool_use_id": "tu_1", "is_error": False},
         {"type": "done", "session_id": "sess-abc", "ts": 2.0},
     )
@@ -135,10 +150,17 @@ async def test_maps_tool_use_turn_and_reassembles_split_line():
     kinds = [e.kind for e in events]
 
     # start is dropped; we synthesize exactly one terminal done.
-    assert kinds == ["text", "tool_use", "tool_result", "done"], kinds
+    assert kinds == ["text", "tool_use", "tool_output", "tool_result", "done"], kinds
     assert events[0].data["text"] == "Let me check the weather."
     assert events[1].data == {"id": "tu_1", "name": "Bash", "input": {"cmd": "date"}}
-    assert events[2].data["tool_use_id"] == "tu_1"
+    assert events[2].data == {
+        "tool_use_id": "tu_1",
+        "content": "Fri\n",
+        "stream": "stdout",
+        "name": "Bash",
+        "input": {"cmd": "date"},
+    }
+    assert events[3].data["tool_use_id"] == "tu_1"
     assert events[-1].data == {"session_id": "sess-abc"}
 
     # The shim was driven via the shim entrypoint with our Request JSON on stdin.
@@ -607,6 +629,7 @@ async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
         "CODEX_API_KEY": "short-lived-cocola-token",
         "CODEX_MODEL": "route-codex",
         "COCOLA_AGENT_CWD": "/workspace",
+        "PYTHONUNBUFFERED": "1",
     }
 
 

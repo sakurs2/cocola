@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Codex } from "@openai/codex-sdk";
+import { commandOutputDelta } from "./codex_output.mjs";
 import { withCodexReasoningEffort } from "./codex_reasoning.mjs";
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -142,6 +143,7 @@ const run = async (request) => {
   const prompt = skillId ? `$${skillId}\n\n${request.prompt}` : request.prompt;
   const { events } = await thread.runStreamed(prompt);
   const textByItem = new Map();
+  const outputByItem = new Map();
   const startedTools = new Set();
   let threadId = request.resume || "";
   let terminalError = "";
@@ -170,6 +172,13 @@ const run = async (request) => {
             emit(mapped);
           }
         }
+        if (item?.type === "command_execution") {
+          const { current, delta } = commandOutputDelta(item, outputByItem.get(item.id));
+          outputByItem.set(item.id, current);
+          if (delta) {
+            emit({ type: "tool_output", tool_use_id: item.id, content: delta, stream: "stdout" });
+          }
+        }
         continue;
       }
       if (event.type === "item.completed") {
@@ -187,6 +196,18 @@ const run = async (request) => {
           if (!startedTools.has(item.id)) {
             const started = toolEvent(item);
             if (started) emit(started);
+          }
+          if (item.type === "command_execution") {
+            const { current, delta } = commandOutputDelta(item, outputByItem.get(item.id));
+            outputByItem.set(item.id, current);
+            if (delta) {
+              emit({
+                type: "tool_output",
+                tool_use_id: item.id,
+                content: delta,
+                stream: "stdout",
+              });
+            }
           }
           const result = toolResult(item);
           if (result) emit(result);

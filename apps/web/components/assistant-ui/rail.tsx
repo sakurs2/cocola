@@ -32,7 +32,8 @@ import {
 } from "lucide-react";
 import { CheckCircle2, ChevronRight, Download, ExternalLink, Eye } from "lucide-react";
 import Image from "next/image";
-import { useState, type FC, type ReactNode } from "react";
+import { Button, Card, ScrollShadow, Tooltip } from "@heroui/react";
+import { useEffect, useState, type FC, type ReactNode } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { formatAgentDuration } from "@/lib/agent-turn-summary.mjs";
 import { cn } from "@/lib/utils";
@@ -499,28 +500,102 @@ const extractCommand = (argsText: string): string | null => {
   return null;
 };
 
-// Terminal-style command preview. A slim dark "window" with a leading prompt
-// glyph makes a shell command read as a command — monospace, syntax-neutral,
-// wraps instead of truncating, and stays legible on both light and dark pages.
-const CommandPreview: FC<{ command: string }> = ({ command }) => (
-  <div className="overflow-hidden rounded-lg border border-border/60 bg-zinc-950 text-zinc-100 shadow-sm dark:bg-zinc-900">
-    <div className="flex items-center gap-1.5 border-b border-white/10 px-3 py-1.5">
-      <span className="size-2 rounded-full bg-red-400/80" />
-      <span className="size-2 rounded-full bg-yellow-400/80" />
-      <span className="size-2 rounded-full bg-green-400/80" />
-      <span className="ml-1.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-        <TerminalWindow className="size-3" />
-        Terminal
-      </span>
-    </div>
-    <pre className="max-h-48 overflow-auto px-3 py-2 font-mono text-[11.5px] leading-5">
-      <code>
-        <span className="mr-2 select-none text-emerald-400">$</span>
-        <span className="whitespace-pre-wrap break-words text-zinc-100">{command}</span>
-      </code>
-    </pre>
-  </div>
-);
+const CommandExecutionCard: FC<{
+  command: string;
+  output?: string;
+  running?: boolean;
+  isError?: boolean;
+}> = ({ command, output = "", running, isError }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!running) return;
+    const startedAt = Date.now();
+    const update = () =>
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  const status = running ? "Running" : isError ? "Failed" : "Finished";
+  const duration = running ? formatAgentDuration(elapsedSeconds * 1000) : "";
+  const detail = output || command;
+  const latestOutput = output.trimEnd().split("\n").at(-1) ?? "";
+
+  return (
+    <Card
+      className={cn(
+        "w-full overflow-hidden border border-border/70 bg-surface/80 p-0 shadow-none",
+        isError && "border-danger/30",
+      )}
+    >
+      <Card.Header className="grid min-h-10 grid-cols-[0.2rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-1.5">
+        <span
+          className={cn(
+            "h-7 w-0.5 rounded-full",
+            running && "bg-sky-500 animate-pulse motion-reduce:animate-none",
+            !running && !isError && "bg-emerald-500/70",
+            isError && "bg-danger/80",
+          )}
+          aria-hidden="true"
+        />
+        <span className="grid size-6 place-items-center rounded-md bg-surface-secondary text-muted">
+          {running ? (
+            <SpinnerGap className="size-3.5 animate-spin motion-reduce:animate-none" />
+          ) : (
+            <TerminalWindow className="size-3.5" />
+          )}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate font-mono text-[11.5px] font-medium text-foreground">
+            {command}
+          </span>
+          <span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted">
+            <span className="shrink-0">
+              {status}
+              {duration ? ` · ${duration}` : ""}
+            </span>
+            {running && latestOutput ? (
+              <span className="truncate font-mono" title={latestOutput}>
+                · {latestOutput}
+              </span>
+            ) : null}
+          </span>
+        </span>
+        {running ? (
+          <span className="hidden text-[10px] text-muted sm:inline">Live execution</span>
+        ) : null}
+        <Tooltip>
+          <Button
+            isIconOnly
+            aria-label={expanded ? "Hide command details" : "Show command details"}
+            size="sm"
+            variant="ghost"
+            onPress={() => setExpanded((value) => !value)}
+          >
+            <ChevronRight
+              className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
+              aria-hidden="true"
+            />
+          </Button>
+          <Tooltip.Content>{expanded ? "Hide details" : "Show details"}</Tooltip.Content>
+        </Tooltip>
+      </Card.Header>
+      {expanded ? (
+        <Card.Content className="border-t border-border/60 bg-zinc-950 p-0 text-zinc-100">
+          <ScrollShadow className="max-h-56 overflow-auto px-3 py-2" hideScrollBar>
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
+              {output ? null : <span className="mr-2 select-none text-emerald-400">$</span>}
+              {detail}
+            </pre>
+          </ScrollShadow>
+        </Card.Content>
+      ) : null}
+    </Card>
+  );
+};
 
 type SearchResult = { title: string; url: string; host: string };
 
@@ -610,17 +685,25 @@ const SearchResultCard: FC<{ item: SearchResult }> = ({ item }) => (
 export const RailTool: FC<{
   toolName: string;
   argsText?: string;
+  liveOutput?: string;
   result?: unknown;
   isError?: boolean;
   outcome?: string;
   running?: boolean;
-}> = ({ toolName, argsText, result, isError, outcome, running }) => {
+}> = ({ toolName, argsText, liveOutput, result, isError, outcome, running }) => {
   const meta = getToolMeta(toolName);
   const Icon = meta.icon;
   const chips = extractToolChips(argsText ?? "");
   const command = extractCommand(argsText ?? "");
   const commandFailure = Boolean(isError && isCommandTool(toolName));
   const failureOutput = isError ? formatPayload(result) : undefined;
+  const commandOutput = command
+    ? running && liveOutput
+      ? liveOutput
+      : result !== undefined
+        ? formatPayload(result)
+        : liveOutput
+    : undefined;
   const label = running
     ? meta.running
     : isError
@@ -640,7 +723,12 @@ export const RailTool: FC<{
     >
       {command ? (
         <div className="mb-1.5">
-          <CommandPreview command={command} />
+          <CommandExecutionCard
+            command={command}
+            output={commandOutput}
+            running={running}
+            isError={isError}
+          />
         </div>
       ) : null}
       {chips.length ? (
@@ -662,7 +750,7 @@ export const RailTool: FC<{
           ))}
         </div>
       ) : null}
-      {failureOutput ? (
+      {failureOutput && !command ? (
         <details className="aui-details group mt-1.5 text-sm">
           <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />

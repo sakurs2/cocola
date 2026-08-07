@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
 )
@@ -34,6 +35,15 @@ func jsonResp(status int, body string) *http.Response {
 		Header:     make(http.Header),
 	}
 }
+
+type contextBody struct{ ctx context.Context }
+
+func (b contextBody) Read([]byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (contextBody) Close() error { return nil }
 
 // newStub builds a Provider whose HTTP client is backed by handler.
 func newStub(t *testing.T, handler roundTripFunc, opts ...Option) *Provider {
@@ -488,6 +498,15 @@ func drainExec(ch <-chan provider.ExecEvent) []provider.ExecEvent {
 	return evs
 }
 
+func execCommandFromBody(t *testing.T, body string) string {
+	t.Helper()
+	var request runCommandRequest
+	if err := json.Unmarshal([]byte(body), &request); err != nil {
+		t.Fatalf("decode exec command body: %v", err)
+	}
+	return request.Command
+}
+
 // TestExec_BridgesSSEStream wires Exec end to end against a stub that first
 // resolves the execd endpoint (GET .../endpoints/44772) and then serves an
 // NDJSON exec stream. It verifies the two-step flow, the command body, and the
@@ -538,10 +557,15 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	if gotExecdToken != "etok" {
 		t.Errorf("execd token header = %q, want etok (from endpoint headers)", gotExecdToken)
 	}
-	for _, want := range []string{`"command":"'echo' 'hi'"`, `"cwd":"/work"`, `"FOO":"bar"`, `"timeout":45000`} {
+	for _, want := range []string{`"cwd":"/work"`, `"FOO":"bar"`, `"timeout":45000`} {
 		if !strings.Contains(gotCmdBody, want) {
 			t.Errorf("command body missing %s\nbody: %s", want, gotCmdBody)
 		}
+	}
+	command := execCommandFromBody(t, gotCmdBody)
+	if !strings.Contains(command, "setsid sh -c") || !strings.Contains(command, "echo") ||
+		!strings.Contains(command, "hi") || !strings.Contains(command, "/tmp/cocola-execution-") {
+		t.Errorf("command was not wrapped in an identifiable process group: %s", command)
 	}
 
 	if len(evs) != 3 {
@@ -597,6 +621,61 @@ func TestExec_NegativeTimeoutHasNoDeadline(t *testing.T) {
 	}
 }
 
+func TestExec_CancellationTerminatesRecordedProcessGroup(t *testing.T) {
+	started := make(chan struct{})
+	cleaned := make(chan string, 1)
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/44772"):
+			return jsonResp(http.StatusOK, `{"endpoint":"http://execd.test:44772"}`), nil
+		case r.Method == http.MethodPost && r.URL.Path == "/command":
+			body, _ := io.ReadAll(r.Body)
+			command := execCommandFromBody(t, string(body))
+			switch {
+			case command == "true":
+				return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+			case strings.Contains(command, "kill -TERM"):
+				cleaned <- command
+				return sseResp(`{"type":"execution_complete","exit_code":0}` + "\n"), nil
+			default:
+				close(started)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       contextBody{ctx: r.Context()},
+					Header:     make(http.Header),
+				}, nil
+			}
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := p.Exec(ctx, "sbx-1", provider.ExecRequest{Cmd: []string{"sleep", "3600"}, Timeout: -1})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	<-started
+	cancel()
+	events := drainExec(ch)
+	if len(events) == 0 || events[len(events)-1].Kind != provider.ExecEventError {
+		t.Fatalf("cancelled events = %+v, want terminal error", events)
+	}
+	select {
+	case cleanup := <-cleaned:
+		for _, want := range []string{"kill -TERM", "kill -KILL", "/tmp/cocola-execution-"} {
+			if !strings.Contains(cleanup, want) {
+				t.Errorf("cleanup command missing %q: %s", want, cleanup)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not issue process-group cleanup")
+	}
+}
+
 // TestExec_StdinPipedAsBase64 verifies that ExecRequest.Stdin is delivered to
 // the command despite execd's /command API having no stdin field: the provider
 // base64-encodes the bytes and pipes them in-shell into the real command. This
@@ -632,7 +711,9 @@ func TestExec_StdinPipedAsBase64(t *testing.T) {
 	// The command must base64-decode the exact stdin bytes and pipe them into
 	// the shell-quoted argv. JSON-escaped, the pipe and quotes survive as-is.
 	wantPipe := `printf %s 'eyJwcm9tcHQiOiJoaSJ9' | base64 -d | '/opt/cocola/shim/entrypoint.sh'`
-	if !strings.Contains(gotCmdBody, wantPipe) {
+	command := execCommandFromBody(t, gotCmdBody)
+	if !strings.Contains(command, "printf %s") || !strings.Contains(command, "eyJwcm9tcHQiOiJoaSJ9") ||
+		!strings.Contains(command, "base64 -d") || !strings.Contains(command, "/opt/cocola/shim/entrypoint.sh") {
 		t.Errorf("command body missing stdin pipe\n  want substring: %s\n  body: %s", wantPipe, gotCmdBody)
 	}
 }
@@ -668,7 +749,8 @@ func TestExec_NoStdinNoPipe(t *testing.T) {
 	if strings.Contains(gotCmdBody, "base64 -d") {
 		t.Errorf("command body unexpectedly wrapped with stdin pipe: %s", gotCmdBody)
 	}
-	if !strings.Contains(gotCmdBody, `"command":"'echo' 'hi'"`) {
+	command := execCommandFromBody(t, gotCmdBody)
+	if !strings.Contains(command, "echo") || !strings.Contains(command, "hi") {
 		t.Errorf("command body missing plain argv: %s", gotCmdBody)
 	}
 }
@@ -722,7 +804,10 @@ func TestExec_RunsAsExecUser(t *testing.T) {
 	// The decoded stdin is piped INTO runuser, which forwards it to the shim.
 	// Flat pipeline, no nested bash -c (nesting broke shell parsing).
 	wantPipe := `printf %s 'eyJwcm9tcHQiOiJoaSJ9' | base64 -d | runuser -u 'cocola' -- '/opt/cocola/shim/entrypoint.sh'`
-	if !strings.Contains(gotCmdBody, wantPipe) {
+	command := execCommandFromBody(t, gotCmdBody)
+	if !strings.Contains(command, "printf %s") || !strings.Contains(command, "eyJwcm9tcHQiOiJoaSJ9") ||
+		!strings.Contains(command, "base64 -d") || !strings.Contains(command, "runuser -u") ||
+		!strings.Contains(command, "cocola") || !strings.Contains(command, "/opt/cocola/shim/entrypoint.sh") {
 		t.Errorf("command body missing runuser-piped stdin\n  want substring: %s\n  body: %s", wantPipe, gotCmdBody)
 	}
 }
@@ -754,7 +839,9 @@ func TestExec_RunsAsExecUserNoStdin(t *testing.T) {
 	}
 	_ = drainExec(ch)
 
-	if !strings.Contains(gotCmdBody, `"command":"runuser -u 'cocola' -- 'claude' '--version'"`) {
+	command := execCommandFromBody(t, gotCmdBody)
+	if !strings.Contains(command, "runuser -u") || !strings.Contains(command, "cocola") ||
+		!strings.Contains(command, "claude") || !strings.Contains(command, "--version") {
 		t.Errorf("command body missing runuser-wrapped argv: %s", gotCmdBody)
 	}
 	if strings.Contains(gotCmdBody, "base64 -d") {
@@ -794,7 +881,8 @@ func TestExec_ExecUserEnvDisablesDrop(t *testing.T) {
 	if strings.Contains(gotCmdBody, "runuser") {
 		t.Errorf("EXEC_USER=root should disable the drop, got: %s", gotCmdBody)
 	}
-	if !strings.Contains(gotCmdBody, `"command":"'echo' 'hi'"`) {
+	command := execCommandFromBody(t, gotCmdBody)
+	if !strings.Contains(command, "echo") || !strings.Contains(command, "hi") {
 		t.Errorf("command body missing plain argv: %s", gotCmdBody)
 	}
 }

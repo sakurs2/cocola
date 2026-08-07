@@ -64,9 +64,9 @@ func settingDefinitions() []SystemSettingDefinition {
 			Kind:        "int", Env: "COCOLA_AGENT_MAX_TURNS", Default: 200, Editable: true, Min: 1, Max: 1000,
 		},
 		{
-			Key: SettingToolStepTimeoutSecs, Group: "Execution", Label: "Tool Step Timeout",
-			Description: "Maximum seconds for one tool step in the next new Agent Run. A timeout stops that Run but preserves its Workspace.",
-			Kind:        "int", Env: "COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", Default: 600, Editable: true, Min: 30, Max: 86400,
+			Key: SettingToolStepTimeoutSecs, Group: "Execution", Label: "Tool Maximum Runtime",
+			Description: "Hard runtime limit in seconds for one tool execution in the next new Agent Run. Quiet commands remain running until this limit or an explicit Stop.",
+			Kind:        "int", Env: "COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", Default: 3600, Editable: true, Min: 30, Max: 86400,
 		},
 		{
 			Key: SettingSchedulerEnabled, Group: "Scheduler", Label: "Scheduler Enabled",

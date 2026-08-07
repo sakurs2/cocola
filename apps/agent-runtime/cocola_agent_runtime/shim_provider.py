@@ -79,6 +79,19 @@ def _shim_event_to_agent_events(ev: dict) -> list[AgentEvent]:
                 },
             )
         ]
+    if t == "tool_output":
+        return [
+            AgentEvent(
+                kind="tool_output",
+                data={
+                    "tool_use_id": ev.get("tool_use_id", ""),
+                    "content": ev.get("content", ""),
+                    "stream": ev.get("stream", "stdout"),
+                    "name": ev.get("name", ""),
+                    "input": ev.get("input", {}),
+                },
+            )
+        ]
     if t == "tool_result":
         is_error = bool(ev.get("is_error", False))
         outcome = str(ev.get("outcome") or "").strip()
@@ -349,7 +362,11 @@ class InSandboxShimProvider:
         the per-turn injection point (ADR-0009 keeps creds in env, never
         the prompt channel).
         """
-        env: dict[str, str] = {}
+        # Child tools inherit the shim environment. Keep Python output
+        # unbuffered so long-running commands do not retain progress in a
+        # userspace pipe buffer until the process exits. This is a compatibility
+        # aid; the execution stream remains language-agnostic.
+        env: dict[str, str] = {"PYTHONUNBUFFERED": "1"}
         route_id = (options.model_route_id or "").strip()
         if route_id and options.runtime_id == "codex":
             env["CODEX_MODEL"] = route_id

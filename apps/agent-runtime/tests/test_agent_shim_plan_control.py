@@ -789,6 +789,7 @@ async def test_resumed_turn_explicitly_switches_the_sdk_permission_mode(monkeypa
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
         ClaudeSDKClient=FakeClaudeSDKClient,
+        HookMatcher=lambda **kwargs: kwargs,
         SystemMessage=SystemMessage,
         query=forbidden_query,
     )
@@ -864,6 +865,7 @@ async def test_runtime_is_not_accepted_before_the_sdk_init_message(monkeypatch):
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
         ClaudeSDKClient=FakeClaudeSDKClient,
+        HookMatcher=lambda **kwargs: kwargs,
         SystemMessage=SystemMessage,
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
@@ -1153,6 +1155,7 @@ def test_execute_options_merge_control_with_user_mcps(monkeypatch):
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", sdk)
     module = _load_shim("cocola_agent_shim_execute_control")
     control = module._CocolaRunControl(plan_mode=False, user_input_enabled=True)
+    live_output = module._LiveCommandOutput()
 
     module._build_options(
         {
@@ -1161,6 +1164,7 @@ def test_execute_options_merge_control_with_user_mcps(monkeypatch):
             "mcp_servers": {"github": {"type": "http", "url": "https://example.invalid"}},
         },
         run_control=control,
+        live_command_output=live_output,
     )
 
     options = captured["options"]
@@ -1169,3 +1173,48 @@ def test_execute_options_merge_control_with_user_mcps(monkeypatch):
     assert "env" not in options
     assert "extra_args" not in options
     assert "can_use_tool" not in options
+    assert len(options["hooks"]["PreToolUse"]) == 2
+    assert len(options["hooks"]["PostToolUse"]) == 2
+
+
+async def test_live_command_output_preserves_shell_streams_and_emits_deltas(monkeypatch):
+    module = _load_shim("cocola_agent_shim_live_command_output")
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(module, "_emit", events.append)
+    monitor = module._LiveCommandOutput()
+    original = "printf 'first line\\n'; printf '错误行\\n' >&2; sleep 0.1; printf 'last line\\n'"
+
+    decision = await monitor.pre_tool_use(
+        {
+            "tool_name": "Bash",
+            "tool_use_id": "bash-live-1",
+            "tool_input": {"command": original, "description": "exercise quoting"},
+        },
+        "bash-live-1",
+        None,
+    )
+    updated = decision["hookSpecificOutput"]["updatedInput"]
+    assert updated["description"] == "exercise quoting"
+    assert updated["command"] != original
+
+    process = await asyncio.create_subprocess_exec(
+        "/bin/bash",
+        "-c",
+        updated["command"],
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    await monitor.post_tool_use({"tool_use_id": "bash-live-1"}, "bash-live-1", None)
+
+    assert process.returncode == 0
+    assert stdout.decode() == "first line\nlast line\n"
+    assert stderr.decode() == "错误行\n"
+    assert events
+    assert {event["type"] for event in events} == {"tool_output"}
+    assert {event["tool_use_id"] for event in events} == {"bash-live-1"}
+    relayed = "".join(str(event["content"]) for event in events)
+    assert "first line\n" in relayed
+    assert "错误行\n" in relayed
+    assert "last line\n" in relayed
+    assert not monitor._captures

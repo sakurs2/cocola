@@ -79,9 +79,10 @@ Admin API，并且必须与 local-path provisioner 和探针 DaemonSet 的宿主
 Measure 时计算，没有周期存储扫描。
 
 Agent Run 默认不设置总 wall-clock deadline。`execution.agent_max_turns` 默认 `200`，
-`execution.tool_step_timeout_secs` 默认 `600` 秒；两者的 DB 覆盖都在下一个新 Run
+`execution.tool_step_timeout_secs` 是单次工具执行的硬上限，默认 `3600` 秒；两者的 DB 覆盖都在下一个新 Run
 开始时读取，运行中的 Run 不受配置变化影响。客户端只能请求更小的 max turns，不能绕过
-管理员上限。工具步骤超时会以 `STEP_TIMEOUT` 结束当前 Run，但 Session PVC、Workspace
+管理员上限。命令没有输出时只在前端表现为静默，不会提前重置或触发该硬上限；用户可以主动停止。
+工具执行超时会以 `STEP_TIMEOUT` 结束当前 Run，但 Session PVC、Workspace
 和 Runtime 会话状态继续保留，用户可在下一轮继续。
 
 Agent Runtime 产品策略由 Gateway 启动配置唯一持有。`COCOLA_AGENT_RUNTIME_DEFAULT_ID`

@@ -182,7 +182,9 @@ func (m *Memory) Finalize(ctx context.Context, in FinalizeInput) (FinalizeResult
 	run.Status = in.Status
 	run.ErrorCode = in.ErrorCode
 	run.ToolCallCount = in.ToolCallCount
-	run.LLMCallCount = in.LLMCallCount
+	if in.LLMCallCount > run.LLMCallCount {
+		run.LLMCallCount = in.LLMCallCount
+	}
 	run.CompletedAt = &now
 	if !run.StartedAt.IsZero() && !now.Before(run.StartedAt) {
 		run.DurationMS = now.Sub(run.StartedAt).Milliseconds()

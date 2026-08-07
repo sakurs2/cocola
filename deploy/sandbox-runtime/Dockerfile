@@ -103,6 +103,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && py3="$(command -v python3)" \
     && test -n "$py3" \
     && ln -sf "$py3" /usr/local/bin/python \
+    # Agent-generated setup scripts commonly use pip directly. Install pip into
+    # the same Python 3 interpreter and expose all conventional spellings;
+    # Cocola's own dependency installation remains uv-managed below.
+    && uv pip install --system --python "$py3" --no-cache pip \
+    && "$py3" -m pip --version \
+    && pip --version \
+    && pip3 --version \
     && npm config set registry "${NPM_REGISTRY}" \
     && npm install -g pnpm@10 yarn playwright "@larksuite/cli@${LARK_CLI_VERSION}" \
     && lark-cli --version \
@@ -282,7 +289,7 @@ RUN chmod 0755 /opt/cocola/install-code-server-extensions.sh \
 # Install into a dedicated venv (uv-managed, per project convention) so the SDK
 # never depends on system Python / pip skew. The shim's entrypoint execs this
 # venv's python directly, so its version is independent of the base image's.
-RUN uv venv --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
+RUN uv venv --seed --python "${COCOLA_VENV_PYTHON}" /opt/cocola/venv \
     && uv pip install --python /opt/cocola/venv/bin/python --no-cache \
         "${CLAUDE_AGENT_SDK_SPEC}" \
         "${JSONSCHEMA_SPEC}" \
@@ -373,6 +380,7 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     XDG_CACHE_HOME=/cache/xdg \
     UV_CACHE_DIR=/cache/uv \
     PIP_CACHE_DIR=/cache/pip \
+    PYTHONUNBUFFERED=1 \
     npm_config_cache=/cache/npm \
     npm_config_prefix=/home/cocola/.local \
     PNPM_HOME=/home/cocola/.local/share/pnpm \

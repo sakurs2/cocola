@@ -50,11 +50,13 @@ the network egress allowlist.
 from __future__ import annotations
 
 import asyncio
+import codecs
 import contextlib
 import hashlib
 import json
 import os
 import re
+import shlex
 import signal
 import sys
 import time
@@ -93,6 +95,7 @@ def _build_options(
     req: dict[str, Any],
     *,
     run_control: _CocolaRunControl | None = None,
+    live_command_output: _LiveCommandOutput | None = None,
 ):
     """Translate a Request into ClaudeAgentOptions.
 
@@ -185,7 +188,6 @@ def _build_options(
         mcp_servers[_PLAN_CONTROL_SERVER] = control.sdk_server(claude_agent_sdk)
         kwargs["mcp_servers"] = mcp_servers
         kwargs["strict_mcp_config"] = True
-        kwargs["hooks"] = control.sdk_hooks(claude_agent_sdk)
         if plan_mode:
             kwargs["allowed_tools"] = sorted(control.tool_names)
             # In SDK print mode Claude Code registers interactive built-ins
@@ -196,6 +198,18 @@ def _build_options(
     elif isinstance(req.get("mcp_servers"), dict) and req["mcp_servers"]:
         kwargs["mcp_servers"] = req["mcp_servers"]
         kwargs["strict_mcp_config"] = True
+
+    hook_groups: list[dict[str, list[Any]]] = []
+    if control is not None:
+        hook_groups.append(control.sdk_hooks(claude_agent_sdk))
+    if live_command_output is not None:
+        hook_groups.append(live_command_output.sdk_hooks(claude_agent_sdk))
+    if hook_groups:
+        merged_hooks: dict[str, list[Any]] = {}
+        for hooks in hook_groups:
+            for event, matchers in hooks.items():
+                merged_hooks.setdefault(event, []).extend(matchers)
+        kwargs["hooks"] = merged_hooks
 
     return claude_agent_sdk.ClaudeAgentOptions(**kwargs)
 
@@ -277,6 +291,155 @@ _TERMINAL_CONTROL_TOOL_NAMES = frozenset(
 _MCP_STATUS_TIMEOUT_SECONDS = 8.0
 _MCP_STATUS_POLL_SECONDS = (0.5, 1.0, 2.0)
 _MCP_TERMINAL_STATUSES = {"connected", "failed", "needs-auth", "disabled"}
+
+
+class _LiveCommandOutput:
+    """Mirror foreground Bash output into bounded Cocola stream events.
+
+    Claude Code's SDK exposes a built-in Bash result only after the command
+    exits. A per-call FIFO lets the unchanged Bash tool continue writing to its
+    normal stdout/stderr while this shim relays a copy as incremental events.
+    """
+
+    _POLL_SECONDS = 0.05
+    _FINAL_DRAIN_POLLS = 1
+
+    def __init__(self) -> None:
+        self._captures: dict[str, tuple[Path, int, asyncio.Event, asyncio.Task[None]]] = {}
+
+    @staticmethod
+    def _updated_input(tool_input: dict[str, Any], fifo: Path) -> dict[str, Any]:
+        command = str(tool_input["command"])
+        helper = Path(__file__).with_name("live_command.py")
+        quoted_python = shlex.quote(sys.executable)
+        quoted_helper = shlex.quote(str(helper))
+        quoted_command = shlex.quote(command)
+        quoted_fifo = shlex.quote(str(fifo))
+        wrapped = f"{quoted_python} -u {quoted_helper} --fifo {quoted_fifo} -- {quoted_command}"
+        return {**tool_input, "command": wrapped}
+
+    async def _relay(
+        self,
+        tool_use_id: str,
+        tool_input: dict[str, Any],
+        fifo: Path,
+        descriptor: int,
+        stopping: asyncio.Event,
+    ) -> None:
+        idle_after_stop = 0
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        try:
+            while True:
+                emitted = False
+                while True:
+                    try:
+                        chunk = os.read(descriptor, 4096)
+                    except BlockingIOError:
+                        break
+                    if not chunk:
+                        break
+                    emitted = True
+                    content = decoder.decode(chunk)
+                    if content:
+                        _emit(
+                            {
+                                "type": "tool_output",
+                                "tool_use_id": tool_use_id,
+                                "name": "Bash",
+                                "input": tool_input,
+                                "stream": "combined",
+                                "content": content,
+                            }
+                        )
+                if stopping.is_set():
+                    idle_after_stop = 0 if emitted else idle_after_stop + 1
+                    if idle_after_stop >= self._FINAL_DRAIN_POLLS:
+                        if content := decoder.decode(b"", final=True):
+                            _emit(
+                                {
+                                    "type": "tool_output",
+                                    "tool_use_id": tool_use_id,
+                                    "name": "Bash",
+                                    "input": tool_input,
+                                    "stream": "combined",
+                                    "content": content,
+                                }
+                            )
+                        return
+                await asyncio.sleep(self._POLL_SECONDS)
+        finally:
+            os.close(descriptor)
+            with contextlib.suppress(FileNotFoundError):
+                fifo.unlink()
+
+    async def pre_tool_use(
+        self,
+        hook_input: dict[str, Any],
+        tool_use_id: str | None,
+        _context: Any,
+    ) -> dict[str, Any]:
+        if str(hook_input.get("tool_name") or "") != "Bash":
+            return {}
+        tool_input = hook_input.get("tool_input")
+        if (
+            not isinstance(tool_input, dict)
+            or not isinstance(tool_input.get("command"), str)
+            or not tool_input["command"]
+            or bool(tool_input.get("run_in_background"))
+        ):
+            return {}
+        identifier = str(hook_input.get("tool_use_id") or tool_use_id or "")
+        if not identifier or identifier in self._captures:
+            return {}
+        digest = hashlib.sha256(identifier.encode()).hexdigest()[:24]
+        fifo = Path(f"/tmp/cocola-tool-output-{digest}.fifo")
+        try:
+            os.mkfifo(fifo, mode=0o600)
+            descriptor = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            with contextlib.suppress(FileNotFoundError):
+                fifo.unlink()
+            return {}
+        stopping = asyncio.Event()
+        task = asyncio.create_task(
+            self._relay(identifier, dict(tool_input), fifo, descriptor, stopping)
+        )
+        self._captures[identifier] = (fifo, descriptor, stopping, task)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "updatedInput": self._updated_input(tool_input, fifo),
+            }
+        }
+
+    async def post_tool_use(
+        self,
+        hook_input: dict[str, Any],
+        tool_use_id: str | None,
+        _context: Any,
+    ) -> dict[str, Any]:
+        identifier = str(hook_input.get("tool_use_id") or tool_use_id or "")
+        capture = self._captures.pop(identifier, None)
+        if capture is not None:
+            capture[2].set()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(capture[3], timeout=1.0)
+        return {}
+
+    async def close(self) -> None:
+        captures = list(self._captures.values())
+        self._captures.clear()
+        for _fifo, _descriptor, stopping, _task in captures:
+            stopping.set()
+        if captures:
+            await asyncio.gather(*(capture[3] for capture in captures), return_exceptions=True)
+
+    def sdk_hooks(self, sdk: Any) -> dict[str, list[Any]]:
+        return {
+            "PreToolUse": [sdk.HookMatcher(matcher="Bash", hooks=[self.pre_tool_use])],
+            "PostToolUse": [sdk.HookMatcher(matcher="Bash", hooks=[self.post_tool_use])],
+            "PostToolUseFailure": [sdk.HookMatcher(matcher="Bash", hooks=[self.post_tool_use])],
+        }
 
 
 def _tool_result_content(content: Any) -> str:
@@ -1901,7 +2064,12 @@ async def _run_claude(req: dict[str, Any]) -> int:
             }
         )
         return 1
-    options = _build_options(req, run_control=run_control)
+    live_command_output = None if plan_mode else _LiveCommandOutput()
+    options = _build_options(
+        req,
+        run_control=run_control,
+        live_command_output=live_command_output,
+    )
     prompt = _claude_prompt(req)
     _emit({"type": "start", "ts": time.time()})
 
@@ -1935,18 +2103,22 @@ async def _run_claude(req: dict[str, Any]) -> int:
     if report_environment:
         _emit(_environment_status_event(req))
     status_task: asyncio.Task[None] | None = None
-    async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
-        await client.set_permission_mode(permission_mode)
-        if report_environment and not plan_mode and _mcp_configs(req):
-            status_task = asyncio.create_task(_watch_mcp_status(client, req))
-        try:
-            await client.query(prompt)
-            await relay(client, client.receive_response())
-        finally:
-            if status_task is not None:
-                if not status_task.done():
-                    status_task.cancel()
-                await asyncio.gather(status_task, return_exceptions=True)
+    try:
+        async with claude_agent_sdk.ClaudeSDKClient(options=options) as client:
+            await client.set_permission_mode(permission_mode)
+            if report_environment and not plan_mode and _mcp_configs(req):
+                status_task = asyncio.create_task(_watch_mcp_status(client, req))
+            try:
+                await client.query(prompt)
+                await relay(client, client.receive_response())
+            finally:
+                if status_task is not None:
+                    if not status_task.done():
+                        status_task.cancel()
+                    await asyncio.gather(status_task, return_exceptions=True)
+    finally:
+        if live_command_output is not None:
+            await live_command_output.close()
 
     if run_control is not None and (final_event := run_control.final_event()):
         _emit(final_event)

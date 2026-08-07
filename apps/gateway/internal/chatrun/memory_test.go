@@ -52,6 +52,29 @@ func TestMemoryStartIsIdempotentAndSingleFlight(t *testing.T) {
 	}
 }
 
+func TestMemoryFinalizePreservesAuthoritativeLLMCallCount(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory(convo.NewMemory())
+	if _, err := store.Start(ctx, testStartInput("run-1", "request-1", "user-1", "conversation-1")); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	run := store.runs["run-1"]
+	run.LLMCallCount = 7
+	store.runs[run.ID] = run
+	store.mu.Unlock()
+
+	result, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusError, LLMCallCount: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Run.LLMCallCount != 7 {
+		t.Fatalf("LLM call count = %d, want preserved authoritative count 7", result.Run.LLMCallCount)
+	}
+}
+
 func TestMemoryStartDoesNotCrossConversationOwner(t *testing.T) {
 	ctx := context.Background()
 	conversations := convo.NewMemory()

@@ -3,6 +3,7 @@ package convo
 import (
 	"encoding/json"
 	"strconv"
+	"unicode/utf8"
 )
 
 // Reducer aggregates the agent's SSE event stream into an assistant message's
@@ -12,7 +13,7 @@ import (
 // straight through convertMessage.
 //
 // Event vocabulary (kind): environment_prepare | environment_status |
-// memory_recall | text | thinking | tool_use | tool_result | file | plan_ready |
+// memory_recall | text | thinking | tool_use | tool_output | tool_result | file | plan_ready |
 // question_ready | run_summary | structured_result_ready | error;
 // result / system / sandbox / done carry no message-body content and are dropped
 // (identical to the frontend).
@@ -39,17 +40,11 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 	case "thinking":
 		r.appendText(PartReasoning, data["thinking"])
 	case "tool_use":
-		id := data["id"]
-		name := data["name"]
-		if name == "" {
-			name = "tool"
-		}
-		r.parts = append(r.parts, Part{
-			Type:       PartToolCall,
-			ToolCallID: id,
-			ToolName:   name,
-			ArgsText:   data["input"],
-		})
+		r.upsertToolUse(data["id"], data["name"], data["input"])
+	case "tool_output":
+		r.appendToolOutput(
+			data["tool_use_id"], data["content"], data["name"], data["input"],
+		)
 	case "tool_result":
 		r.fillToolResult(
 			data["tool_use_id"],
@@ -78,6 +73,50 @@ func (r *Reducer) Apply(kind string, data map[string]string) {
 	default:
 		// result / system / sandbox / done / unknown: no body content.
 	}
+}
+
+const maxToolOutputBytes = 64 << 10
+
+// appendToolOutput keeps a bounded tail of live command output on its tool-call
+// part. The final tool_result remains separate so a command can stream without
+// prematurely changing the tool-call to a completed state.
+func (r *Reducer) upsertToolUse(toolUseID, toolName, argsText string) {
+	if toolName == "" {
+		toolName = "tool"
+	}
+	for i := len(r.parts) - 1; i >= 0; i-- {
+		if r.parts[i].Type == PartToolCall && r.parts[i].ToolCallID == toolUseID {
+			r.parts[i].ToolName = toolName
+			r.parts[i].ArgsText = argsText
+			return
+		}
+	}
+	r.parts = append(r.parts, Part{
+		Type: PartToolCall, ToolCallID: toolUseID, ToolName: toolName, ArgsText: argsText,
+	})
+}
+
+func (r *Reducer) appendToolOutput(toolUseID, chunk, toolName, argsText string) {
+	if toolUseID == "" || chunk == "" {
+		return
+	}
+	for i := len(r.parts) - 1; i >= 0; i-- {
+		if r.parts[i].Type != PartToolCall || r.parts[i].ToolCallID != toolUseID {
+			continue
+		}
+		output := r.parts[i].ToolOutput + chunk
+		if len(output) > maxToolOutputBytes {
+			start := len(output) - maxToolOutputBytes
+			for start < len(output) && !utf8.RuneStart(output[start]) {
+				start++
+			}
+			output = output[start:]
+		}
+		r.parts[i].ToolOutput = output
+		return
+	}
+	r.upsertToolUse(toolUseID, toolName, argsText)
+	r.appendToolOutput(toolUseID, chunk, toolName, argsText)
 }
 
 func (r *Reducer) upsertPlan(data map[string]string) {

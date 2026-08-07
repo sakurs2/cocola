@@ -84,4 +84,16 @@ REMOVED_IMAGE_IDS=""
 cleanup_stale_sandbox_images "test-node"
 assert_equal "" "$REMOVED_IMAGE_IDS" "no stale images"
 
+TEST_FORWARD_PID_FILE="$(mktemp)"
+trap 'rm -f "$TEST_FORWARD_PID_FILE"' EXIT
+FORWARD_PID_FILE="$TEST_FORWARD_PID_FILE"
+printf '987654321\n' >"$FORWARD_PID_FILE"
+stop_forward 987654320
+assert_equal "987654321" "$(cat "$FORWARD_PID_FILE")" "old supervisor preserves new forward"
+stop_forward 987654321
+if [[ -e "$FORWARD_PID_FILE" ]]; then
+  printf 'FAIL: owned forward pid file was not removed\n' >&2
+  exit 1
+fi
+
 printf 'run-stack-dev tests passed\n'
