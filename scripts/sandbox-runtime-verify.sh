@@ -130,6 +130,19 @@ if docker exec -i -u cocola "$CTR" sh -c \
 else
   bad "guest package-manager prefix or GOBIN is not initialized"
 fi
+if docker exec -i -u cocola "$CTR" sh -c \
+  'test "$(command -v python)" = /home/cocola/.venv/bin/python &&
+   test "$(command -v python3)" = /home/cocola/.venv/bin/python3 &&
+   test "$(command -v pip)" = /home/cocola/.venv/bin/pip &&
+   test "$(command -v pip3)" = /home/cocola/.venv/bin/pip3 &&
+   python -c "import site, sys; assert sys.prefix == '\''/home/cocola/.venv'\''; assert site.getsitepackages()" &&
+   python -m pip --version >/dev/null &&
+   site_packages="$(python -c "import site; print(site.getsitepackages()[0])")" &&
+   test -w "$site_packages"'; then
+  ok "guest python, python3, pip, and pip3 use a writable isolated venv"
+else
+  bad "guest Python commands are not isolated in the writable user venv"
+fi
 for tool in pnpm yarn playwright chromium fd jq yq tree file make imagemagick pdftotext rsvg_convert \
   gopls clangd shellcheck shfmt java; do
   if echo "$SELF" | grep -Eq "\"$tool\":\"(missing|error:)"; then

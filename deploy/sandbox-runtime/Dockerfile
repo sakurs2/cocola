@@ -103,13 +103,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && py3="$(command -v python3)" \
     && test -n "$py3" \
     && ln -sf "$py3" /usr/local/bin/python \
-    # Agent-generated setup scripts commonly use pip directly. Install pip into
-    # the same Python 3 interpreter and expose all conventional spellings;
-    # Cocola's own dependency installation remains uv-managed below.
-    && uv pip install --system --python "$py3" --no-cache pip \
-    && "$py3" -m pip --version \
-    && pip --version \
-    && pip3 --version \
     && npm config set registry "${NPM_REGISTRY}" \
     && npm install -g pnpm@10 yarn playwright "@larksuite/cli@${LARK_CLI_VERSION}" \
     && lark-cli --version \
@@ -352,10 +345,19 @@ RUN useradd -m -u 10001 -s /bin/bash cocola \
         /home/cocola/.local/share/pnpm \
         /home/cocola/.local/share/man \
         /data/plugins \
+    # User workloads get their own writable Python environment. Keep it
+    # separate from /opt/cocola/venv so `pip install` can never alter the
+    # platform-owned Agent SDK, and avoid bypassing PEP 668 on system Python.
+    && uv venv --seed --python "${COCOLA_VENV_PYTHON}" /home/cocola/.venv \
     # Keep /opt/cocola root-owned. Supervisor runs as root and may restart the
     # fixed launchers stored there; making those files guest-writable would turn
     # an optional-service restart into a privilege-escalation path.
-    && chown -R cocola:cocola /home/cocola /session /workspace /cache
+    && chown -R cocola:cocola /home/cocola /session /workspace /cache \
+    && runuser -u cocola -- /home/cocola/.venv/bin/python -c \
+        'import sys; assert sys.prefix == "/home/cocola/.venv"' \
+    && runuser -u cocola -- /home/cocola/.venv/bin/python -m pip --version \
+    && runuser -u cocola -- /home/cocola/.venv/bin/pip --version \
+    && runuser -u cocola -- /home/cocola/.venv/bin/pip3 --version
 
 # NOTE: the container's main process runs as ROOT so firewall-entrypoint.sh can
 # install the egress firewall (needs NET_ADMIN). This is NOT a privilege
@@ -397,7 +399,7 @@ ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     CHROME_BIN=/usr/local/bin/chromium \
     PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium \
     PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/local/bin/chromium \
-    PATH=/opt/cocola/toolchains/bin:/home/cocola/.local/bin:/home/cocola/.local/share/pnpm:$PATH
+    PATH=/home/cocola/.venv/bin:/opt/cocola/toolchains/bin:/home/cocola/.local/bin:/home/cocola/.local/share/pnpm:$PATH
 
 # tini reaps the `claude` CLI subprocesses the SDK spawns. Default command keeps
 # the container alive (session-lived per ADR-0009); the shim is invoked on

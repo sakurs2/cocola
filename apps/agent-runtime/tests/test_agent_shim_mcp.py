@@ -108,6 +108,7 @@ async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch)
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
         ClaudeSDKClient=FakeClaudeSDKClient,
+        HookMatcher=lambda **kwargs: kwargs,
         SystemMessage=SystemMessage,
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
@@ -182,6 +183,7 @@ async def test_agent_shim_skips_mcp_status_on_resumed_turn(monkeypatch):
     fake_sdk = types.SimpleNamespace(
         ClaudeAgentOptions=FakeClaudeAgentOptions,
         ClaudeSDKClient=FakeClaudeSDKClient,
+        HookMatcher=lambda **kwargs: kwargs,
         SystemMessage=SystemMessage,
     )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
