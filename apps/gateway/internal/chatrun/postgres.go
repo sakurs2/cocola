@@ -162,11 +162,19 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 				if projectBaseRef == "" {
 					projectBaseRef = projectDefaultBranch
 				}
-				branchName := taskBranch(effective.ID)
+				branchName := strings.TrimSpace(in.ProjectTaskBranch)
+				if branchName == "" {
+					branchName = taskBranch(effective.ID)
+				}
 				_, insertErr = tx.Exec(ctx, `INSERT INTO project_workspaces
 					(conversation_id, project_id, base_ref, base_sha, branch_name, created_at, updated_at)
 					VALUES ($1,$2::uuid,$3,$4,$5,$6,$6)`, effective.ID, effective.ProjectID,
 					projectBaseRef, strings.TrimSpace(in.ProjectBaseSHA), branchName, effective.CreatedAt)
+				var branchConflict *pgconn.PgError
+				if errors.As(insertErr, &branchConflict) && branchConflict.Code == "23505" &&
+					branchConflict.ConstraintName == "project_workspaces_project_branch_key" {
+					return StartResult{}, ErrProjectBranchExists
+				}
 				if insertErr != nil {
 					return StartResult{}, insertErr
 				}

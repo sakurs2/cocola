@@ -52,7 +52,7 @@ export function ConversationActionsMenu({
             <PencilSimple className="size-4" />
             Rename
           </MenuItem>
-          {conversation.chat_type !== "scheduled_task" ? (
+          {conversation.chat_type !== "scheduled_task" && !conversation.project_id ? (
             <DropdownMenu.Sub>
               <DropdownMenu.SubTrigger className="flex cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent">
                 <FolderOpen className="size-4" />

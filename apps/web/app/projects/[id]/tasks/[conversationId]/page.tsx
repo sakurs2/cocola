@@ -24,12 +24,11 @@ type ProjectWorkspace = {
 export default function ProjectTaskPage() {
   const params = useParams<{ id: string; conversationId: string }>();
   const router = useRouter();
-  const { activeSessionId, conversations, loadConversation, projects } = useCocola();
+  const { activeSessionId, loadConversation, projects } = useCocola();
   const project = projects.find((item) => item.id === params.id);
   const [projectName, setProjectName] = useState("");
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [merged, setMerged] = useState(false);
-  const conversation = conversations.find((item) => item.id === params.conversationId);
 
   useEffect(() => {
     if (activeSessionId === params.conversationId) return;
@@ -107,8 +106,9 @@ export default function ProjectTaskPage() {
 
   return (
     <div className="user-theme-indigo flex h-full min-h-0 flex-1 flex-col">
-      <div className="border-separator bg-background flex h-12 shrink-0 items-center gap-2 border-b px-3 text-xs">
+      <div className="border-separator bg-background flex h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
         <Button
+          className="h-8 px-2 font-semibold"
           size="sm"
           variant="ghost"
           onPress={() => router.push(`/projects/${encodeURIComponent(params.id)}`)}
@@ -116,17 +116,20 @@ export default function ProjectTaskPage() {
           <ChevronLeft className="size-3.5" />
           {project?.name || projectName || "Project"}
         </Button>
-        <span className="text-muted">/</span>
-        <span className="max-w-64 truncate text-foreground">{conversation?.title || "Task"}</span>
         {merged ? (
           <Chip className="ml-auto" color="success" size="sm" variant="soft">
             <GitMerge className="size-3.5" />
             Merged · read-only
           </Chip>
         ) : null}
-        <Chip className={merged ? "" : "ml-auto"} color="accent" size="sm" variant="soft">
+        <Chip
+          className={`${merged ? "" : "ml-auto"} max-w-[min(24rem,48vw)]`}
+          color="accent"
+          size="sm"
+          variant="soft"
+        >
           <GitBranch className="size-3.5" />
-          {branchName}
+          <span className="truncate">{branchName}</span>
         </Chip>
       </div>
       <div className="min-h-0 flex-1">

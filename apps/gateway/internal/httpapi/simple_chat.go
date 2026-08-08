@@ -275,6 +275,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	req.FolderID = strings.TrimSpace(req.FolderID)
 	req.ProjectID = strings.TrimSpace(req.ProjectID)
 	req.ProjectBaseRef = strings.TrimSpace(req.ProjectBaseRef)
+	req.ProjectTaskBranch = strings.TrimSpace(req.ProjectTaskBranch)
 	req.SkillID = strings.TrimSpace(req.SkillID)
 	req.AgentID = strings.TrimSpace(req.AgentID)
 	if req.SkillID != "" && !validSkillID(req.SkillID) {
@@ -425,12 +426,21 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "project_base_ref requires project_id")
 		return
 	}
+	if req.ProjectTaskBranch != "" && req.ProjectID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "project_task_branch requires project_id")
+		return
+	}
 	if len(req.ProjectBaseRef) > 1024 || strings.ContainsAny(req.ProjectBaseRef, "\x00\r\n") {
 		writeErr(w, http.StatusBadRequest, "INVALID_PROJECT_BASE_REF", "project_base_ref is invalid")
 		return
 	}
+	if len(req.ProjectTaskBranch) > 128 || strings.ContainsAny(req.ProjectTaskBranch, "\x00\r\n") {
+		writeErr(w, http.StatusBadRequest, "INVALID_PROJECT_TASK_BRANCH", "project_task_branch is invalid")
+		return
+	}
 	var projectBaseRef string
 	var projectBaseSHA string
+	var projectTaskBranch string
 	if req.ProjectID != "" {
 		if a.projects == nil {
 			writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
@@ -439,7 +449,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		taskBase, projectErr := a.projects.PrepareTaskBase(r.Context(), project.Identity{
 			TenantID: identity.TenantID, UserID: identity.UserID, Email: identity.Email,
 			Name: identity.Name, Username: identity.Username,
-		}, req.ProjectID, req.SessionID, req.ProjectBaseRef)
+		}, req.ProjectID, req.SessionID, req.ProjectBaseRef, req.ProjectTaskBranch)
 		if errors.Is(projectErr, project.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, "PROJECT_NOT_FOUND", "project not found")
 			return
@@ -468,6 +478,18 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "PROJECT_BASE_MISMATCH", "a project task base branch cannot be changed")
 			return
 		}
+		if errors.Is(projectErr, project.ErrTaskBranchInvalid) {
+			writeErr(w, http.StatusUnprocessableEntity, "PROJECT_TASK_BRANCH_INVALID", "use cocola/task- followed by 1-48 lowercase letters, numbers, dots, underscores, or hyphens")
+			return
+		}
+		if errors.Is(projectErr, project.ErrTaskBranchMismatch) {
+			writeErr(w, http.StatusConflict, "PROJECT_TASK_BRANCH_MISMATCH", "a project task branch cannot be changed after work starts")
+			return
+		}
+		if errors.Is(projectErr, project.ErrTaskBranchExists) {
+			writeErr(w, http.StatusConflict, "PROJECT_TASK_BRANCH_EXISTS", "this task branch already exists; choose another name")
+			return
+		}
 		if errors.Is(projectErr, project.ErrChangeRequestMerged) {
 			writeErr(w, http.StatusConflict, "PROJECT_TASK_MERGED", "this task is read-only because it has been merged")
 			return
@@ -481,6 +503,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectBaseRef, projectBaseSHA = taskBase.Ref, taskBase.SHA
+		projectTaskBranch = taskBase.BranchName
 		if req.RuntimeID == "" {
 			req.RuntimeID = taskBase.Project.RuntimeID
 		}
@@ -547,6 +570,7 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 		},
 		ProjectBaseRef:              projectBaseRef,
 		ProjectBaseSHA:              projectBaseSHA,
+		ProjectTaskBranch:           projectTaskBranch,
 		RevisionPlanID:              req.RevisionOfPlanID,
 		ExpectedRevisionPlanVersion: req.ExpectedPlanVersion,
 	})
@@ -618,6 +642,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, chatrun.ErrProjectMismatch) {
 		writeErr(w, http.StatusConflict, "PROJECT_MISMATCH", "conversation project cannot be changed")
+		return
+	}
+	if errors.Is(err, chatrun.ErrProjectBranchExists) {
+		writeErr(w, http.StatusConflict, "PROJECT_TASK_BRANCH_EXISTS", "this task branch is already used by another task")
 		return
 	}
 	if errors.Is(err, chatrun.ErrQuestionPending) {

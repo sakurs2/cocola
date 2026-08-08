@@ -368,6 +368,8 @@ const ThreadWelcome: FC = () => {
 const ConversationComposerInner: FC<{
   placeholder?: string;
   branchControl?: ReactNode;
+  disabled?: boolean;
+  disabledReason?: string;
   promptStarter?: PromptStarter | null;
   promptSlotBindings?: PromptStarterSlotBindings;
   onPromptSlotBindingChange?: (binding: PromptStarterSlotBinding) => void;
@@ -376,6 +378,8 @@ const ConversationComposerInner: FC<{
 }> = ({
   placeholder,
   branchControl,
+  disabled = false,
+  disabledReason,
   promptStarter = null,
   promptSlotBindings = EMPTY_PROMPT_SLOT_BINDINGS,
   onPromptSlotBindingChange,
@@ -395,6 +399,7 @@ const ConversationComposerInner: FC<{
   const contextualBranchControl = useProjectComposerBranchControl();
   const projectReadOnly = useProjectComposerReadOnly();
   const noModel = !modelsLoaded || !selectedModel;
+  const inputDisabled = noModel || disabled;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
   const promptInputRef = useRef<ComposerWikiInputHandle>(null);
   const composerAttachments = useComposer((state) => state.attachments);
@@ -461,20 +466,22 @@ const ConversationComposerInner: FC<{
                 <div className="relative min-w-0 text-left">
                   <ComposerWikiInput
                     ref={promptInputRef}
-                    autoFocus={!noModel}
-                    disabled={noModel}
+                    autoFocus={!inputDisabled}
+                    disabled={inputDisabled}
                     placeholder={
-                      runtimeConfigError
-                        ? runtimeConfigError
-                        : noModel
-                          ? selectedRuntime
-                            ? "No compatible model configured"
-                            : "No Agent Runtime available"
-                          : pendingQuestion
-                            ? "Reply to Cocola…"
-                            : interactionMode === "plan"
-                              ? PLAN_MODE_COPY.initialPlaceholder
-                              : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
+                      disabled && disabledReason
+                        ? disabledReason
+                        : runtimeConfigError
+                          ? runtimeConfigError
+                          : noModel
+                            ? selectedRuntime
+                              ? "No compatible model configured"
+                              : "No Agent Runtime available"
+                            : pendingQuestion
+                              ? "Reply to Cocola…"
+                              : interactionMode === "plan"
+                                ? PLAN_MODE_COPY.initialPlaceholder
+                                : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
                     }
                     promptStarter={promptStarter}
                     promptSlotBindings={promptSlotBindings}
@@ -503,6 +510,7 @@ const ConversationComposerInner: FC<{
                 </PromptInput.ToolbarStart>
                 <PromptInput.ToolbarEnd>
                   <ComposerAction
+                    disabled={disabled}
                     missingPromptFileSlot={missingPromptFileSlot}
                     onResolveMissingPromptFileSlot={() =>
                       missingPromptFileSlot
@@ -1544,15 +1552,16 @@ const ComposerAttachmentChip: FC = () => {
 };
 
 const ComposerAction: FC<{
+  disabled?: boolean;
   missingPromptFileSlot?: PromptStarterFileSlot;
   onResolveMissingPromptFileSlot?: () => void;
-}> = ({ missingPromptFileSlot, onResolveMissingPromptFileSlot }) => {
+}> = ({ disabled = false, missingPromptFileSlot, onResolveMissingPromptFileSlot }) => {
   const { selectedModel, modelsLoaded } = useCocola();
   const hasPreparingAttachment = useComposer((state) =>
     state.attachments.some((attachment) => attachment.status.type !== "complete"),
   );
   const noModel = !modelsLoaded || !selectedModel;
-  const sendDisabled = noModel || hasPreparingAttachment;
+  const sendDisabled = disabled || noModel || hasPreparingAttachment;
 
   return (
     <>

@@ -141,7 +141,7 @@ export function AppSidebar({
   const visiblePrimaryNav = PRIMARY_NAV.filter(
     (item) => !item.href?.startsWith("/admin") || isAdmin,
   );
-  const regularConversations = conversations.filter((conversation) => !conversation.project_id);
+  const recentConversations = conversations;
 
   const setSectionRef = (section: SidebarSection) => (node: HTMLDivElement | null) => {
     sectionRefs.current[section] = node;
@@ -162,13 +162,19 @@ export function AppSidebar({
     });
   };
 
-  const openConversation = (id: string) => {
+  const openConversation = (conversation: ConversationSummary) => {
     runWithNavigationGuard(async () => {
-      if (pathname !== "/") {
-        router.push(`/?conversation=${encodeURIComponent(id)}`);
+      if (conversation.project_id) {
+        router.push(
+          `/projects/${encodeURIComponent(conversation.project_id)}/tasks/${encodeURIComponent(conversation.id)}`,
+        );
         return;
       }
-      await loadConversation(id);
+      if (pathname !== "/") {
+        router.push(`/?conversation=${encodeURIComponent(conversation.id)}`);
+        return;
+      }
+      await loadConversation(conversation.id);
     });
   };
 
@@ -364,22 +370,26 @@ export function AppSidebar({
 
           <SidebarSectionPanel refSetter={setSectionRef("chats")}>
             <SectionLabel>Chats</SectionLabel>
-            {regularConversations.length === 0 ? (
+            {recentConversations.length === 0 ? (
               <div className="px-2.5 py-1 text-xs text-foreground/50">No conversations yet</div>
             ) : (
               <div className="flex flex-col gap-0.5">
-                {regularConversations.map((c) => (
+                {recentConversations.map((c) => (
                   <ChatHistoryItem
                     key={c.id}
                     conversation={c}
                     folders={folders}
-                    active={c.id === activeSessionId}
+                    active={
+                      c.project_id
+                        ? pathname === `/projects/${c.project_id}/tasks/${c.id}`
+                        : pathname === "/" && c.id === activeSessionId
+                    }
                     running={runningSessionIds.has(c.id)}
                     unread={unreadCompletedSessionIds.has(c.id)}
                     editing={editingId === c.id}
                     draftTitle={draftTitle}
                     onOpen={() => {
-                      openConversation(c.id);
+                      openConversation(c);
                     }}
                     onRename={() => startRename(c.id, c.title || "Untitled")}
                     onDelete={() => openDeleteDialog(c.id, c.title || "Untitled")}
@@ -549,6 +559,7 @@ function ChatHistoryItem({
           <ChatTypeIcon
             type={conversation.chat_type || "chat"}
             isAgent={Boolean(conversation.agent_id || conversation.agent)}
+            isProject={Boolean(conversation.project_id)}
           />
           <span className="min-w-0 flex-1 truncate">{title}</span>
         </button>
@@ -581,7 +592,18 @@ function ChatHistoryItem({
   );
 }
 
-function ChatTypeIcon({ type, isAgent }: { type: string; isAgent?: boolean }) {
+function ChatTypeIcon({
+  type,
+  isAgent,
+  isProject,
+}: {
+  type: string;
+  isAgent?: boolean;
+  isProject?: boolean;
+}) {
+  if (isProject) {
+    return <FolderGit2 className="size-4 shrink-0 text-indigo-600 dark:text-indigo-300" />;
+  }
   if (isAgent) {
     return <Bot className="size-4 shrink-0 text-cyan-600 dark:text-cyan-300" />;
   }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/url"
@@ -15,6 +16,11 @@ import (
 )
 
 const projectOperationStaleAfter = 15 * time.Minute
+
+const (
+	taskBranchPrefix    = "cocola/task-"
+	taskBranchSuffixMax = 48
+)
 
 type Config struct {
 	SecretKey               string
@@ -1195,6 +1201,7 @@ func (s *Service) PrepareTaskBase(
 	projectID string,
 	conversationID string,
 	requestedRef string,
+	requestedBranch string,
 ) (TaskBase, error) {
 	if _, err := uuid.Parse(projectID); err != nil {
 		return TaskBase{}, ErrInvalidArgument
@@ -1213,6 +1220,15 @@ func (s *Service) PrepareTaskBase(
 		}
 		if requestedRef != "" && requestedRef != baseRef {
 			return TaskBase{}, ErrBaseRefMismatch
+		}
+		if strings.TrimSpace(requestedBranch) != "" {
+			branchName, branchErr := normalizeTaskBranch(requestedBranch, conversationID)
+			if branchErr != nil {
+				return TaskBase{}, branchErr
+			}
+			if branchName != workspace.BranchName {
+				return TaskBase{}, ErrTaskBranchMismatch
+			}
 		}
 		if value.Status != ProjectReady {
 			return TaskBase{}, ErrProjectNotReady
@@ -1233,7 +1249,9 @@ func (s *Service) PrepareTaskBase(
 		} else if changeErr != nil && !errors.Is(changeErr, ErrNotFound) {
 			return TaskBase{}, changeErr
 		}
-		return TaskBase{Project: value, Ref: baseRef, SHA: workspace.BaseSHA}, nil
+		return TaskBase{
+			Project: value, Ref: baseRef, SHA: workspace.BaseSHA, BranchName: workspace.BranchName,
+		}, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return TaskBase{}, err
 	}
@@ -1243,6 +1261,10 @@ func (s *Service) PrepareTaskBase(
 	}
 	if value.Status != ProjectReady {
 		return TaskBase{}, ErrProjectNotReady
+	}
+	taskBranch, err := normalizeTaskBranch(requestedBranch, conversationID)
+	if err != nil {
+		return TaskBase{}, err
 	}
 	baseRef := requestedRef
 	if baseRef == "" {
@@ -1263,7 +1285,14 @@ func (s *Service) PrepareTaskBase(
 		if branchErr != nil {
 			return TaskBase{}, branchErr
 		}
-		return TaskBase{Project: value, Ref: "main", SHA: sha}, nil
+		if _, branchErr = s.forgejo.branchSHA(
+			ctx, token, value.RepositoryOwner, value.RepositoryName, taskBranch,
+		); branchErr == nil {
+			return TaskBase{}, ErrTaskBranchExists
+		} else if !forgejoStatus(branchErr, http.StatusNotFound) {
+			return TaskBase{}, branchErr
+		}
+		return TaskBase{Project: value, Ref: "main", SHA: sha, BranchName: taskBranch}, nil
 	}
 	value, _, connection, github, err := s.currentProjectInstallation(ctx, id, value)
 	if err != nil {
@@ -1282,7 +1311,63 @@ func (s *Service) PrepareTaskBase(
 	if err != nil {
 		return TaskBase{}, err
 	}
-	return TaskBase{Project: value, Ref: baseRef, SHA: sha}, nil
+	if _, err = github.branchSHA(
+		ctx, token, value.RepositoryOwner, value.RepositoryName, taskBranch,
+	); err == nil {
+		return TaskBase{}, ErrTaskBranchExists
+	} else if !githubStatus(err, http.StatusNotFound) {
+		return TaskBase{}, err
+	}
+	return TaskBase{Project: value, Ref: baseRef, SHA: sha, BranchName: taskBranch}, nil
+}
+
+func normalizeTaskBranch(requestedBranch, conversationID string) (string, error) {
+	branch := strings.TrimSpace(requestedBranch)
+	if branch == "" {
+		branch = defaultTaskBranch(conversationID)
+	}
+	if !strings.HasPrefix(branch, taskBranchPrefix) {
+		return "", ErrTaskBranchInvalid
+	}
+	suffix := strings.TrimPrefix(branch, taskBranchPrefix)
+	if len(suffix) == 0 || len(suffix) > taskBranchSuffixMax ||
+		!isTaskBranchAlphaNumeric(suffix[0]) || !isTaskBranchAlphaNumeric(suffix[len(suffix)-1]) {
+		return "", ErrTaskBranchInvalid
+	}
+	for index := range len(suffix) {
+		char := suffix[index]
+		if isTaskBranchAlphaNumeric(char) || char == '.' || char == '_' || char == '-' {
+			continue
+		}
+		return "", ErrTaskBranchInvalid
+	}
+	return branch, nil
+}
+
+func isTaskBranchAlphaNumeric(char byte) bool {
+	return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+}
+
+func defaultTaskBranch(conversationID string) string {
+	raw := strings.TrimSpace(conversationID)
+	suffix := strings.ToLower(strings.ReplaceAll(raw, "-", ""))
+	if len(suffix) > 12 {
+		suffix = suffix[:12]
+	}
+	if suffix != "" {
+		valid := true
+		for index := range len(suffix) {
+			if !isTaskBranchAlphaNumeric(suffix[index]) && suffix[index] != '.' && suffix[index] != '_' {
+				valid = false
+				break
+			}
+		}
+		if valid && isTaskBranchAlphaNumeric(suffix[0]) && isTaskBranchAlphaNumeric(suffix[len(suffix)-1]) {
+			return taskBranchPrefix + suffix
+		}
+	}
+	digest := sha256.Sum256([]byte(raw))
+	return taskBranchPrefix + hex.EncodeToString(digest[:6])
 }
 
 func (s *Service) ValidateReady(ctx context.Context, id Identity, projectID string) (Project, error) {

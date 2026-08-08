@@ -1,6 +1,7 @@
 "use client";
 
 import * as Popover from "@radix-ui/react-popover";
+import { Input, Label, TextField } from "@heroui/react";
 import { Command } from "cmdk";
 import { Check, ChevronDown, GitBranch, Loader2, Search } from "lucide-react";
 import {
@@ -60,6 +61,66 @@ type BranchPage = {
   next_cursor?: string;
   error?: { message?: string };
 };
+
+export const PROJECT_TASK_BRANCH_PREFIX = "cocola/task-";
+
+export function projectTaskBranchError(branch: string) {
+  if (!branch.startsWith(PROJECT_TASK_BRANCH_PREFIX)) return "Keep the Cocola task prefix.";
+  const suffix = branch.slice(PROJECT_TASK_BRANCH_PREFIX.length);
+  if (!suffix) return "Enter a branch name.";
+  if (suffix.length > 48) return "Use 48 characters or fewer.";
+  if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(suffix)) {
+    return "Use lowercase letters, numbers, dots, underscores, or hyphens; start and end with a letter or number.";
+  }
+  return "";
+}
+
+function normalizeTaskBranchInput(nextValue: string) {
+  const rawSuffix = nextValue.startsWith(PROJECT_TASK_BRANCH_PREFIX)
+    ? nextValue.slice(PROJECT_TASK_BRANCH_PREFIX.length)
+    : PROJECT_TASK_BRANCH_PREFIX.startsWith(nextValue)
+      ? ""
+      : nextValue;
+  const suffix = rawSuffix
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "")
+    .slice(0, 48);
+  return `${PROJECT_TASK_BRANCH_PREFIX}${suffix}`;
+}
+
+export function ProjectTaskBranchField({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (branch: string) => void;
+  disabled?: boolean;
+}) {
+  const error = projectTaskBranchError(value);
+  return (
+    <div className="grid gap-1.5">
+      <TextField
+        className="max-w-xl"
+        isDisabled={disabled}
+        isInvalid={Boolean(error)}
+        value={value}
+        variant="secondary"
+        onChange={(nextValue) => onChange(normalizeTaskBranchInput(nextValue))}
+      >
+        <Label>Task branch</Label>
+        <Input className="font-mono text-[13px]" spellCheck={false} />
+      </TextField>
+      <p
+        className={error ? "text-xs text-danger" : "text-xs text-muted"}
+        role={error ? "alert" : undefined}
+      >
+        {error || "Editable until the first message. Cocola keeps the protected task prefix."}
+      </p>
+    </div>
+  );
+}
 
 export function ProjectBaseBranchPicker({
   projectID,

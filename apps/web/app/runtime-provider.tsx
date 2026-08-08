@@ -311,6 +311,12 @@ export type ConversationSummary = {
 type PendingProjectTaskHint = {
   projectId: string;
   baseRef: string;
+  taskBranch: string;
+};
+
+type NewProjectTaskResult = {
+  sessionId: string;
+  branchName: string;
 };
 
 export type ProjectSummary = {
@@ -460,8 +466,9 @@ type CocolaContextValue = {
   // resume entry in the backend session_map, so Route A's claude CLI starts
   // from zero — this is the boundary that severs prior-turn history.
   newConversation: (folderId?: string) => string;
-  newProjectTask: (projectId: string, runtimeId: string, baseRef: string) => string;
+  newProjectTask: (projectId: string, runtimeId: string, baseRef: string) => NewProjectTaskResult;
   updatePendingProjectTaskBaseRef: (sessionId: string, baseRef: string) => boolean;
+  updatePendingProjectTaskBranch: (sessionId: string, taskBranch: string) => boolean;
   discardPendingProjectTask: (sessionId: string) => boolean;
   // Persisted conversation list (sidebar) + loaders. conversations is refreshed
   // after each turn and on mount; loadConversation replays a stored conversation
@@ -2755,6 +2762,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const pendingProjectHint = sessionProjectHintsRef.current.get(turnSessionId);
       const projectHint = pendingProjectHint?.projectId ?? boundConversation?.project_id ?? "";
       const projectBaseRef = pendingProjectHint?.baseRef ?? "";
+      const projectTaskBranch = pendingProjectHint?.taskBranch ?? "";
       const model = selectedModel;
       const agentRuntime = selectedRuntime;
       const turnAgent = selectedAgent;
@@ -2912,6 +2920,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           ...(folderHint ? { folder_id: folderHint } : {}),
           ...(projectHint ? { project_id: projectHint } : {}),
           ...(projectBaseRef ? { project_base_ref: projectBaseRef } : {}),
+          ...(projectTaskBranch ? { project_task_branch: projectTaskBranch } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(wikiReferences.length > 0
             ? {
@@ -3699,6 +3708,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
 
   const newProjectTask = useCallback((projectId: string, runtimeId: string, baseRef: string) => {
     const fresh = genId();
+    const branchName = `cocola/task-${fresh.replaceAll("-", "").slice(0, 12)}`;
     const previousSessionID = sessionIdRef.current;
     sessionFolderHintsRef.current.delete(sessionIdRef.current);
     sessionProjectHintsRef.current.delete(sessionIdRef.current);
@@ -3712,6 +3722,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     sessionProjectHintsRef.current.set(fresh, {
       projectId,
       baseRef: baseRef.trim(),
+      taskBranch: branchName,
     });
     setSessionId(fresh);
     setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
@@ -3720,7 +3731,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     setSelectedArtifact(null);
     setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
     setSandboxes((prev) => ({ ...prev, [fresh]: null }));
-    return fresh;
+    return { sessionId: fresh, branchName };
   }, []);
 
   const updatePendingProjectTaskBaseRef = useCallback(
@@ -3738,6 +3749,27 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       sessionProjectHintsRef.current.set(pendingSessionId, {
         ...current,
         baseRef: nextBaseRef,
+      });
+      return true;
+    },
+    [],
+  );
+
+  const updatePendingProjectTaskBranch = useCallback(
+    (pendingSessionId: string, taskBranch: string) => {
+      const current = sessionProjectHintsRef.current.get(pendingSessionId);
+      const nextTaskBranch = taskBranch.trim();
+      if (
+        !current ||
+        !nextTaskBranch ||
+        abortMap.current.has(pendingSessionId) ||
+        runCursors.current.has(pendingSessionId)
+      ) {
+        return false;
+      }
+      sessionProjectHintsRef.current.set(pendingSessionId, {
+        ...current,
+        taskBranch: nextTaskBranch,
       });
       return true;
     },
@@ -3928,6 +3960,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       newConversation,
       newProjectTask,
       updatePendingProjectTaskBaseRef,
+      updatePendingProjectTaskBranch,
       discardPendingProjectTask,
       conversations,
       refreshConversations,
@@ -3994,6 +4027,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       newConversation,
       newProjectTask,
       updatePendingProjectTaskBaseRef,
+      updatePendingProjectTaskBranch,
       discardPendingProjectTask,
       conversations,
       refreshConversations,

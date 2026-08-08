@@ -23,6 +23,7 @@ var (
 	ErrProjectNotFound          = errors.New("chatrun: project not found")
 	ErrProjectNotReady          = errors.New("chatrun: project not ready")
 	ErrProjectMismatch          = errors.New("chatrun: conversation project mismatch")
+	ErrProjectBranchExists      = errors.New("chatrun: project task branch already exists")
 	ErrPlanNotCurrent           = errors.New("chatrun: plan is not current")
 	ErrPlanState                = errors.New("chatrun: plan state does not allow this operation")
 	ErrPlanModelUnavailable     = errors.New("chatrun: plan model is unavailable")
@@ -86,6 +87,7 @@ type StartInput struct {
 	UserMessage                 convo.Message
 	ProjectBaseRef              string
 	ProjectBaseSHA              string
+	ProjectTaskBranch           string
 	RevisionPlanID              string
 	ExpectedRevisionPlanVersion int
 }

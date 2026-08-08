@@ -47,7 +47,7 @@ function Workspace() {
   const { showError } = useWorkspaceToast();
   const router = useRouter();
   const hasMessages = useThread((thread) => thread.messages.length > 0);
-  const [workspaceWidth, setWorkspaceWidth] = useState(640);
+  const [workspaceWidth, setWorkspaceWidth] = useState(480);
   const [dockView, setDockView] = useState<"status" | "workspace">("status");
   const [statusOpen, setStatusOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);

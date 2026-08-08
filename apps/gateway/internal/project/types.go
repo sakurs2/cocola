@@ -24,6 +24,9 @@ var (
 	ErrProjectNotReady        = errors.New("project: project not ready")
 	ErrBaseRefNotFound        = errors.New("project: base branch not found")
 	ErrBaseRefMismatch        = errors.New("project: task base branch cannot be changed")
+	ErrTaskBranchInvalid      = errors.New("project: task branch is invalid")
+	ErrTaskBranchMismatch     = errors.New("project: task branch cannot be changed")
+	ErrTaskBranchExists       = errors.New("project: task branch already exists")
 	ErrWorkspaceDirty         = errors.New("project: workspace has uncommitted changes")
 	ErrChangeRequestMerged    = errors.New("project: task change request is already merged")
 	ErrChangeRequestNotReady  = errors.New("project: change request is not ready to merge")
@@ -202,9 +205,10 @@ type BranchPage struct {
 }
 
 type TaskBase struct {
-	Project Project
-	Ref     string
-	SHA     string
+	Project    Project
+	Ref        string
+	SHA        string
+	BranchName string
 }
 
 type ChangeRequestPreparation struct {

@@ -659,6 +659,7 @@ type chatRequest struct {
 	FolderID                             string                         `json:"folder_id"`
 	ProjectID                            string                         `json:"project_id"`
 	ProjectBaseRef                       string                         `json:"project_base_ref"`
+	ProjectTaskBranch                    string                         `json:"project_task_branch"`
 	SkillID                              string                         `json:"skill_id"`
 	AllowWorkspaceReset                  bool                           `json:"allow_workspace_reset"`
 	AgentID                              string                         `json:"agent_id"`

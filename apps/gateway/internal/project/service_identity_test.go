@@ -119,9 +119,14 @@ func TestClaimProvisionAttemptUsesCASAndRejectsAnActiveAttempt(t *testing.T) {
 func TestPrepareTaskBaseResolvesLocalProjectMainFromInternalSCM(t *testing.T) {
 	projectID := "11111111-1111-1111-1111-111111111111"
 	identity := Identity{TenantID: "tenant-a", UserID: "user-a"}
+	taskBranchExists := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/cocola/p-project/branches/main" ||
-			r.Header.Get("Authorization") != "token project-token" {
+		if r.Header.Get("Authorization") != "token project-token" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path != "/api/v1/repos/cocola/p-project/branches/main" &&
+			!(taskBranchExists && strings.HasSuffix(r.URL.Path, "/branches/cocola/task-login-page")) {
 			http.NotFound(w, r)
 			return
 		}
@@ -150,15 +155,22 @@ func TestPrepareTaskBaseResolvesLocalProjectMainFromInternalSCM(t *testing.T) {
 		forgejo: &forgejoClient{http: server.Client(), apiBase: server.URL},
 	}
 	result, err := service.PrepareTaskBase(
-		context.Background(), identity, projectID, "new-task", "main",
+		context.Background(), identity, projectID, "new-task", "main", "cocola/task-login-page",
 	)
-	if err != nil || result.Ref != "main" || result.SHA != strings.Repeat("a", 40) {
+	if err != nil || result.Ref != "main" || result.SHA != strings.Repeat("a", 40) ||
+		result.BranchName != "cocola/task-login-page" {
 		t.Fatalf("PrepareTaskBase() = %+v, %v", result, err)
 	}
 	if _, err := service.PrepareTaskBase(
-		context.Background(), identity, projectID, "new-task", "feature/login",
+		context.Background(), identity, projectID, "new-task", "feature/login", "cocola/task-login-page",
 	); !errors.Is(err, ErrBaseRefNotFound) {
 		t.Fatalf("non-main local base error = %v", err)
+	}
+	taskBranchExists = true
+	if _, err := service.PrepareTaskBase(
+		context.Background(), identity, projectID, "new-task", "main", "cocola/task-login-page",
+	); !errors.Is(err, ErrTaskBranchExists) {
+		t.Fatalf("existing task branch error = %v", err)
 	}
 }
 
@@ -171,20 +183,49 @@ func TestPrepareTaskBaseReusesImmutableWorkspaceBase(t *testing.T) {
 		},
 		workspace: &Workspace{
 			ConversationID: "task-1", ProjectID: projectID,
-			BaseRef: "main", BaseSHA: strings.Repeat("a", 40),
+			BaseRef: "main", BaseSHA: strings.Repeat("a", 40), BranchName: "cocola/task-login-page",
 		},
 	}
 	service := &Service{store: store, localProjectsEnabled: true}
 	result, err := service.PrepareTaskBase(
-		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "",
+		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "", "",
 	)
-	if err != nil || result.Ref != "main" || result.SHA != strings.Repeat("a", 40) {
+	if err != nil || result.Ref != "main" || result.SHA != strings.Repeat("a", 40) ||
+		result.BranchName != "cocola/task-login-page" {
 		t.Fatalf("PrepareTaskBase() = %+v, %v", result, err)
 	}
 	if _, err := service.PrepareTaskBase(
-		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "feature/login",
+		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "feature/login", "",
 	); !errors.Is(err, ErrBaseRefMismatch) {
 		t.Fatalf("changed task base error = %v", err)
+	}
+	if _, err := service.PrepareTaskBase(
+		context.Background(), Identity{UserID: "user-a"}, projectID, "task-1", "main", "cocola/task-other",
+	); !errors.Is(err, ErrTaskBranchMismatch) {
+		t.Fatalf("changed task branch error = %v", err)
+	}
+}
+
+func TestNormalizeTaskBranch(t *testing.T) {
+	tests := map[string]struct {
+		requested string
+		want      string
+		wantErr   error
+	}{
+		"valid":        {requested: " cocola/task-login-page ", want: "cocola/task-login-page"},
+		"default":      {requested: "", want: "cocola/task-9ad7d7672f20"},
+		"wrong prefix": {requested: "feature/login-page", wantErr: ErrTaskBranchInvalid},
+		"uppercase":    {requested: "cocola/task/Login", wantErr: ErrTaskBranchInvalid},
+		"slash":        {requested: "cocola/task-login/page", wantErr: ErrTaskBranchInvalid},
+		"edge dash":    {requested: "cocola/task--login", wantErr: ErrTaskBranchInvalid},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := normalizeTaskBranch(test.requested, "9ad7d767-2f20-4d67-b8ff-b604d10dd03e")
+			if !errors.Is(err, test.wantErr) || got != test.want {
+				t.Fatalf("normalizeTaskBranch() = %q, %v; want %q, %v", got, err, test.want, test.wantErr)
+			}
+		})
 	}
 }
 

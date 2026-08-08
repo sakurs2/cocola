@@ -150,7 +150,7 @@ function HeroUIWorkspaceSidebarContents({
   const visibleWorkspaceNavigation = WORKSPACE_NAVIGATION.filter(
     (item) => !item.adminOnly || isAdmin,
   );
-  const regularConversations = conversations.filter((conversation) => !conversation.project_id);
+  const recentConversations = conversations;
 
   useEffect(() => {
     let cancelled = false;
@@ -183,13 +183,19 @@ function HeroUIWorkspaceSidebarContents({
     });
   };
 
-  const openConversation = (conversationId: string) => {
+  const openConversation = (conversation: ConversationSummary) => {
     runWithNavigationGuard(async () => {
-      if (pathname !== "/") {
-        router.push(`/?conversation=${encodeURIComponent(conversationId)}`);
+      if (conversation.project_id) {
+        router.push(
+          `/projects/${encodeURIComponent(conversation.project_id)}/tasks/${encodeURIComponent(conversation.id)}`,
+        );
         return;
       }
-      await loadConversation(conversationId);
+      if (pathname !== "/") {
+        router.push(`/?conversation=${encodeURIComponent(conversation.id)}`);
+        return;
+      }
+      await loadConversation(conversation.id);
     });
   };
 
@@ -316,7 +322,7 @@ function HeroUIWorkspaceSidebarContents({
         <Sidebar.Group>
           <Sidebar.GroupLabel>Chats</Sidebar.GroupLabel>
           <Sidebar.Menu aria-label="Recent chats">
-            {regularConversations.map((conversation) => (
+            {recentConversations.map((conversation) => (
               <ConversationSidebarItem
                 key={conversation.id}
                 conversation={conversation}
@@ -324,7 +330,11 @@ function HeroUIWorkspaceSidebarContents({
                 editing={editingId === conversation.id}
                 folders={folders}
                 idPrefix={idPrefix}
-                isCurrent={pathname === "/" && activeSessionId === conversation.id}
+                isCurrent={
+                  conversation.project_id
+                    ? pathname === `/projects/${conversation.project_id}/tasks/${conversation.id}`
+                    : pathname === "/" && activeSessionId === conversation.id
+                }
                 requiresUserAction={conversation.requires_user_action === true}
                 running={runningSessionIds.has(conversation.id)}
                 unread={unreadCompletedSessionIds.has(conversation.id)}
@@ -332,7 +342,7 @@ function HeroUIWorkspaceSidebarContents({
                 onCancelRename={() => setEditingId(null)}
                 onCommitRename={() => void commitRename(conversation.id)}
                 onDraftTitleChange={setDraftTitle}
-                onOpen={() => openConversation(conversation.id)}
+                onOpen={() => openConversation(conversation)}
               />
             ))}
           </Sidebar.Menu>
@@ -538,7 +548,7 @@ function ConversationSidebarItem({
                     <Pencil className="text-muted size-4 shrink-0" />
                     <span data-slot="label">Rename</span>
                   </Dropdown.Item>
-                  {conversation.chat_type !== "scheduled_task" ? (
+                  {conversation.chat_type !== "scheduled_task" && !conversation.project_id ? (
                     <Dropdown.SubmenuTrigger>
                       <Dropdown.Item id="move" textValue="Move to folder">
                         <FolderOpen className="text-muted size-4 shrink-0" />
@@ -595,6 +605,9 @@ function ConversationSidebarItem({
 }
 
 function ConversationTypeIcon({ conversation }: { conversation: ConversationSummary }) {
+  if (conversation.project_id) {
+    return <Folder className="size-4 text-indigo-600 dark:text-indigo-300" />;
+  }
   if (conversation.agent_id || conversation.agent) {
     return <FaceRobot className="size-4 text-cyan-600 dark:text-cyan-300" />;
   }

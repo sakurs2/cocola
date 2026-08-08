@@ -30,9 +30,9 @@ import {
   Wrench as PhWrench,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
-import { CheckCircle2, ChevronRight, Download, ExternalLink, Eye } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, Copy, Download, ExternalLink, Eye } from "lucide-react";
 import Image from "next/image";
-import { Button, Card, ScrollShadow, Tooltip } from "@heroui/react";
+import { Button, Card, Tooltip } from "@heroui/react";
 import { useEffect, useState, type FC, type ReactNode } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { formatAgentDuration } from "@/lib/agent-turn-summary.mjs";
@@ -42,6 +42,7 @@ import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { normalizeProgressItems } from "@/lib/progress-items.mjs";
 import { isCommandTool, toolOutcomeLabel } from "@/lib/tool-failure.mjs";
+import { HighlightedCode } from "@/components/assistant-ui/markdown-text";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -508,6 +509,7 @@ const CommandExecutionCard: FC<{
 }> = ({ command, output = "", running, isError }) => {
   const [expanded, setExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!running) return;
@@ -521,8 +523,17 @@ const CommandExecutionCard: FC<{
 
   const status = running ? "Running" : isError ? "Failed" : "Finished";
   const duration = running ? formatAgentDuration(elapsedSeconds * 1000) : "";
-  const detail = output || command;
   const latestOutput = output.trimEnd().split("\n").at(-1) ?? "";
+
+  const copyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <Card
@@ -549,8 +560,13 @@ const CommandExecutionCard: FC<{
           )}
         </span>
         <span className="min-w-0">
-          <span className="block truncate font-mono text-[11.5px] font-medium text-foreground">
-            {command}
+          <span className="block truncate rounded-md bg-zinc-950 px-2 py-1 text-zinc-100">
+            <HighlightedCode
+              compact
+              className="block truncate font-mono text-[11.5px] font-medium"
+              code={command}
+              language="shell"
+            />
           </span>
           <span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted">
             <span className="shrink-0">
@@ -584,13 +600,42 @@ const CommandExecutionCard: FC<{
         </Tooltip>
       </Card.Header>
       {expanded ? (
-        <Card.Content className="border-t border-border/60 bg-zinc-950 p-0 text-zinc-100">
-          <ScrollShadow className="max-h-56 overflow-auto px-3 py-2" hideScrollBar>
-            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
-              {output ? null : <span className="mr-2 select-none text-emerald-400">$</span>}
-              {detail}
+        <Card.Content className="grid gap-2.5 border-t border-border/60 bg-surface-secondary/25 p-2.5">
+          <section className="overflow-hidden rounded-xl border border-zinc-800 bg-[#0f1011] text-zinc-100">
+            <header className="flex h-8 items-center justify-between border-b border-zinc-800 px-3">
+              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-400">
+                Command
+              </span>
+              <Tooltip>
+                <Button
+                  isIconOnly
+                  aria-label={copied ? "Command copied" : "Copy command"}
+                  className="size-6 min-h-6 min-w-6 text-zinc-400 hover:text-zinc-100"
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => void copyCommand()}
+                >
+                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                </Button>
+                <Tooltip.Content>{copied ? "Copied" : "Copy command"}</Tooltip.Content>
+              </Tooltip>
+            </header>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[11.5px] leading-5">
+              <HighlightedCode code={command} language="shell" />
             </pre>
-          </ScrollShadow>
+          </section>
+          {output ? (
+            <section className="overflow-hidden rounded-xl border border-border/70 bg-background">
+              <header className="flex h-8 items-center border-b border-border/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                Output
+              </header>
+              <div className="max-h-72 overflow-auto">
+                <pre className="min-w-max whitespace-pre px-3 py-2.5 font-mono text-[11.5px] leading-5 text-foreground">
+                  {output}
+                </pre>
+              </div>
+            </section>
+          ) : null}
         </Card.Content>
       ) : null}
     </Card>

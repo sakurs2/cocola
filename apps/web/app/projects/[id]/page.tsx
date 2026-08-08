@@ -23,6 +23,8 @@ import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import {
   ProjectBaseBranchPicker,
   ProjectBranchBadge,
+  ProjectTaskBranchField,
+  projectTaskBranchError,
 } from "@/components/assistant-ui/project-branch-control";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
 import { shouldOpenProjectTask } from "@/lib/project-task-intent.mjs";
@@ -68,6 +70,7 @@ export default function ProjectPage() {
     refreshProjects,
     newProjectTask,
     updatePendingProjectTaskBaseRef,
+    updatePendingProjectTaskBranch,
     discardPendingProjectTask,
     activeSessionId,
     serverAcceptedSessionIds,
@@ -85,6 +88,7 @@ export default function ProjectPage() {
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [selectedBaseRef, setSelectedBaseRef] = useState("");
+  const [taskBranchName, setTaskBranchName] = useState("");
   const preparedProject = useRef<string | null>(null);
   const preparedSession = useRef<string | null>(null);
   const initializedBaseProject = useRef<string | null>(null);
@@ -145,7 +149,9 @@ export default function ProjectPage() {
     )
       return;
     preparedProject.current = project.id;
-    preparedSession.current = newProjectTask(project.id, project.runtime_id, selectedBaseRef);
+    const pendingTask = newProjectTask(project.id, project.runtime_id, selectedBaseRef);
+    preparedSession.current = pendingTask.sessionId;
+    setTaskBranchName(pendingTask.branchName);
     setComposerReady(true);
   }, [newProjectTask, project, selectedBaseRef, tasks.length, tasksLoaded]);
 
@@ -181,6 +187,12 @@ export default function ProjectPage() {
     )
       return;
     setSelectedBaseRef(branch);
+  };
+
+  const selectTaskBranch = (branch: string) => {
+    if (preparedSession.current && !updatePendingProjectTaskBranch(preparedSession.current, branch))
+      return;
+    setTaskBranchName(branch);
   };
 
   const retry = async () => {
@@ -480,12 +492,15 @@ export default function ProjectPage() {
             <Card.Header className="p-0">
               <Card.Title>Start project work</Card.Title>
               <Card.Description>
-                Choose a base branch. Cocola locks its current revision when you send the first
-                message.
+                Choose the starting point and name this task branch. Both are locked when you send
+                the first message.
               </Card.Description>
             </Card.Header>
-            <Card.Content className="mt-4 p-0">
+            <Card.Content className="mt-4 gap-4 p-0">
+              <ProjectTaskBranchField value={taskBranchName} onChange={selectTaskBranch} />
               <ConversationComposer
+                disabled={Boolean(projectTaskBranchError(taskBranchName))}
+                disabledReason="Choose a valid task branch before sending."
                 placeholder={`Ask Cocola to work on ${project.name}…`}
                 branchControl={
                   project.repository_provider === "github" ? (
@@ -508,7 +523,7 @@ export default function ProjectPage() {
         <div>
           <h2 className="font-semibold">Project tasks</h2>
           <p className="text-muted mt-1 text-sm">
-            Project conversations stay separate from the global Chats list.
+            Project tasks also appear in Chats for quick access.
           </p>
         </div>
         <Chip size="sm" variant="soft">

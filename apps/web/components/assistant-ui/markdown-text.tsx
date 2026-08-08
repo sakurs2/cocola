@@ -418,6 +418,37 @@ const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
   );
 };
 
+export function HighlightedCode({
+  language,
+  code,
+  compact = false,
+  className,
+}: {
+  language?: string;
+  code: string;
+  compact?: boolean;
+  className?: string;
+}) {
+  const normalized = normalizeLanguage(language);
+  if (compact) {
+    return (
+      <code className={className}>
+        {highlightLine(code.replace(/\s+/g, " ").trim(), normalized)}
+      </code>
+    );
+  }
+  const lines = code.replace(/\n$/, "").split("\n");
+  return (
+    <code className={className}>
+      {lines.map((line, index) => (
+        <span key={index} className={cn("block min-h-5", diffLineClass(normalized, line))}>
+          {highlightLine(line, normalized)}
+        </span>
+      ))}
+    </code>
+  );
+}
+
 const normalizeLanguage = (language?: string) => {
   switch ((language ?? "").toLowerCase()) {
     case "bash":

@@ -25,10 +25,16 @@ test("running composer exposes an enabled HeroUI stop control", () => {
 test("command execution uses a compact HeroUI activity card", () => {
   assert.match(railSource, /const CommandExecutionCard/);
   assert.match(railSource, /<Card\.Header/);
-  assert.match(railSource, /<ScrollShadow/);
+  assert.match(railSource, /max-h-72 overflow-auto/);
   assert.match(railSource, /formatAgentDuration\(elapsedSeconds \* 1000\)/);
   assert.match(railSource, /latestOutput/);
   assert.match(railSource, /motion-reduce:animate-none/);
+  assert.match(railSource, /<HighlightedCode[\s\S]*?language="shell"/);
+  assert.match(railSource, />\s*Command\s*</);
+  assert.match(railSource, />\s*Output\s*</);
+  assert.match(railSource, /aria-label=\{copied \? "Command copied" : "Copy command"\}/);
+  assert.doesNotMatch(railSource, /const detail = output \|\| command/);
+  assert.doesNotMatch(railSource, /hideScrollBar/);
 });
 
 test("live command output stays separate from the terminal tool result", () => {
