@@ -20,12 +20,19 @@ export PATH="$HOME/.local/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/op
 
 # Keep background helpers out of the terminal's foreground process group so
 # Ctrl+C reaches this supervisor first and dependencies can stop in order.
-if command -v setsid >/dev/null 2>&1; then
-  SETSID="setsid"
+COCOLA_USE_SETSID_WAIT=0
+if command -v setsid >/dev/null 2>&1 && setsid --wait true >/dev/null 2>&1; then
+  COCOLA_USE_SETSID_WAIT=1
 else
-  SETSID=""
   set -m
 fi
+
+exec_in_session() {
+  if [[ "$COCOLA_USE_SETSID_WAIT" == "1" ]]; then
+    exec setsid --wait "$@"
+  fi
+  exec "$@"
+}
 
 ACTION="${1:-up}"
 
@@ -356,7 +363,7 @@ start_forward() {
   mkdir -p "$LOG_DIR"
   stop_forward
   (
-    $SETSID kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
+    exec_in_session kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
   ) >"$LOG_DIR/opensandbox-dev-forward.log" 2>&1 &
   OWNED_FORWARD_PID="$!"
   echo "$OWNED_FORWARD_PID" >"$FORWARD_PID_FILE"

@@ -431,7 +431,11 @@ func executionMarker(executionID string) string {
 func wrapExecution(command, marker string) string {
 	script := "marker=$1; echo $$ > \"$marker\"; " +
 		"trap 'rm -f \"$marker\"' EXIT; " + command
-	return "setsid sh -c " + shellQuote(script) + " sh " + shellQuote(marker)
+	// --wait is part of the execution contract: when setsid is already a process
+	// group leader it forks before exec. Without --wait that parent exits
+	// immediately, so execd reports a false success while the real command keeps
+	// running detached in the sandbox.
+	return "setsid --wait sh -c " + shellQuote(script) + " sh " + shellQuote(marker)
 }
 
 // ssePayload is the JSON object carried by each execd SSE/NDJSON event. Only the

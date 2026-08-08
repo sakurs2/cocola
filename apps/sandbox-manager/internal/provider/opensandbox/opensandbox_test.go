@@ -563,7 +563,7 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 		}
 	}
 	command := execCommandFromBody(t, gotCmdBody)
-	if !strings.Contains(command, "setsid sh -c") || !strings.Contains(command, "echo") ||
+	if !strings.Contains(command, "setsid --wait sh -c") || !strings.Contains(command, "echo") ||
 		!strings.Contains(command, "hi") || !strings.Contains(command, "/tmp/cocola-execution-") {
 		t.Errorf("command was not wrapped in an identifiable process group: %s", command)
 	}

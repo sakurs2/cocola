@@ -83,6 +83,30 @@ func TestLiveRunMemoryRecallPublishesAndPersistsExactContext(t *testing.T) {
 	}
 }
 
+func TestMeaningfulAssistantOutputIgnoresRuntimeScaffolding(t *testing.T) {
+	scaffolding := []convo.Part{
+		{Type: convo.PartEnvironment},
+		{Type: convo.PartSessionStatus},
+		{Type: convo.PartMemoryRecall},
+		{Type: convo.PartProgress},
+		{Type: convo.PartReasoning, Text: "internal reasoning"},
+		{Type: convo.PartText, Text: "  \n"},
+	}
+	if hasMeaningfulAssistantOutput(scaffolding) {
+		t.Fatal("runtime scaffolding was treated as a completed assistant answer")
+	}
+	for _, part := range []convo.Part{
+		{Type: convo.PartText, Text: "answer"},
+		{Type: convo.PartToolCall, ToolName: "Bash"},
+		{Type: convo.PartFile, Filename: "result.txt"},
+		{Type: convo.PartStructured},
+	} {
+		if !hasMeaningfulAssistantOutput([]convo.Part{part}) {
+			t.Fatalf("meaningful part %q was rejected", part.Type)
+		}
+	}
+}
+
 type blockingChatStreamer struct {
 	started  chan struct{}
 	stopped  chan struct{}
@@ -618,7 +642,10 @@ func TestExecuteLiveRunRetainsStateUntilFinalizationRecovers(t *testing.T) {
 	base := chatrun.NewMemory(conversations)
 	store := &controlledFinalizeStore{Store: base, failAll: true}
 	api := New(
-		&fakeStreamer{script: []agent.Event{{Kind: "done"}}},
+		&fakeStreamer{script: []agent.Event{
+			{Kind: "text", Data: map[string]string{"text": "completed"}},
+			{Kind: "done"},
+		}},
 		auth.NewVerifier(auth.Config{}),
 		logger.Must(),
 	).WithConvoStore(conversations).
@@ -710,6 +737,35 @@ func TestDurableChatBusinessErrorCannotBecomeSuccess(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), `"duration_ms":"`+fmt.Sprint(duration)+`"`) {
 		t.Fatalf("SSE and metadata durations differ: metadata=%d body=%s", duration, recorder.Body.String())
+	}
+}
+
+func TestDurableChatEmptyAgentResponseBecomesError(t *testing.T) {
+	api, runs, conversations := durableTestAPI(
+		&fakeStreamer{script: []agent.Event{{Kind: "done"}}},
+	)
+	recorder := httptest.NewRecorder()
+	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"hello","session_id":"empty-agent-response","client_request_id":"empty-response-request"}`,
+	)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("chat response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	runID := recorder.Header().Get("x-cocola-run-id")
+	run := waitForRunStatus(t, runs, runID, chatrun.StatusError)
+	if run.ErrorCode != emptyAgentResponse {
+		t.Fatalf("error code = %q, want %q", run.ErrorCode, emptyAgentResponse)
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"EMPTY_AGENT_RESPONSE"`) ||
+		!strings.Contains(recorder.Body.String(), "completed without returning an answer") {
+		t.Fatalf("empty response error was not streamed: %s", recorder.Body.String())
+	}
+	messages, err := conversations.GetMessages(
+		context.Background(), "empty-agent-response", auth.DevIdentity.UserID,
+	)
+	if err != nil || len(messages) != 2 || len(messages[1].Parts) != 1 ||
+		!strings.Contains(messages[1].Parts[0].Text, "completed without returning an answer") {
+		t.Fatalf("saved empty response error = %+v, %v", messages, err)
 	}
 }
 

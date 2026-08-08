@@ -336,12 +336,19 @@ wait_port() {
 # tree (go run / uv run fork child binaries). setsid does this on Linux but is
 # absent on macOS, so fall back to shell job control (set -m), which also puts
 # every `&` job in its own process group. cleanup() does `kill -- -$pid`.
-if command -v setsid >/dev/null 2>&1; then
-  SETSID="setsid"
+COCOLA_USE_SETSID_WAIT=0
+if command -v setsid >/dev/null 2>&1 && setsid --wait true >/dev/null 2>&1; then
+  COCOLA_USE_SETSID_WAIT=1
 else
-  SETSID=""
   set -m
 fi
+
+exec_in_session() {
+  if [[ "$COCOLA_USE_SETSID_WAIT" == "1" ]]; then
+    exec setsid --wait "$@"
+  fi
+  exec "$@"
+}
 
 # ----------------------------------------------------------------- dev mode
 # THE single debug mode. Only the sandbox's OWN container dependencies stay
@@ -483,7 +490,7 @@ dev_up() {
     COCOLA_SANDBOX_PROFILE="${COCOLA_SANDBOX_PROFILE:-coding}" \
     COCOLA_SANDBOX_LLM_BASE_URL="${COCOLA_SANDBOX_LLM_BASE_URL:-http://host.docker.internal:$LLM_PORT}" \
     COCOLA_SANDBOX_MODEL_ALIAS="${COCOLA_SANDBOX_MODEL_ALIAS:-cocola-default}" \
-      $SETSID go run ./cmd/sandbox-manager
+      exec_in_session go run ./cmd/sandbox-manager
   ) >"$(log_redirect sandbox-manager)" 2>&1 &
   PIDS+=("$!")
   wait_port 127.0.0.1 50051 "sandbox-manager" 180
@@ -511,7 +518,7 @@ free_port "$LLM_PORT" llm-gateway
     COCOLA_MODEL_SECRET_KEY="$COCOLA_MODEL_SECRET_KEY" \
     COCOLA_CONFIG_SECRET_KEY="$COCOLA_CONFIG_SECRET_KEY" \
     COCOLA_LLM_REDIS_URL="${COCOLA_LLM_REDIS_URL:-redis://127.0.0.1:6379/0}" \
-    $SETSID uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
+    exec_in_session uv run python -m cocola_llm_gateway ) >"$(log_redirect llm-gateway)" 2>&1 &
   PIDS+=("$!")
   # nc -z 0.0.0.0 is unreliable; a 0.0.0.0 bind also answers on loopback, so probe there.
   llm_probe_host="$LLM_HOST"; [[ "$LLM_HOST" == "0.0.0.0" ]] && llm_probe_host="127.0.0.1"
@@ -542,7 +549,7 @@ free_port 8092 admin-api
     COCOLA_BOOTSTRAP_ADMIN_PASSWORD="$COCOLA_BOOTSTRAP_ADMIN_PASSWORD" \
     COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH="${COCOLA_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}" \
     COCOLA_BOOTSTRAP_ADMIN_RESET="${COCOLA_BOOTSTRAP_ADMIN_RESET:-}" \
-      $SETSID go run ./apps/admin-api/cmd/admin-api
+      exec_in_session go run ./apps/admin-api/cmd/admin-api
   ) >"$(log_redirect admin-api)" 2>&1 &
 PIDS+=("$!")
 wait_port 127.0.0.1 8092 "admin-api" 120
@@ -556,7 +563,7 @@ free_port "$AGENT_PORT" agent-runtime
   COCOLA_SANDBOX_ADDR="${COCOLA_SANDBOX_ADDR:-}" \
   COCOLA_SANDBOX_PROJECT_BROKER_URL="$COCOLA_SANDBOX_PROJECT_BROKER_URL" \
   COCOLA_SANDBOX_SKILL_BROKER_URL="$COCOLA_SANDBOX_SKILL_BROKER_URL" \
-    $SETSID uv run python -m cocola_agent_runtime
+    exec_in_session uv run python -m cocola_agent_runtime
 ) >"$(log_redirect agent-runtime)" 2>&1 &
 PIDS+=("$!")
 wait_port "$AGENT_HOST" "$AGENT_PORT" "agent-runtime"
@@ -565,7 +572,7 @@ wait_port "$AGENT_HOST" "$AGENT_PORT" "agent-runtime"
 free_port "$GATEWAY_PORT" gateway
 (
   COCOLA_GATEWAY_ADDR="$GATEWAY_ADDR" COCOLA_AGENT_ADDR="$AGENT_ADDR" \
-    $SETSID go run ./apps/gateway/cmd/gateway
+    exec_in_session go run ./apps/gateway/cmd/gateway
 ) >"$(log_redirect gateway)" 2>&1 &
 PIDS+=("$!")
 wait_port "$GATEWAY_HOST" "$GATEWAY_PORT" "gateway"
@@ -584,7 +591,7 @@ free_port "$WEB_PORT" web
     # bundles. Keep the default above V8's 4 GiB limit while allowing callers
     # to supply their own Node options.
     export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=8192}"
-    $SETSID node server.mjs --port "$WEB_PORT"
+    exec_in_session node server.mjs --port "$WEB_PORT"
   ) >"$(log_redirect web)" 2>&1 &
   PIDS+=("$!")
 wait_port "127.0.0.1" "$WEB_PORT" "web" 240

@@ -48,6 +48,7 @@ const (
 	maxChatAttachments   = 8
 	maxChatAttachment    = int64(32 << 20)
 	maxChatAttachmentSum = int64(32 << 20)
+	emptyAgentResponse   = "EMPTY_AGENT_RESPONSE"
 )
 
 type RunConfig struct {
@@ -1122,6 +1123,21 @@ func (r *liveRun) parts() []convo.Part {
 	return append([]convo.Part(nil), r.reducer.Parts()...)
 }
 
+func hasMeaningfulAssistantOutput(parts []convo.Part) bool {
+	for _, part := range parts {
+		switch part.Type {
+		case convo.PartText:
+			if strings.TrimSpace(part.Text) != "" {
+				return true
+			}
+		case convo.PartToolCall, convo.PartFile, convo.PartWikiFile,
+			convo.PartSCMApproval, convo.PartPlan, convo.PartQuestion, convo.PartStructured:
+			return true
+		}
+	}
+	return false
+}
+
 func (r *liveRun) setPlanCandidate(content, workspaceRevision string) {
 	r.mu.Lock()
 	r.planContent = content
@@ -1426,6 +1442,12 @@ func (a *API) executeLiveRun(live *liveRun) {
 	if status == chatrun.StatusSuccess && questionText != "" {
 		status = chatrun.StatusWaitingInput
 	}
+	planContent, workspaceRevision := live.planCandidate()
+	emptyResponse := status == chatrun.StatusSuccess && planContent == "" &&
+		!hasMeaningfulAssistantOutput(live.parts())
+	if emptyResponse {
+		status, errorCode = chatrun.StatusError, emptyAgentResponse
+	}
 	if status == chatrun.StatusCancelled || status == chatrun.StatusInterrupted {
 		notice := "Run was cancelled."
 		if status == chatrun.StatusInterrupted {
@@ -1435,7 +1457,14 @@ func (a *API) executeLiveRun(live *liveRun) {
 		live.apply(noticeEvent)
 		live.publish(noticeEvent)
 	}
-	if stepTimeout != nil && !cancelled {
+	if emptyResponse {
+		errorData := map[string]string{
+			"error": "The agent completed without returning an answer.",
+			"code":  errorCode,
+		}
+		live.apply(agent.Event{Kind: "error", Data: errorData})
+		live.publish(agent.Event{Kind: "error", Data: errorData})
+	} else if stepTimeout != nil && !cancelled {
 		errorData := map[string]string{
 			"error": fmt.Sprintf("tool step %q timed out after %s", stepTimeout.Name, stepTimeout.Limit),
 			"code":  errorCode,
@@ -1464,7 +1493,6 @@ func (a *API) executeLiveRun(live *liveRun) {
 		ID: live.run.ID + "-assistant", ConversationID: live.run.ConversationID,
 		Role: "assistant", Parts: live.parts(), Metadata: metadata, CreatedAt: completedAt,
 	}
-	planContent, workspaceRevision := live.planCandidate()
 	var planCandidate *chatrun.PlanCandidate
 	if planContent != "" && status == chatrun.StatusSuccess &&
 		live.request.InteractionMode == chatrun.InteractionModePlan {
