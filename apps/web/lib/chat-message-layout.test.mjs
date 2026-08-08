@@ -95,6 +95,11 @@ test("shell code uses a compact macOS terminal treatment", () => {
   assert.match(markdownSource, /bg-\[#28c840\]/);
   assert.match(markdownSource, /grid h-7 grid-cols-\[1fr_auto_1fr\]/);
   assert.match(markdownSource, /bg-\[#0d0f12\][^"\n]*text-\[12px\][^"\n]*leading-5/);
+  assert.match(markdownSource, /shell \? "overflow-x-hidden" : "overflow-x-auto"/);
+  assert.match(
+    markdownSource,
+    /shell \? "whitespace-pre-wrap break-words \[overflow-wrap:anywhere\]" : "whitespace-pre"/,
+  );
   assert.doesNotMatch(markdownSource, /rounded-t-xl[^"\n]*bg-surface-secondary\/50/);
 });
 

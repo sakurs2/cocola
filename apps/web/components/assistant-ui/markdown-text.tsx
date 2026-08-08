@@ -416,11 +416,22 @@ const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
   code,
 }) => {
   const normalized = normalizeLanguage(language);
+  const shell = normalized === "shell";
   const lines = code.replace(/\n$/, "").split("\n");
 
   return (
-    <Pre className="mb-3 overflow-x-auto rounded-b-lg border-x border-b border-zinc-700/80 bg-[#0d0f12] px-3 py-2.5 text-[12px] leading-5 text-[#eceff4] shadow-[0_1px_2px_rgba(0,0,0,0.16)]">
-      <Code className="block whitespace-pre font-mono">
+    <Pre
+      className={cn(
+        "mb-3 rounded-b-lg border-x border-b border-zinc-700/80 bg-[#0d0f12] px-3 py-2.5 text-[12px] leading-5 text-[#eceff4] shadow-[0_1px_2px_rgba(0,0,0,0.16)]",
+        shell ? "overflow-x-hidden" : "overflow-x-auto",
+      )}
+    >
+      <Code
+        className={cn(
+          "block min-w-0 font-mono",
+          shell ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]" : "whitespace-pre",
+        )}
+      >
         {lines.map((line, index) => (
           <span key={index} className={cn("block min-h-5", diffLineClass(normalized, line))}>
             {highlightLine(line, normalized)}
