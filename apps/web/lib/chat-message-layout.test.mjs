@@ -88,6 +88,16 @@ test("assistant answers inherit Inter and use the compact product text rhythm", 
   assert.doesNotMatch(markdownSource, /aui-answer-markdown[^"\n]*leading-7/);
 });
 
+test("shell code uses a compact macOS terminal treatment", () => {
+  assert.match(markdownSource, /normalizeLanguage\(language\) === "shell"/);
+  assert.match(markdownSource, /bg-\[#ff5f57\]/);
+  assert.match(markdownSource, /bg-\[#febc2e\]/);
+  assert.match(markdownSource, /bg-\[#28c840\]/);
+  assert.match(markdownSource, /grid h-7 grid-cols-\[1fr_auto_1fr\]/);
+  assert.match(markdownSource, /bg-\[#0d0f12\][^"\n]*text-\[12px\][^"\n]*leading-5/);
+  assert.doesNotMatch(markdownSource, /rounded-t-xl[^"\n]*bg-surface-secondary\/50/);
+});
+
 test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.match(
     threadSource,

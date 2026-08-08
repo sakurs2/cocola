@@ -30,16 +30,7 @@ import {
   Wrench as PhWrench,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
-import {
-  Check,
-  CheckCircle2,
-  ChevronRight,
-  CircleX,
-  Copy,
-  Download,
-  ExternalLink,
-  Eye,
-} from "lucide-react";
+import { CheckCircle2, ChevronRight, CircleX, Download, ExternalLink, Eye } from "lucide-react";
 import Image from "next/image";
 import { Button, Card, Tooltip } from "@heroui/react";
 import { useEffect, useState, type FC, type ReactNode } from "react";
@@ -51,7 +42,7 @@ import { resolveFileType } from "@/lib/file-type";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { normalizeProgressItems } from "@/lib/progress-items.mjs";
 import { isCommandTool, toolOutcomeLabel } from "@/lib/tool-failure.mjs";
-import { HighlightedCode } from "@/components/assistant-ui/markdown-text";
+import { CodeBlock } from "@/components/assistant-ui/markdown-text";
 
 // All rail action icons come from Phosphor; reuse its component type so the
 // `weight` prop (duotone/bold/...) type-checks.
@@ -518,7 +509,6 @@ const CommandExecutionCard: FC<{
 }> = ({ command, output = "", running, isError }) => {
   const [expanded, setExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!running) return;
@@ -536,16 +526,6 @@ const CommandExecutionCard: FC<{
   const latestOutput = output.trimEnd().split("\n").at(-1) ?? "";
   const statusTooltip = running && latestOutput ? `${statusLabel}\n${latestOutput}` : statusLabel;
 
-  const copyCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
     <Card
       className={cn(
@@ -553,7 +533,7 @@ const CommandExecutionCard: FC<{
         isError && "border-danger/30",
       )}
     >
-      <Card.Header className="grid min-h-10 grid-cols-[0.2rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-1.5">
+      <Card.Header className="grid min-h-9 grid-cols-[0.2rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-1">
         <span
           className={cn(
             "h-7 w-0.5 rounded-full",
@@ -566,14 +546,9 @@ const CommandExecutionCard: FC<{
         <span className="grid size-6 place-items-center rounded-md bg-surface-secondary text-muted">
           <TerminalWindow className="size-3.5" />
         </span>
-        <span className="block min-w-0 truncate rounded-md bg-zinc-950 px-2 py-1 text-zinc-100">
-          <HighlightedCode
-            compact
-            className="block truncate font-mono text-[11.5px] font-medium"
-            code={command}
-            language="shell"
-          />
-        </span>
+        <code className="block min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/85">
+          {command}
+        </code>
         <span
           aria-label={statusLabel}
           className={cn(
@@ -597,6 +572,7 @@ const CommandExecutionCard: FC<{
           <Button
             isIconOnly
             aria-label={expanded ? "Hide command details" : "Show command details"}
+            className="size-7 min-h-7 min-w-7 rounded-full"
             size="sm"
             variant="ghost"
             onPress={() => setExpanded((value) => !value)}
@@ -610,37 +586,19 @@ const CommandExecutionCard: FC<{
         </Tooltip>
       </Card.Header>
       {expanded ? (
-        <Card.Content className="grid gap-2.5 border-t border-border/60 bg-surface-secondary/25 p-2.5">
-          <section className="overflow-hidden rounded-xl border border-zinc-800 bg-[#0f1011] text-zinc-100">
-            <header className="flex h-8 items-center justify-between border-b border-zinc-800 px-3">
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-400">
-                Command
-              </span>
-              <Tooltip>
-                <Button
-                  isIconOnly
-                  aria-label={copied ? "Command copied" : "Copy command"}
-                  className="size-6 min-h-6 min-w-6 text-zinc-400 hover:text-zinc-100"
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => void copyCommand()}
-                >
-                  {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                </Button>
-                <Tooltip.Content>{copied ? "Copied" : "Copy command"}</Tooltip.Content>
-              </Tooltip>
-            </header>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[11.5px] leading-5">
-              <HighlightedCode code={command} language="shell" />
-            </pre>
-          </section>
+        <Card.Content className="grid gap-2 border-t border-border/60 bg-surface-secondary/20 p-2">
+          <CodeBlock
+            className="[&>div:first-child]:!mt-0 [&>pre:last-child]:!mb-0"
+            code={command}
+            language="shell"
+          />
           {output ? (
-            <section className="overflow-hidden rounded-xl border border-border/70 bg-background">
-              <header className="flex h-8 items-center border-b border-border/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+            <section className="overflow-hidden rounded-lg border border-border/70 bg-background">
+              <header className="flex h-7 items-center border-b border-border/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
                 Output
               </header>
               <div className="max-h-72 overflow-auto">
-                <pre className="min-w-max whitespace-pre px-3 py-2.5 font-mono text-[11.5px] leading-5 text-foreground">
+                <pre className="min-w-max whitespace-pre px-3 py-2 font-mono text-[11.5px] leading-5 text-foreground">
                   {output}
                 </pre>
               </div>

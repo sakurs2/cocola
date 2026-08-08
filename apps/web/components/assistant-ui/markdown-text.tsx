@@ -371,6 +371,7 @@ const safeHref = (href: string) =>
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   const [copied, setCopied] = useState(false);
   const label = language && language !== "unknown" ? language : "text";
+  const shell = normalizeLanguage(language) === "shell";
 
   const onCopy = async () => {
     try {
@@ -383,15 +384,27 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="mt-3 flex items-center justify-between gap-3 rounded-t-xl border-x border-t border-border/60 bg-surface-secondary/50 px-3 py-2">
-      <span className="min-w-0 truncate font-mono text-[11px] uppercase text-muted">{label}</span>
+    <div className="mt-3 grid h-7 grid-cols-[1fr_auto_1fr] items-center rounded-t-lg border-x border-t border-zinc-700/80 bg-[#191b1f] px-2.5">
+      <span className="flex items-center gap-1.5" aria-hidden="true">
+        {shell ? (
+          <>
+            <span className="size-2 rounded-full bg-[#ff5f57]" />
+            <span className="size-2 rounded-full bg-[#febc2e]" />
+            <span className="size-2 rounded-full bg-[#28c840]" />
+          </>
+        ) : null}
+      </span>
+      <span className="min-w-0 truncate font-mono text-[10px] lowercase tracking-[0.04em] text-zinc-400">
+        {label}
+      </span>
       <button
         type="button"
         onClick={onCopy}
-        className="aui-code-action inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
+        className="aui-code-action ml-auto inline-flex size-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         aria-label={copied ? "Copied code" : "Copy code"}
+        title={copied ? "Copied" : "Copy code"}
       >
-        {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>
     </div>
   );
@@ -406,10 +419,10 @@ const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
   const lines = code.replace(/\n$/, "").split("\n");
 
   return (
-    <Pre className="mb-3 overflow-x-auto rounded-b-xl border-x border-b border-border/60 bg-[#0f1011] p-4 text-[13px] leading-6 text-[#eceff4]">
+    <Pre className="mb-3 overflow-x-auto rounded-b-lg border-x border-b border-zinc-700/80 bg-[#0d0f12] px-3 py-2.5 text-[12px] leading-5 text-[#eceff4] shadow-[0_1px_2px_rgba(0,0,0,0.16)]">
       <Code className="block whitespace-pre font-mono">
         {lines.map((line, index) => (
-          <span key={index} className={cn("block min-h-6", diffLineClass(normalized, line))}>
+          <span key={index} className={cn("block min-h-5", diffLineClass(normalized, line))}>
             {highlightLine(line, normalized)}
           </span>
         ))}
