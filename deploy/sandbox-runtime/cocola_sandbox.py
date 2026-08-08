@@ -534,6 +534,15 @@ def preview_manager_status(manifest: dict[str, Any], profile: str) -> dict[str, 
     }
 
 
+def artifact_mime_type(path: str) -> str:
+    # Markdown was only added to Python's bundled MIME table in newer
+    # releases, and host-level mime.types files vary. Keep artifact metadata
+    # stable across the Python 3.11 runtime image and developer machines.
+    if Path(path).suffix.lower() in {".md", ".markdown"}:
+        return "text/markdown"
+    return mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
 def artifact_files(manifest: dict[str, Any], profile: str, limit: int) -> dict[str, Any]:
     status_payload = artifact_status(manifest, profile)
     if not status_payload["enabled"]:
@@ -562,7 +571,7 @@ def artifact_files(manifest: dict[str, Any], profile: str, limit: int) -> dict[s
                 {
                     "path": relative,
                     "size": file_stat.st_size,
-                    "mime_type": mimetypes.guess_type(relative)[0] or "application/octet-stream",
+                    "mime_type": artifact_mime_type(relative),
                     "mtime_ns": file_stat.st_mtime_ns,
                 }
             )

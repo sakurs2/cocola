@@ -307,7 +307,7 @@ def test_workspace_info_uses_manifest_contract(cli, tmp_path):
     }
 
 
-def test_artifact_list_reports_regular_files_and_skips_links(cli, tmp_path):
+def test_artifact_list_reports_regular_files_and_skips_links(cli, tmp_path, monkeypatch):
     outputs = tmp_path / "outputs"
     nested = outputs / "site"
     nested.mkdir(parents=True)
@@ -328,6 +328,14 @@ def test_artifact_list_reports_regular_files_and_skips_links(cli, tmp_path):
         },
     }
 
+    platform_guess_type = cli.mimetypes.guess_type
+    monkeypatch.setattr(
+        cli.mimetypes,
+        "guess_type",
+        lambda path: (
+            (None, None) if Path(path).suffix.lower() == ".md" else platform_guess_type(path)
+        ),
+    )
     payload = cli.artifact_files(manifest, "coding", 200)
 
     assert payload["root"] == str(outputs)
