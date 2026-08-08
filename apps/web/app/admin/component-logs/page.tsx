@@ -1,10 +1,15 @@
 "use client";
 
 import { SquareTerminal as ComponentLogsPageIcon } from "lucide-react";
-import { AlertTriangle, CheckCircle2, Copy, Loader2 } from "lucide-react";
+import { CheckCircle2, Copy, Loader2 } from "lucide-react";
 import { Button, Card, Input, Label, TextField, Tooltip } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminErrorDialog,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+} from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 
 type LogFile = {
@@ -119,12 +124,12 @@ export default function ComponentLogsPage() {
         </Card.Content>
       </Card>
 
-      {error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          <AlertTriangle className="size-4 shrink-0" />
-          <span className="min-w-0">{error}</span>
-        </div>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Could not load component logs"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
 
       <Card className="overflow-hidden p-0">
         <Card.Header className="flex-row items-center justify-between p-4">

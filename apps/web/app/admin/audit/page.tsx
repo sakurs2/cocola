@@ -1,15 +1,16 @@
 "use client";
 
 import { FileText } from "lucide-react";
-import { AlertTriangle, Clock3 } from "lucide-react";
+import { Clock3 } from "lucide-react";
 import { Button, Input, Label, SearchField, TextField } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  AdminAlert,
+  AdminDataGrid,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminPagination,
@@ -266,13 +267,14 @@ export default function AdminAuditPage() {
         </TextField>
       </div>
 
-      {error ? (
-        <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
-          {error}
-        </AdminAlert>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Could not load agent runs"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
 
-      <DataGrid
+      <AdminDataGrid
         aria-label="Agent runs"
         columns={columns}
         contentClassName="min-w-[1420px]"

@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import {
   AdminConfirmDialog,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminPagination,
@@ -351,9 +352,7 @@ export default function AdminSkillsPage() {
         onChange={chooseFile}
       />
 
-      {error ? (
-        <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
-      ) : null}
+      <AdminErrorDialog error={error} onDismiss={() => setError(null)} />
 
       <Card className="p-5">
         <Card.Header className="p-0">

@@ -2,17 +2,22 @@
 
 import { Settings as SettingsPageIcon } from "lucide-react";
 import { Loader2, RotateCcw, Save } from "lucide-react";
-import { AlertTriangle, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, Chip, Input, Label, Switch, TextField, Tooltip } from "@heroui/react";
 import {
   AdminConfirmDialog,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
 } from "@/components/admin/admin-ui";
+import { SelectControl } from "@/components/ui/select-control";
 
 type SettingValue = boolean | number | string | null;
+type QuantityUnit = "MB" | "GB";
+type QuantityDraft = { amount: string; unit: QuantityUnit };
+type DraftValue = SettingValue | QuantityDraft;
 
 type SystemSetting = {
   key: string;
@@ -33,7 +38,7 @@ type SystemSetting = {
   max?: number;
 };
 
-type Drafts = Record<string, SettingValue>;
+type Drafts = Record<string, DraftValue>;
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<SystemSetting[]>([]);
@@ -139,12 +144,12 @@ export default function AdminSettingsPage() {
         }
       />
 
-      {error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          <AlertTriangle className="size-4 shrink-0" />
-          <span className="min-w-0">{error}</span>
-        </div>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Settings operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
       {notice ? (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
           <Check className="size-4 shrink-0" />
@@ -170,7 +175,8 @@ export default function AdminSettingsPage() {
               <Card.Content className="divide-y divide-separator p-0">
                 {rows.map((setting) => {
                   const draftValue = drafts[setting.key] ?? valueForDraft(setting);
-                  const dirty = !sameValue(valueForDraft(setting), draftValue);
+                  const dirty = !sameDraft(setting, valueForDraft(setting), draftValue);
+                  const valid = validDraft(setting, draftValue);
                   const busy = savingKey === setting.key;
                   return (
                     <div
@@ -211,7 +217,7 @@ export default function AdminSettingsPage() {
                             setDrafts((prev) => ({ ...prev, [setting.key]: value }))
                           }
                         />
-                        <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default)}`}</div>
+                        <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default, setting.kind)}`}</div>
                       </div>
 
                       <div className="admin-setting-actions flex items-center justify-end gap-2">
@@ -220,7 +226,7 @@ export default function AdminSettingsPage() {
                             <Tooltip delay={0}>
                               <Button
                                 aria-label={`Save ${setting.label}`}
-                                isDisabled={!dirty || busy}
+                                isDisabled={!dirty || !valid || busy}
                                 size="sm"
                                 variant={dirty ? "primary" : "outline"}
                                 onPress={() => void save(setting)}
@@ -295,8 +301,8 @@ function SettingControl({
   onChange,
 }: {
   setting: SystemSetting;
-  value: SettingValue;
-  onChange: (value: SettingValue) => void;
+  value: DraftValue;
+  onChange: (value: DraftValue) => void;
 }) {
   if (setting.kind === "bool") {
     const checked = value === true;
@@ -314,6 +320,31 @@ function SettingControl({
           {checked ? "Enabled" : "Disabled"}
         </Switch.Content>
       </Switch>
+    );
+  }
+
+  if (setting.kind === "quantity") {
+    const quantity = isQuantityDraft(value) ? value : parseQuantityDraft(value);
+    return (
+      <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
+        <TextField
+          isDisabled={!setting.editable}
+          value={quantity.amount}
+          variant="secondary"
+          onChange={(amount) => onChange({ ...quantity, amount })}
+        >
+          <Label className="sr-only">{setting.label} value</Label>
+          <Input inputMode="decimal" min={1} step="1" type="number" />
+        </TextField>
+        <SelectControl
+          ariaLabel={`${setting.label} unit`}
+          className="h-full rounded-xl"
+          disabled={!setting.editable}
+          options={QUANTITY_UNITS}
+          value={quantity.unit}
+          onValueChange={(unit) => onChange({ ...quantity, unit: unit === "MB" ? "MB" : "GB" })}
+        />
+      </div>
     );
   }
 
@@ -336,23 +367,59 @@ function SettingControl({
   );
 }
 
-function valueForDraft(setting: SystemSetting): SettingValue {
-  if (setting.value !== undefined) return setting.value;
-  return setting.default ?? null;
+const QUANTITY_UNITS = [
+  { value: "MB", label: "MB" },
+  { value: "GB", label: "GB" },
+] as const;
+
+function valueForDraft(setting: SystemSetting): DraftValue {
+  const value = setting.value !== undefined ? setting.value : (setting.default ?? null);
+  return setting.kind === "quantity" ? parseQuantityDraft(value) : value;
 }
 
-function serializeDraft(setting: SystemSetting, value: SettingValue) {
+function serializeDraft(setting: SystemSetting, value: DraftValue) {
   if (setting.kind === "int") return Number(value);
+  if (setting.kind === "quantity") {
+    const quantity = isQuantityDraft(value) ? value : parseQuantityDraft(value);
+    const amount = Number(quantity.amount);
+    if (!Number.isFinite(amount) || amount <= 0) return "";
+    return `${amount}${quantity.unit === "GB" ? "Gi" : "Mi"}`;
+  }
   return value;
 }
 
-function sameValue(a: SettingValue, b: SettingValue) {
-  return String(a ?? "") === String(b ?? "");
+function sameDraft(setting: SystemSetting, a: DraftValue, b: DraftValue) {
+  return String(serializeDraft(setting, a) ?? "") === String(serializeDraft(setting, b) ?? "");
 }
 
-function formatValue(value: SettingValue | undefined) {
+function validDraft(setting: SystemSetting, value: DraftValue) {
+  if (setting.kind !== "quantity") return true;
+  const quantity = isQuantityDraft(value) ? value : parseQuantityDraft(value);
+  const amount = Number(quantity.amount);
+  return Number.isFinite(amount) && amount > 0;
+}
+
+function formatValue(value: SettingValue | undefined, kind?: SystemSetting["kind"]) {
   if (value === undefined || value === null || value === "") return "-";
+  if (kind === "quantity") {
+    const quantity = parseQuantityDraft(value);
+    return `${quantity.amount} ${quantity.unit}`;
+  }
   return String(value);
+}
+
+function isQuantityDraft(value: DraftValue): value is QuantityDraft {
+  return typeof value === "object" && value !== null && "amount" in value && "unit" in value;
+}
+
+function parseQuantityDraft(value: SettingValue | DraftValue): QuantityDraft {
+  if (isQuantityDraft(value)) return value;
+  const raw = String(value ?? "").trim();
+  const match = raw.match(/^([0-9]+(?:\.[0-9]+)?)\s*(Mi|Gi|M|G|MB|GB)?$/i);
+  if (!match) return { amount: raw, unit: "GB" };
+  const amount = match[1] ?? "";
+  const suffix = (match[2] ?? "Gi").toLowerCase();
+  return { amount, unit: suffix.startsWith("m") ? "MB" : "GB" };
 }
 
 function sourceLabel(source: SystemSetting["source"]) {

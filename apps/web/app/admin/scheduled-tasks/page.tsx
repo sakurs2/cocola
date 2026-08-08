@@ -3,13 +3,15 @@
 import { Timer as ClockCountdown } from "lucide-react";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { Button, Card, Dropdown, SearchField } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AdminAlert,
+  AdminDataGrid,
   AdminDrawer,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
@@ -188,7 +190,6 @@ export default function ScheduledTasksPage() {
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
       width: 80,
       cell: (task) => (
         <Dropdown>
@@ -238,7 +239,12 @@ export default function ScheduledTasksPage() {
         }
       />
 
-      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
+      <AdminErrorDialog
+        error={error}
+        title="Scheduled task operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <SearchField
@@ -267,7 +273,7 @@ export default function ScheduledTasksPage() {
         </Segment>
       </div>
 
-      <DataGrid
+      <AdminDataGrid
         aria-label="Scheduled tasks"
         columns={columns}
         contentClassName="min-w-[1060px]"

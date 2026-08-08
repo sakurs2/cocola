@@ -2,14 +2,17 @@
 
 import { Cpu as SandboxNodesPageIcon } from "lucide-react";
 import { Button, Card, Chip, Input, Label, TextField, Tooltip } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import {
+  AdminDataGrid,
   AdminEmptyState,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
+  AdminRowActions,
   AdminStatusBadge,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
@@ -324,48 +327,43 @@ export default function SandboxNodesPage() {
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
-      width: 220,
+      width: 72,
       cell: (node) => {
         const composeNode = node.labels?.["cocola.dev/runtime-mode"] === "compose";
         const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
-        const offlining = actingNode === `${node.name}:offline`;
         return composeNode ? (
           <span className="text-muted text-xs">Single-node runtime</span>
         ) : (
-          <span className="flex justify-center gap-1">
-            {node.schedulable ? (
-              <Button
-                isDisabled={Boolean(actingNode)}
-                size="sm"
-                variant="outline"
-                onPress={() => void runNodeAction(node, "disable")}
-              >
-                <Ban className="size-4" />
-                Disable
-              </Button>
-            ) : (
-              <Button
-                isDisabled={Boolean(actingNode)}
-                size="sm"
-                variant="outline"
-                onPress={() => void runNodeAction(node, "restore")}
-              >
-                <CheckCircle2 className="size-4" />
-                Restore
-              </Button>
-            )}
-            <Button
-              isDisabled={Boolean(actingNode) || alreadyOffline}
-              isPending={offlining}
-              size="sm"
-              variant="danger-soft"
-              onPress={() => void runNodeAction(node, "offline", false)}
-            >
-              <Power className="size-4" />
-              {alreadyOffline ? "Offline" : "Offline"}
-            </Button>
-          </span>
+          <AdminRowActions
+            label={`Actions for node ${node.name}`}
+            busy={Boolean(actingNode)}
+            actions={[
+              node.schedulable
+                ? {
+                    id: "disable",
+                    label: "Disable scheduling",
+                    icon: <Ban className="size-4" />,
+                  }
+                : {
+                    id: "restore",
+                    label: "Restore scheduling",
+                    icon: <CheckCircle2 className="size-4" />,
+                  },
+              {
+                id: "offline",
+                label: alreadyOffline ? "Node is offline" : "Take node offline",
+                icon: <Power className="size-4" />,
+                disabled: alreadyOffline,
+                destructive: true,
+              },
+            ]}
+            onAction={(action) => {
+              if (action === "disable" || action === "restore") {
+                void runNodeAction(node, action);
+              }
+              if (action === "offline") void runNodeAction(node, "offline", false);
+            }}
+          />
         );
       },
     },
@@ -395,11 +393,12 @@ export default function SandboxNodesPage() {
         }
       />
 
-      {error ? (
-        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          {error}
-        </div>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Node operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void refresh()}
+      />
       {notice && !error ? (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
           <CheckCircle2 className="size-4 shrink-0" />
@@ -410,10 +409,10 @@ export default function SandboxNodesPage() {
       {unsupported ? (
         <UnsupportedState />
       ) : (
-        <DataGrid
+        <AdminDataGrid
           aria-label="Sandbox nodes"
           columns={columns}
-          contentClassName="min-w-[1320px]"
+          contentClassName="min-w-[1160px]"
           data={nodes}
           getRowId={(node) => node.name}
           selectionMode="none"

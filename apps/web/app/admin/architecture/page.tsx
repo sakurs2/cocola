@@ -6,6 +6,7 @@ import { Button, Card } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
@@ -142,11 +143,12 @@ export default function AdminArchitecturePage() {
         }
       />
 
-      {error ? (
-        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          {error}
-        </div>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Could not load architecture"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
 
       <section className="min-w-0">
         <Card className="architecture-flow relative min-h-[620px] w-full max-w-full min-w-0 overflow-auto p-5">

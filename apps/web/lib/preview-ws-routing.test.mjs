@@ -45,8 +45,8 @@ test("claimed preview upgrades are hidden from Next's App Router", () => {
 });
 
 test("the dev stack keeps the custom server that owns workspace upgrades", () => {
-  assert.match(runStackSource, /\$SETSID node server\.mjs --port "\$WEB_PORT"/);
-  assert.doesNotMatch(runStackSource, /\$SETSID pnpm dev --port "\$WEB_PORT"/);
+  assert.match(runStackSource, /exec_in_session node server\.mjs --port "\$WEB_PORT"/);
+  assert.doesNotMatch(runStackSource, /exec_in_session pnpm dev --port "\$WEB_PORT"/);
   assert.match(runStackSource, /WEB_HOST="\$\{COCOLA_WEB_HOST:-0\.0\.0\.0\}"/);
   assert.match(runStackSource, /export COCOLA_WEB_HOST="\$WEB_HOST"/);
   assert.match(serverSource, /process\.env\.COCOLA_WEB_HOST \|\| "0\.0\.0\.0"/);

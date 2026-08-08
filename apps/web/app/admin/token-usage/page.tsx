@@ -15,12 +15,18 @@ import {
 } from "chart.js";
 import { Download, Loader2, UserRound } from "lucide-react";
 import { Button, Card, Input, Label, SearchField, TextField } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { Line } from "react-chartjs-2";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AdminPage, AdminPageHeader, AdminRefreshButton } from "@/components/admin/admin-ui";
+import {
+  AdminDataGrid,
+  AdminErrorDialog,
+  AdminPage,
+  AdminPageHeader,
+  AdminRefreshButton,
+} from "@/components/admin/admin-ui";
 
 ChartJS.register(
   CategoryScale,
@@ -382,11 +388,12 @@ export default function AdminTokenUsagePage() {
         </div>
       </div>
 
-      {error ? (
-        <div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-          {error}
-        </div>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Token usage operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
 
       <Card className="p-0">
         <Card.Header className="flex-row items-center justify-between px-5 pb-0 pt-5">
@@ -428,7 +435,7 @@ export default function AdminTokenUsagePage() {
             </SearchField>
           </Card.Header>
           <Card.Content className="p-0">
-            <DataGrid
+            <AdminDataGrid
               aria-label="Token usage by user"
               columns={columns}
               contentClassName="admin-token-usage-grid min-w-[700px]"

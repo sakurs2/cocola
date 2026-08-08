@@ -1,19 +1,22 @@
 "use client";
 
 import { HardDrive as StoragePageIcon } from "lucide-react";
-import { AlertTriangle, Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
-import { Button, Card, Tooltip } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
+import { Button, Card } from "@heroui/react";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AdminAlert,
   AdminConfirmDialog,
+  AdminDataGrid,
+  AdminErrorDialog,
+  AdminMetric,
   AdminPage,
   AdminPageHeader,
   AdminPagination,
   AdminRefreshButton,
+  AdminRowActions,
   AdminStatusBadge,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
@@ -146,6 +149,7 @@ export default function StoragePage() {
   const measureVolume = async (volume: SessionVolume) => {
     const key = volumeKey(volume);
     setError("");
+    setNotice("");
     setMeasuring(key);
     try {
       const query = new URLSearchParams({ pvc_name: volume.pvc_name });
@@ -160,6 +164,7 @@ export default function StoragePage() {
       if (!res.ok) throw new Error(await responseError(res));
       const result = (await res.json()) as StorageMeasurement;
       setMeasurements((current) => ({ ...current, [key]: result }));
+      setNotice("Usage measured");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -187,7 +192,11 @@ export default function StoragePage() {
       }
       if (!res.ok) throw new Error(await responseError(res));
       setPendingDelete(null);
-      setNotice(`Orphan Session Volume ${volume.pvc_name} deletion submitted`);
+      setNotice(
+        isMissingVolume(volume)
+          ? "Stale storage binding cleaned"
+          : "Orphan Session Volume deletion submitted",
+      );
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -216,8 +225,8 @@ export default function StoragePage() {
       setBulkDeleteOpen(false);
       setNotice(
         failed > 0
-          ? `Deleted ${deleted} orphan Session Volumes; ${failed} could not be deleted.`
-          : `Deleted ${deleted} orphan Session Volumes.`,
+          ? `Cleaned ${deleted} stale storage items; ${failed} could not be cleaned.`
+          : `Cleaned ${deleted} stale storage items.`,
       );
       await refresh();
     } catch (err) {
@@ -263,22 +272,37 @@ export default function StoragePage() {
     {
       id: "volume",
       header: "Volume",
-      minWidth: 220,
-      cell: (volume) => (
-        <span className="block min-w-0">
-          <AdminTruncatedValue
-            className="font-mono text-xs"
-            copyLabel="PVC name"
-            value={volume.pvc_name}
-          />
-          <span className="mt-1 flex flex-wrap items-center gap-1">
-            <AdminStatusBadge tone={isAttachedVolume(volume) ? "green" : "amber"} dot>
-              {volume.pvc_phase}
-            </AdminStatusBadge>
-            {volume.delete_allowed ? <AdminStatusBadge tone="red">Orphan</AdminStatusBadge> : null}
+      minWidth: 210,
+      cell: (volume) => {
+        const missing = isMissingVolume(volume);
+        return (
+          <span className="block min-w-0">
+            <AdminTruncatedValue
+              className="font-mono text-xs"
+              copyLabel="PVC name"
+              value={volume.pvc_name}
+            />
+            <span className="mt-1 flex flex-wrap items-center gap-1">
+              <AdminStatusBadge
+                tone={missing ? "red" : isAttachedVolume(volume) ? "green" : "amber"}
+                dot
+              >
+                {missing ? "Missing" : volume.pvc_phase}
+              </AdminStatusBadge>
+              {volume.delete_allowed && !missing ? (
+                <AdminStatusBadge tone="red">Orphan</AdminStatusBadge>
+              ) : null}
+            </span>
+            {missing ? (
+              <span className="text-muted mt-1 block text-[11px]">
+                {volume.delete_allowed
+                  ? "Stale binding can be cleaned"
+                  : "A fresh volume is created on the next run"}
+              </span>
+            ) : null}
           </span>
-        </span>
-      ),
+        );
+      },
     },
     {
       id: "generation",
@@ -301,14 +325,23 @@ export default function StoragePage() {
       header: "Actual usage",
       minWidth: 170,
       cell: (volume) => {
-        const measurement = measurements[volumeKey(volume)];
-        return measurement ? (
+        const key = volumeKey(volume);
+        const measurement = measurements[key];
+        return measuring === key ? (
+          <span className="text-muted flex items-center gap-2 text-xs">
+            <LoaderCircle className="size-3.5 animate-spin" />
+            Measuring…
+          </span>
+        ) : measurement ? (
           <span>
             <span className="block font-mono text-xs font-medium tabular-nums">
               {formatBytes(measurement.allocated_bytes)}
             </span>
             <span className="text-muted block text-xs">
               {measurement.file_count} files · {measurement.directory_count} dirs
+            </span>
+            <span className="text-muted mt-0.5 block text-[11px]">
+              Measured {formatMeasurementTime(measurement.measured_at)}
             </span>
           </span>
         ) : (
@@ -339,52 +372,43 @@ export default function StoragePage() {
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
-      width: 150,
+      width: 72,
       cell: (volume) => {
         const key = volumeKey(volume);
+        const attached = isAttachedVolume(volume);
+        const missing = isMissingVolume(volume);
+        const actions = [
+          {
+            id: "measure",
+            label: attached
+              ? measurements[key]
+                ? "Measure again"
+                : "Measure usage"
+              : "Measurement unavailable",
+            icon: <Gauge className="size-4" />,
+            disabled: !attached,
+          },
+          ...(volume.delete_allowed
+            ? [
+                {
+                  id: "delete",
+                  label: missing ? "Clean stale binding" : "Delete orphan volume",
+                  icon: <Trash2 className="size-4" />,
+                  destructive: true,
+                },
+              ]
+            : []),
+        ];
         return (
-          <span className="flex justify-center gap-1">
-            <Tooltip delay={0}>
-              <Button
-                isIconOnly
-                aria-label={`Measure ${volume.pvc_name}`}
-                isDisabled={measuring === key || !isAttachedVolume(volume)}
-                isPending={measuring === key}
-                size="sm"
-                variant="outline"
-                onPress={() => void measureVolume(volume)}
-              >
-                {measuring === key ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <Gauge className="size-4" />
-                )}
-              </Button>
-              <Tooltip.Content>
-                {!isAttachedVolume(volume)
-                  ? "Measurement requires an attached volume"
-                  : measurements[key]
-                    ? "Measure again"
-                    : "Measure actual usage"}
-              </Tooltip.Content>
-            </Tooltip>
-            {volume.delete_allowed ? (
-              <Tooltip delay={0}>
-                <Button
-                  isIconOnly
-                  aria-label={`Delete orphan ${volume.pvc_name}`}
-                  isDisabled={deleting === key}
-                  size="sm"
-                  variant="danger-soft"
-                  onPress={() => setPendingDelete(volume)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-                <Tooltip.Content>Delete orphan volume</Tooltip.Content>
-              </Tooltip>
-            ) : null}
-          </span>
+          <AdminRowActions
+            label={`Actions for ${volume.pvc_name}`}
+            busy={measuring === key || deleting === key}
+            actions={actions}
+            onAction={(action) => {
+              if (action === "measure") void measureVolume(volume);
+              if (action === "delete") setPendingDelete(volume);
+            }}
+          />
         );
       },
     },
@@ -408,12 +432,35 @@ export default function StoragePage() {
         }
       />
 
-      {error ? (
-        <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
-          {error}
-        </AdminAlert>
+      <AdminErrorDialog
+        error={error}
+        title="Storage operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void refresh()}
+      />
+
+      {!unsupported && nodes.length > 0 ? (
+        <section className="grid gap-3 sm:grid-cols-3">
+          <AdminMetric
+            label="Storage probes"
+            value={`${totals.measuredCount}/${totals.nodeCount}`}
+            detail="nodes reporting"
+            tone={totals.measuredCount === totals.nodeCount ? "green" : "amber"}
+          />
+          <AdminMetric
+            label="Available capacity"
+            value={formatBytes(totals.availableBytes)}
+            detail={`of ${formatBytes(totals.totalBytes)}`}
+            tone="violet"
+          />
+          <AdminMetric
+            label="Session requests"
+            value={formatBytes(totals.requestedBytes)}
+            detail="soft capacity"
+            tone="sky"
+          />
+        </section>
       ) : null}
-      {notice ? <AdminAlert tone="success">{notice}</AdminAlert> : null}
 
       {unsupported ? (
         <Card className="p-8">
@@ -486,10 +533,11 @@ export default function StoragePage() {
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                {notice ? <AdminStatusBadge tone="green">{notice}</AdminStatusBadge> : null}
                 <AdminStatusBadge tone={orphanCount > 0 ? "amber" : "green"} dot>
                   {orphanCount === 0
-                    ? "No orphan volumes"
-                    : `${orphanCount} orphan ${orphanCount === 1 ? "volume" : "volumes"}`}
+                    ? "No cleanup needed"
+                    : `${orphanCount} cleanup ${orphanCount === 1 ? "item" : "items"}`}
                 </AdminStatusBadge>
                 <Button
                   isDisabled={orphanCount === 0 || loading || bulkDeleting || Boolean(deleting)}
@@ -498,16 +546,16 @@ export default function StoragePage() {
                   onPress={() => setBulkDeleteOpen(true)}
                 >
                   <Trash2 className="size-3.5" />
-                  Delete all orphans ({orphanCount})
+                  Clean up all ({orphanCount})
                 </Button>
               </div>
             </div>
 
             <div className="min-w-0">
-              <DataGrid
+              <AdminDataGrid
                 aria-label="Session storage"
                 columns={columns}
-                contentClassName="min-w-[1240px]"
+                contentClassName="min-w-[1160px]"
                 data={volumes}
                 getRowId={volumeKey}
                 selectionMode="none"
@@ -547,13 +595,21 @@ export default function StoragePage() {
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}
-        title="Delete orphan Session Volume?"
+        title={
+          pendingDelete && isMissingVolume(pendingDelete)
+            ? "Clean missing storage record?"
+            : "Delete orphan Session Volume?"
+        }
         description={
           pendingDelete
-            ? `This permanently deletes ${pendingDelete.pvc_name}. Active Session Volumes are not affected.`
+            ? isMissingVolume(pendingDelete)
+              ? `The volume is already missing. This removes its stale database binding so it is not listed again.`
+              : `This permanently deletes ${pendingDelete.pvc_name}. Active Session Volumes are not affected.`
             : ""
         }
-        confirmLabel="Delete orphan"
+        confirmLabel={
+          pendingDelete && isMissingVolume(pendingDelete) ? "Clean stale binding" : "Delete orphan"
+        }
         busy={deleting !== null}
         destructive
         onConfirm={() => void deleteOrphanVolume()}
@@ -561,9 +617,9 @@ export default function StoragePage() {
       <AdminConfirmDialog
         open={bulkDeleteOpen}
         onOpenChange={setBulkDeleteOpen}
-        title={`Delete all ${orphanCount} orphan Session Volumes?`}
-        description="This permanently deletes every Session Volume currently marked as an orphan. Active Session Volumes are not affected."
-        confirmLabel="Delete all orphans"
+        title={`Clean up all ${orphanCount} stale storage items?`}
+        description="This deletes orphan volumes and removes stale Missing bindings. Active Session Volumes are not affected."
+        confirmLabel="Clean up all"
         busy={bulkDeleting}
         destructive
         onConfirm={() => void deleteAllOrphanVolumes()}
@@ -636,6 +692,16 @@ function volumeKey(volume: Pick<SessionVolume, "storage_id" | "pvc_name">) {
 
 function isAttachedVolume(volume: Pick<SessionVolume, "pvc_phase">) {
   return volume.pvc_phase === "Bound" || volume.pvc_phase === "Mounted";
+}
+
+function isMissingVolume(volume: Pick<SessionVolume, "pvc_phase">) {
+  return volume.pvc_phase === "Missing";
+}
+
+function formatMeasurementTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "just now";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function capacityTone(available: number, total: number): "green" | "amber" | "red" {

@@ -49,6 +49,7 @@ import {
   AdminConfirmDialog,
   AdminDrawer,
   AdminEmptyState,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
@@ -322,11 +323,12 @@ export default function AdminMCPPage() {
         }
       />
 
-      {error && !drawerOpen ? (
-        <AdminAlert tone="error" icon={<CircleAlert className="size-4" />}>
-          <span aria-live="polite">{error}</span>
-        </AdminAlert>
-      ) : null}
+      <AdminErrorDialog
+        error={drawerOpen ? null : error}
+        title="MCP server operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
       {notice ? (
         <AdminAlert tone="success" icon={<CircleCheck className="size-4" />}>
           <span aria-live="polite">{notice}</span>

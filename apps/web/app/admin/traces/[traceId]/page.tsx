@@ -21,6 +21,7 @@ import { Button, Card } from "@heroui/react";
 import {
   AdminAlert,
   AdminDrawer,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
@@ -158,11 +159,12 @@ export default function AdminTracePage() {
         ) : null}
       </div>
 
-      {error ? (
-        <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
-          {error}
-        </AdminAlert>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Could not load agent run"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
       {run?.detail_status === "expired" ? (
         <AdminAlert tone="warning" icon={<Clock3 className="size-4" />}>
           Trace details expired. The conversation audit summary remains available.

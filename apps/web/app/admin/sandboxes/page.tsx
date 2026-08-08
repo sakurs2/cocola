@@ -3,17 +3,20 @@
 import { Layers as SandboxesPageIcon } from "lucide-react";
 import {
   AdminConfirmDialog,
+  AdminDataGrid,
   AdminEmptyState,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
+  AdminRowActions,
   AdminStatusBadge,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
-import { Button, Card } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { Card } from "@heroui/react";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
-import { CircleDot, LoaderCircle, Server, Trash2 } from "lucide-react";
+import { CircleDot, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -129,7 +132,7 @@ export default function SandboxesPage() {
       id: "sandbox",
       header: "Sandbox",
       isRowHeader: true,
-      minWidth: 250,
+      width: 220,
       cell: (sandbox) => (
         <span className="block min-w-0">
           <AdminTruncatedValue
@@ -146,7 +149,7 @@ export default function SandboxesPage() {
     {
       id: "status",
       header: "Status",
-      width: 150,
+      width: 135,
       cell: (sandbox) => (
         <AdminStatusBadge tone={STATUS_TONES[sandbox.status] ?? "neutral"} dot>
           {STATUS_LABELS[sandbox.status] ?? sandbox.status}
@@ -155,41 +158,29 @@ export default function SandboxesPage() {
     },
     {
       id: "session",
-      header: "Session",
-      minWidth: 220,
-      cell: (sandbox) => (
-        <AdminTruncatedValue
-          className="font-mono text-xs"
-          copyLabel="session ID"
-          value={sandbox.session_id || "—"}
-        />
-      ),
-    },
-    {
-      id: "user",
-      header: "User",
-      minWidth: 200,
+      header: "Session / User",
+      width: 260,
       cell: (sandbox) => (
         <span className="block min-w-0">
           <AdminTruncatedValue
-            className="text-sm font-medium"
-            copyLabel="username"
-            value={sandbox.username || sandbox.user_id || "—"}
+            className="font-mono text-xs font-medium"
+            copyLabel="session ID"
+            value={sandbox.session_id || "—"}
           />
-          {sandbox.username ? (
-            <AdminTruncatedValue
-              className="text-muted font-mono text-xs"
-              copyLabel="user ID"
-              value={sandbox.user_id}
-            />
-          ) : null}
+          <AdminTruncatedValue
+            className="text-muted text-xs"
+            copyLabel={sandbox.username ? "user ID" : "user"}
+            value={
+              sandbox.username ? `${sandbox.username} · ${sandbox.user_id}` : sandbox.user_id || "—"
+            }
+          />
         </span>
       ),
     },
     {
       id: "runtime",
       header: "Runtime",
-      minWidth: 220,
+      width: 200,
       cell: (sandbox) => (
         <AdminTruncatedValue
           className="font-mono text-xs"
@@ -201,7 +192,7 @@ export default function SandboxesPage() {
     {
       id: "created",
       header: "Created",
-      minWidth: 150,
+      width: 145,
       cell: (sandbox) => (
         <span className="text-muted text-xs tabular-nums">{formatDate(sandbox.created_at)}</span>
       ),
@@ -209,7 +200,7 @@ export default function SandboxesPage() {
     {
       id: "placement",
       header: "Node / Pod",
-      minWidth: 240,
+      width: 220,
       cell: (sandbox) => (
         <span className="block min-w-0">
           <AdminTruncatedValue
@@ -229,28 +220,24 @@ export default function SandboxesPage() {
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
-      width: 100,
-      cell: (sandbox) =>
-        sandbox.status === "ready" || sandbox.status === "orphan" ? (
-          <Button
-            isIconOnly
-            aria-label={`Delete sandbox ${sandbox.sandbox_id}`}
-            isDisabled={Boolean(deletingId)}
-            isPending={deletingId === sandbox.sandbox_id}
-            size="sm"
-            variant="danger-soft"
-            onPress={() => setPendingDeleteId(sandbox.sandbox_id)}
-          >
-            {deletingId === sandbox.sandbox_id ? (
-              <LoaderCircle className="size-4 animate-spin" />
-            ) : (
-              <Trash2 className="size-4" />
-            )}
-          </Button>
-        ) : (
-          <span className="text-muted">—</span>
-        ),
+      width: 72,
+      cell: (sandbox) => (
+        <AdminRowActions
+          label={`Actions for sandbox ${sandbox.sandbox_id}`}
+          busy={deletingId === sandbox.sandbox_id}
+          actions={[
+            {
+              id: "delete",
+              label: sandbox.status === "running" ? "Delete running sandbox" : "Delete sandbox",
+              icon: <Trash2 className="size-4" />,
+              destructive: true,
+            },
+          ]}
+          onAction={(action) => {
+            if (action === "delete") setPendingDeleteId(sandbox.sandbox_id);
+          }}
+        />
+      ),
     },
   ];
 
@@ -272,11 +259,12 @@ export default function SandboxesPage() {
         }
       />
 
-      {error ? (
-        <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          {error}
-        </div>
-      ) : null}
+      <AdminErrorDialog
+        error={error}
+        title="Sandbox operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void refresh()}
+      />
       {notice && !loading && !error && !unsupported ? (
         <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
           <CircleDot className="size-4 shrink-0" />
@@ -287,10 +275,10 @@ export default function SandboxesPage() {
       {unsupported ? (
         <UnsupportedState />
       ) : (
-        <DataGrid
+        <AdminDataGrid
           aria-label="Sandboxes"
           columns={columns}
-          contentClassName="min-w-[1380px]"
+          contentClassName="min-w-[1080px]"
           data={sandboxes}
           getRowId={(sandbox) => sandbox.sandbox_id}
           selectionMode="none"
@@ -351,16 +339,6 @@ function formatDate(value?: string) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
     date.getHours(),
   )}:${pad(date.getMinutes())}`;
-}
-
-function userTitle(sandbox: SandboxRuntime) {
-  if (sandbox.username && sandbox.user_id) return `${sandbox.username} / ${sandbox.user_id}`;
-  return sandbox.username || sandbox.user_id || undefined;
-}
-
-function podTitle(sandbox: SandboxRuntime) {
-  if (sandbox.pod_name && sandbox.pod_phase) return `${sandbox.pod_name} / ${sandbox.pod_phase}`;
-  return sandbox.pod_name || sandbox.pod_phase || undefined;
 }
 
 async function responseError(res: Response) {

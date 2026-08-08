@@ -18,14 +18,16 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { Button, Chip, Dropdown, Input, SearchField, Switch } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AdminAlert,
   AdminConfirmDialog,
+  AdminDataGrid,
   AdminDrawer,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
@@ -514,7 +516,12 @@ export default function AdminModelsPage() {
         }
       />
 
-      {error ? <AdminAlert tone="error">{error}</AdminAlert> : null}
+      <AdminErrorDialog
+        error={error}
+        title="Model configuration operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void load()}
+      />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <Segment
@@ -1306,7 +1313,6 @@ function ModelsList({
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
       width: 80,
       cell: (model) => (
         <ResourceMenu
@@ -1323,7 +1329,7 @@ function ModelsList({
     },
   ];
   return (
-    <DataGrid
+    <AdminDataGrid
       aria-label="Model routes"
       columns={columns}
       contentClassName="min-w-[880px]"
@@ -1441,7 +1447,6 @@ function ProvidersList({
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
       width: 80,
       cell: (provider) => (
         <ResourceMenu onEdit={() => onEdit(provider)} onDelete={() => onDelete(provider)} />
@@ -1449,7 +1454,7 @@ function ProvidersList({
     },
   ];
   return (
-    <DataGrid
+    <AdminDataGrid
       aria-label="Model providers"
       columns={columns}
       contentClassName="min-w-[980px]"

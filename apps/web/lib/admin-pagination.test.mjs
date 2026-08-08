@@ -52,11 +52,11 @@ test("destructive admin actions use product dialogs instead of browser confirmat
   assert.match(sandboxesSource, /<AdminConfirmDialog/);
 });
 
-test("Session Storage can delete every current orphan with one backend request", () => {
-  assert.match(storageSource, /Delete all orphans \(\{orphanCount\}\)/);
+test("Session Storage can clean every stale item with one backend request", () => {
+  assert.match(storageSource, /Clean up all \(\{orphanCount\}\)/);
   assert.match(storageSource, /fetch\(\"\/api\/admin\/session-storage\/orphans\"/);
   assert.match(orphanRouteSource, /proxyAdmin\(req, "\/admin\/session-storage\/orphans"\)/);
-  assert.match(storageSource, /orphanCount === 0\s*\? "No orphan volumes"/);
-  assert.match(storageSource, /volume\.delete_allowed \? <AdminStatusBadge tone="red">Orphan/);
+  assert.match(storageSource, /orphanCount === 0\s*\? "No cleanup needed"/);
+  assert.match(storageSource, /volume\.delete_allowed && !missing/);
   assert.match(storageSource, /isDisabled=\{orphanCount === 0 \|\|/);
 });

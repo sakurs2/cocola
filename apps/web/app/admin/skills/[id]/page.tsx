@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, FileText, Folder, Hash, LoaderCircle } from "lucide-react";
 import { SkillIcon } from "@/components/ui/skill-icon";
+import { AdminErrorDialog } from "@/components/admin/admin-ui";
 
 type Skill = {
   id: string;
@@ -74,9 +75,7 @@ export default function AdminSkillDetailPage() {
           </div>
         </header>
 
-        {error ? (
-          <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">{error}</div>
-        ) : null}
+        <AdminErrorDialog error={error} onDismiss={() => setError(null)} />
 
         {!skill && !error ? (
           <div className="text-muted flex h-40 items-center justify-center">

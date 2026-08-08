@@ -11,13 +11,15 @@ import {
   SearchField,
   TextField,
 } from "@heroui/react";
-import { DataGrid, type DataGridColumn } from "@cocola/ui-compat/data-grid";
+import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import {
   AdminAlert,
   AdminConfirmDialog,
+  AdminDataGrid,
   AdminDrawer,
+  AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
 } from "@/components/admin/admin-ui";
@@ -359,7 +361,6 @@ export default function AdminUsersPage() {
       id: "actions",
       header: "Actions",
       align: "center",
-      pinned: "end",
       width: 80,
       cell: (user) => {
         const busy = actingId === user.id;
@@ -451,7 +452,12 @@ export default function AdminUsersPage() {
           </Button>
         }
       />
-      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      <AdminErrorDialog
+        error={error}
+        title="User operation failed"
+        onDismiss={() => setError("")}
+        onRetry={() => void refresh()}
+      />
       {notice && (
         <AdminAlert tone="success" icon={<CheckCircle2 className="size-4" />}>
           {notice}
@@ -493,7 +499,7 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      <DataGrid
+      <AdminDataGrid
         aria-label="Users"
         columns={columns}
         contentClassName="min-w-[840px]"

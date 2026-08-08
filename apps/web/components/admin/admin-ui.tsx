@@ -1,9 +1,27 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle2, ChevronLeft, ChevronRight, Copy, RefreshCw } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Copy,
+  LoaderCircle,
+  MoreHorizontal,
+  RefreshCw,
+} from "lucide-react";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
-import { Button, Card, Chip, Tooltip, type ButtonProps } from "@heroui/react";
+import {
+  AlertDialog,
+  Button,
+  Card,
+  Chip,
+  Dropdown,
+  Tooltip,
+  type ButtonProps,
+} from "@heroui/react";
+import { DataGrid, type DataGridProps } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
@@ -205,6 +223,77 @@ export function AdminStatusBadge({
   );
 }
 
+export function AdminDataGrid<T extends object>({
+  scrollContainerClassName,
+  ...props
+}: DataGridProps<T>) {
+  return (
+    <DataGrid
+      {...props}
+      scrollContainerClassName={cn("admin-data-grid-scroll", scrollContainerClassName)}
+    />
+  );
+}
+
+export type AdminRowAction = {
+  id: string;
+  label: string;
+  icon?: ReactNode;
+  disabled?: boolean;
+  destructive?: boolean;
+};
+
+export function AdminRowActions({
+  label,
+  actions,
+  busy = false,
+  onAction,
+}: {
+  label: string;
+  actions: AdminRowAction[];
+  busy?: boolean;
+  onAction: (id: string) => void;
+}) {
+  return (
+    <Dropdown>
+      <Dropdown.Trigger
+        aria-label={label}
+        className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus"
+        isDisabled={busy || actions.length === 0}
+      >
+        {busy ? (
+          <LoaderCircle className="size-4 animate-spin" />
+        ) : (
+          <MoreHorizontal className="size-4" />
+        )}
+      </Dropdown.Trigger>
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu aria-label={label} onAction={(key) => onAction(String(key))}>
+          {actions.map((action) => (
+            <Dropdown.Item
+              key={action.id}
+              id={action.id}
+              isDisabled={action.disabled}
+              textValue={action.label}
+              variant={action.destructive ? "danger" : undefined}
+            >
+              <span
+                className={cn(
+                  "flex min-w-0 items-center gap-2",
+                  action.destructive && "text-danger",
+                )}
+              >
+                {action.icon ? <span className="shrink-0">{action.icon}</span> : null}
+                <span>{action.label}</span>
+              </span>
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
+}
+
 export function AdminTruncatedValue({
   value,
   copyLabel = "value",
@@ -253,7 +342,7 @@ export function AdminTruncatedValue({
         isIconOnly
         aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`}
         className={cn(
-          "size-7 min-w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
+          "size-7 min-w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
           !truncated && "invisible",
         )}
         isDisabled={!truncated}
@@ -299,6 +388,68 @@ export function AdminAlert({
       {icon ? <span className="mt-0.5 shrink-0">{icon}</span> : null}
       <div className="min-w-0">{children}</div>
     </div>
+  );
+}
+
+export function AdminErrorDialog({
+  error,
+  title = "Operation failed",
+  retryLabel = "Try again",
+  onDismiss,
+  onRetry,
+}: {
+  error: string | null | undefined;
+  title?: string;
+  retryLabel?: string;
+  onDismiss: () => void;
+  onRetry?: () => void;
+}) {
+  return (
+    <AlertDialog
+      isOpen={Boolean(error)}
+      onOpenChange={(open) => {
+        if (!open) onDismiss();
+      }}
+    >
+      <AlertDialog.Backdrop isDismissable>
+        <AlertDialog.Container placement="center" size="sm">
+          <AlertDialog.Dialog>
+            <AlertDialog.Header className="items-start">
+              <AlertDialog.Icon status="danger">
+                <CircleAlert className="size-5" />
+              </AlertDialog.Icon>
+              <div className="min-w-0">
+                <AlertDialog.Heading>{title}</AlertDialog.Heading>
+                <p className="mt-1 text-sm leading-6 text-muted">
+                  Cocola could not complete the requested admin operation.
+                </p>
+              </div>
+            </AlertDialog.Header>
+            <AlertDialog.Body>
+              <p className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-danger/10 px-3 py-2.5 text-sm text-danger">
+                {error}
+              </p>
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button variant="outline" onPress={onDismiss}>
+                Close
+              </Button>
+              {onRetry ? (
+                <Button
+                  variant="danger"
+                  onPress={() => {
+                    onDismiss();
+                    onRetry();
+                  }}
+                >
+                  {retryLabel}
+                </Button>
+              ) : null}
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
+    </AlertDialog>
   );
 }
 
