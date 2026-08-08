@@ -90,13 +90,15 @@ func (a *API) validatePlanWorkspace(
 	if a.projects == nil || a.gitInspector == nil || strings.TrimSpace(plan.WorkspaceRevision) == "" {
 		return false
 	}
-	value, scmToken, err := a.projects.ProjectContext(ctx, project.Identity{
+	projectIdentity := project.Identity{
 		TenantID: identity.TenantID, UserID: identity.UserID, Email: identity.Email,
 		Name: identity.Name, Username: identity.Username,
-	}, conversationID)
+	}
+	value, scmToken, err := a.projects.ProjectContext(ctx, projectIdentity, conversationID)
 	if err != nil {
 		return false
 	}
+	defer a.projectCredentialRelease(projectIdentity, value.RepositoryProvider, scmToken)()
 	inspectCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	result, err := a.gitInspector.InspectWorkspaceGit(inspectCtx, agent.InspectRequest{

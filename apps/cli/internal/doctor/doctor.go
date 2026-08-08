@@ -112,6 +112,7 @@ func Run(ctx context.Context, paths config.Paths) Report {
 
 	volumePresent := inspectVolumes(ctx, runner, state, add)
 	statuses := inspectServices(ctx, runner, state, add)
+	inspectInternalSCMEndpoint(ctx, runner, state, statuses, add)
 	inspectPostgresCredentials(ctx, runner, volumePresent["pgdata"], statuses, add)
 	inspectImages(ctx, runner, add)
 	return report
@@ -200,7 +201,7 @@ func inspectServices(
 			message = service.State
 		}
 		switch {
-		case service.Service == "minio-init" && stateName == "exited" && service.ExitCode == 0:
+		case (service.Service == "minio-init" || service.Service == "forgejo-db-init" || service.Service == "forgejo-init") && stateName == "exited" && service.ExitCode == 0:
 			add(name, StatusPass, "completed successfully")
 		case stateName == "running" && (health == "" || health == "healthy"):
 			add(name, StatusPass, message)
@@ -213,7 +214,8 @@ func inspectServices(
 		}
 	}
 	expected := []string{
-		"redis", "postgres", "minio", "minio-init", "sandbox-manager",
+		"redis", "postgres", "forgejo-db-init", "forgejo", "forgejo-init",
+		"minio", "minio-init", "sandbox-manager", "host-agent",
 		"llm-gateway", "admin-api", "agent-runtime", "gateway", "web",
 	}
 	if state.ManagedOpenSandbox {
@@ -233,6 +235,42 @@ func inspectServices(
 		add("services", status, "containers not created: "+strings.Join(missing, ", "))
 	}
 	return observed
+}
+
+func inspectInternalSCMEndpoint(
+	ctx context.Context,
+	runner *compose.Runner,
+	state config.State,
+	statuses map[string]compose.ServiceStatus,
+	add func(string, Status, string),
+) {
+	forgejo, ok := statuses["forgejo"]
+	if !ok || strings.ToLower(forgejo.State) != "running" {
+		add("internal SCM endpoint", StatusWarning, "not checked because Internal SCM is not running")
+		return
+	}
+	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	owned, err := runner.ServiceOwnsPublishedPort(
+		checkContext, "forgejo", 3000, state.InternalSCM.HostPort,
+	)
+	if err != nil {
+		add("internal SCM endpoint", StatusFail, err.Error())
+		return
+	}
+	if !owned {
+		add(
+			"internal SCM endpoint",
+			StatusFail,
+			fmt.Sprintf("configured host port %d is not published by the Forgejo container", state.InternalSCM.HostPort),
+		)
+		return
+	}
+	add(
+		"internal SCM endpoint",
+		StatusPass,
+		fmt.Sprintf("host port %d is owned by the Forgejo container", state.InternalSCM.HostPort),
+	)
 }
 
 func inspectPostgresCredentials(

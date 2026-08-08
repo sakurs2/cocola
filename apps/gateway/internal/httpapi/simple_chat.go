@@ -1216,13 +1216,19 @@ func (a *API) executeLiveRun(live *liveRun) {
 		if a.projects == nil {
 			projectSetupErr = project.ErrDisabled
 		} else {
-			value, token, err := a.projects.ProjectContext(live.ctx, project.Identity{
+			projectIdentity := project.Identity{
 				TenantID: live.identity.TenantID, UserID: live.identity.UserID, Email: live.identity.Email,
 				Name: live.identity.Name, Username: live.identity.Username,
-			}, live.request.SessionID)
+			}
+			value, token, err := a.projects.ProjectContext(
+				live.ctx, projectIdentity, live.request.SessionID,
+			)
 			if err != nil {
 				projectSetupErr = err
 			} else {
+				defer a.projectCredentialRelease(
+					projectIdentity, value.RepositoryProvider, token,
+				)()
 				projectContext = &agent.ProjectContext{
 					ProjectID: value.ProjectID, RepositoryID: value.RepositoryExternalID,
 					CloneURL: value.CloneURL, DefaultBranch: value.DefaultBranch,

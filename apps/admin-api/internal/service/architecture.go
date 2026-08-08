@@ -270,6 +270,7 @@ func architectureEdges() []ArchitectureEdge {
 		{From: "agent-runtime", To: "minio", Label: "attachments", Kind: "s3"},
 		{From: "sandbox-manager", To: "opensandbox", Label: "provider", Kind: "http"},
 		{From: "opensandbox", To: "user-sandboxes", Label: "creates", Kind: "runtime"},
+		{From: "user-sandboxes", To: "internal-scm", Label: "clone / push", Kind: "git+http"},
 		{From: "user-sandboxes", To: "llm-gateway", Label: "model API", Kind: "http"},
 		{From: "llm-gateway", To: "redis", Label: "quota", Kind: "redis"},
 		{From: "llm-gateway", To: "postgres", Label: "models", Kind: "sql"},

@@ -179,12 +179,17 @@ async def inspect_project(
     sandbox_id: str,
     spec: ProjectSpec,
     operation: str,
+    token: str,
     *,
     path: str = "",
     diff_target: str = "",
     commit_sha: str = "",
 ) -> dict[str, Any]:
     validate_spec(spec)
+    if not token:
+        raise ProjectWorkspaceError(
+            "PROJECT_CREDENTIAL_UNAVAILABLE", "Project credential is unavailable"
+        )
     if operation not in {"status", "diff", "commit"}:
         raise ProjectWorkspaceError("GIT_OPERATION_INVALID", "Git operation is invalid")
     if operation == "diff":
@@ -202,6 +207,7 @@ async def inspect_project(
         sandbox_id=sandbox_id,
         cmd=["python3", "-c", _PROJECT_GIT_SCRIPT],
         cwd="/",
+        env={"COCOLA_SCM_TOKEN": token},
         stdin=json.dumps(
             {
                 "operation": operation,
@@ -211,7 +217,7 @@ async def inspect_project(
                 "commit_sha": commit_sha,
             }
         ),
-        timeout_secs=60,
+        timeout_secs=600,
     )
     return _decode_result(result, "GIT_INSPECT_FAILED")
 
@@ -233,8 +239,13 @@ async def publish_project(
         or remote.username is not None
         or remote.password is not None
         or not remote_clone_url.endswith(".git")
-        or len(expected_head_sha) != 40
-        or any(char not in "0123456789abcdefABCDEF" for char in expected_head_sha)
+        or (
+            expected_head_sha
+            and (
+                len(expected_head_sha) != 40
+                or any(char not in "0123456789abcdefABCDEF" for char in expected_head_sha)
+            )
+        )
     ):
         raise ProjectWorkspaceError("PROJECT_PUBLISH_INVALID", "Publish request is invalid")
     result = await executor.exec(
@@ -852,8 +863,9 @@ def publish():
     if snapshot["dirty"]:
         fail("PROJECT_PUBLISH_DIRTY", "Commit local changes before publishing")
     expected_head = request.get("expected_head_sha", "")
-    if snapshot["head_sha"].lower() != expected_head.lower():
+    if expected_head and snapshot["head_sha"].lower() != expected_head.lower():
         fail("PROJECT_PUBLISH_HEAD_CHANGED", "Project HEAD changed before publishing")
+    publish_head = snapshot["head_sha"]
     remote_url = request.get("remote_clone_url", "")
     remote = urllib.parse.urlsplit(remote_url)
     if (
@@ -880,7 +892,7 @@ def publish():
     )
     try:
         pushed = git(
-            ["push", remote_url, expected_head + ":refs/heads/" + spec["task_branch"]],
+            ["push", remote_url, publish_head + ":refs/heads/" + spec["task_branch"]],
             env={
                 "GIT_ASKPASS": str(askpass),
                 "COCOLA_SCM_USERNAME": scm_username,
@@ -897,15 +909,17 @@ def publish():
     finally:
         os.environ.pop("COCOLA_SCM_TOKEN", None)
         shutil.rmtree(askpass_dir, ignore_errors=True)
-    return snapshot["head_sha"]
+    return snapshot
 
 operation = request["operation"]
 if operation == "bootstrap":
     bootstrap()
     print(json.dumps({"ok": True, "snapshot": status_snapshot()}))
 elif operation == "status":
+    bootstrap()
     print(json.dumps({"ok": True, "snapshot": status_snapshot()}))
 elif operation == "diff":
+    bootstrap()
     validate_workspace()
     args = ["diff", "--no-ext-diff", "--no-textconv"]
     expected_codes = {0}
@@ -930,6 +944,7 @@ elif operation == "diff":
         "binary": binary, "truncated": truncated,
     }))
 elif operation == "commit":
+    bootstrap()
     commit_sha = request.get("commit_sha", "")
     commit, commit_files, files_truncated, parent = commit_details(commit_sha)
     path = request.get("path", "")
@@ -948,7 +963,9 @@ elif operation == "commit":
         "truncated": diff_truncated if path else files_truncated,
     }))
 elif operation == "publish":
-    print(json.dumps({"ok": True, "head_sha": publish()}))
+    bootstrap()
+    snapshot = publish()
+    print(json.dumps({"ok": True, "head_sha": snapshot["head_sha"], "snapshot": snapshot}))
 else:
     fail("GIT_OPERATION_INVALID", "Git operation is invalid")
 """

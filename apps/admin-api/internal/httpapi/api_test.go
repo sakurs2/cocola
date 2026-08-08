@@ -1490,6 +1490,16 @@ func TestArchitectureGraph(t *testing.T) {
 	if len(graph.Edges) == 0 {
 		t.Fatal("expected edges")
 	}
+	hasSandboxSCMEdge := false
+	for _, edge := range graph.Edges {
+		if edge.From == "user-sandboxes" && edge.To == "internal-scm" {
+			hasSandboxSCMEdge = true
+			break
+		}
+	}
+	if !hasSandboxSCMEdge {
+		t.Fatal("expected user sandbox to Internal SCM edge")
+	}
 	nodes := map[string]service.ArchitectureNode{}
 	for _, node := range graph.Nodes {
 		nodes[node.ID] = node

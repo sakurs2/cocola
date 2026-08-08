@@ -456,6 +456,7 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 	if a.writeProjectError(w, err) {
 		return
 	}
+	defer a.projectCredentialRelease(id, contextValue.RepositoryProvider, scmToken)()
 	inspectCtx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
 	result, err := a.gitInspector.InspectWorkspaceGit(inspectCtx, agent.InspectRequest{
@@ -539,62 +540,104 @@ func (a *API) createProjectChangeRequest(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
 		return
 	}
-	if a.projects == nil || a.gitInspector == nil || a.gitPublisher == nil {
+	if a.projects == nil || a.gitPublisher == nil {
 		writeErr(w, http.StatusNotImplemented, "CHANGE_REQUEST_UNAVAILABLE", "Change requests are not configured")
 		return
 	}
-	projectID := r.PathValue("id")
-	conversationID := r.PathValue("task")
-	if !a.projectTaskIdle(
-		w, r, id, conversationID, "Wait for the running answer before creating a change request",
-	) {
-		return
-	}
-	preparation, err := a.projects.PrepareChangeRequest(r.Context(), id, projectID, conversationID)
-	if a.writeProjectError(w, err) {
-		return
-	}
-	if preparation.Project.RepositoryProvider == project.ProviderGitHub {
-		defer func() {
-			revokeContext, revokeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer revokeCancel()
-			a.projects.RevokeGitHubToken(revokeContext, id, preparation.Token)
-		}()
-	}
-	publishContext, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-	gitContext := agentProjectContext(preparation.Context)
-	inspection, err := a.gitInspector.InspectWorkspaceGit(publishContext, agent.InspectRequest{
-		UserID: id.UserID, SessionID: conversationID, Operation: "status",
-		SCMToken: preparation.Token, Project: gitContext,
-	})
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, "GIT_INSPECT_FAILED", "could not inspect the Project workspace")
-		return
-	}
-	if inspection.Snapshot.Dirty || inspection.Snapshot.HeadSHA == "" {
-		writeErr(w, http.StatusConflict, "PROJECT_WORKSPACE_DIRTY", "commit all changes before creating a change request")
-		return
-	}
-	headSHA, err := a.gitPublisher.PublishWorkspaceGit(publishContext, agent.PublishRequest{
-		UserID: id.UserID, SessionID: conversationID, SCMToken: preparation.Token,
-		RemoteCloneURL: preparation.CloneURL, ExpectedHeadSHA: inspection.Snapshot.HeadSHA,
-		Project: gitContext,
-	})
-	if err != nil || !strings.EqualFold(headSHA, inspection.Snapshot.HeadSHA) {
-		a.log.Warn("Project task branch publish failed")
-		writeErr(w, http.StatusBadGateway, "PROJECT_PUBLISH_FAILED", "could not publish the task branch")
-		return
-	}
-	result, err := a.projects.CompleteChangeRequest(r.Context(), id, preparation, headSHA)
-	if a.writeProjectError(w, err) {
+	result, existed, ok := a.publishProjectTask(
+		w, r, id, false, "Wait for the running answer before creating a change request",
+	)
+	if !ok {
 		return
 	}
 	status := http.StatusCreated
-	if preparation.Existing != nil {
+	if existed {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, result)
+}
+
+func (a *API) updateProjectChangeRequest(w http.ResponseWriter, r *http.Request) {
+	id, ok := projectIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return
+	}
+	if a.projects == nil || a.gitPublisher == nil {
+		writeErr(w, http.StatusNotImplemented, "CHANGE_REQUEST_UNAVAILABLE", "Change requests are not configured")
+		return
+	}
+	result, _, ok := a.publishProjectTask(
+		w, r, id, true, "Wait for the running answer before updating the task branch",
+	)
+	if ok {
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func (a *API) publishProjectTask(
+	w http.ResponseWriter,
+	r *http.Request,
+	id project.Identity,
+	requireExisting bool,
+	busyMessage string,
+) (project.ChangeRequest, bool, bool) {
+	projectID, conversationID := r.PathValue("id"), r.PathValue("task")
+	if !a.projectTaskIdle(w, r, id, conversationID, busyMessage) {
+		return project.ChangeRequest{}, false, false
+	}
+	preparation, err := a.projects.PrepareChangeRequest(r.Context(), id, projectID, conversationID)
+	if a.writeProjectError(w, err) {
+		return project.ChangeRequest{}, false, false
+	}
+	if requireExisting && preparation.Existing == nil {
+		writeErr(w, http.StatusNotFound, "CHANGE_REQUEST_NOT_FOUND", "create a change request before updating its branch")
+		return project.ChangeRequest{}, false, false
+	}
+	defer a.projectCredentialRelease(
+		id, preparation.Project.RepositoryProvider, preparation.Token,
+	)()
+	publishContext, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	headSHA, err := a.gitPublisher.PublishWorkspaceGit(publishContext, agent.PublishRequest{
+		UserID: id.UserID, SessionID: conversationID, SCMToken: preparation.Token,
+		RemoteCloneURL: preparation.CloneURL, Project: agentProjectContext(preparation.Context),
+	})
+	if err != nil {
+		if agent.GitErrorCode(err) == "PROJECT_PUBLISH_DIRTY" {
+			writeErr(w, http.StatusConflict, "PROJECT_WORKSPACE_DIRTY", "commit all changes before publishing the task branch")
+			return project.ChangeRequest{}, false, false
+		}
+		a.log.Warn("Project task branch publish failed")
+		writeErr(w, http.StatusBadGateway, "PROJECT_PUBLISH_FAILED", "could not publish the task branch")
+		return project.ChangeRequest{}, false, false
+	}
+	completionContext, completionCancel := context.WithTimeout(
+		context.WithoutCancel(r.Context()), 30*time.Second,
+	)
+	defer completionCancel()
+	result, err := a.projects.CompleteChangeRequest(
+		completionContext, id, preparation, headSHA,
+	)
+	if a.writeProjectError(w, err) {
+		return project.ChangeRequest{}, false, false
+	}
+	return result, preparation.Existing != nil, true
+}
+
+func (a *API) projectCredentialRelease(
+	id project.Identity,
+	provider string,
+	token string,
+) func() {
+	if provider != project.ProviderGitHub || strings.TrimSpace(token) == "" {
+		return func() {}
+	}
+	return func() {
+		revokeContext, revokeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer revokeCancel()
+		a.projects.RevokeGitHubToken(revokeContext, id, token)
+	}
 }
 
 func (a *API) getProjectChangeRequest(w http.ResponseWriter, r *http.Request) {
@@ -612,50 +655,6 @@ func (a *API) refreshProjectChangeRequest(w http.ResponseWriter, r *http.Request
 		return
 	}
 	projectID, conversationID := r.PathValue("id"), r.PathValue("task")
-	if r.Method == http.MethodPost && a.gitInspector != nil && a.gitPublisher != nil {
-		if !a.projectTaskIdle(
-			w, r, id, conversationID, "Wait for the running answer before updating the change request",
-		) {
-			return
-		}
-		preparation, prepareErr := a.projects.PrepareChangeRequest(
-			r.Context(), id, projectID, conversationID,
-		)
-		if a.writeProjectError(w, prepareErr) {
-			return
-		}
-		if preparation.Project.RepositoryProvider == project.ProviderGitHub {
-			defer func() {
-				revokeContext, revokeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer revokeCancel()
-				a.projects.RevokeGitHubToken(revokeContext, id, preparation.Token)
-			}()
-		}
-		syncContext, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-		defer cancel()
-		gitContext := agentProjectContext(preparation.Context)
-		inspection, inspectErr := a.gitInspector.InspectWorkspaceGit(syncContext, agent.InspectRequest{
-			UserID: id.UserID, SessionID: conversationID, Operation: "status",
-			SCMToken: preparation.Token, Project: gitContext,
-		})
-		if inspectErr != nil {
-			writeErr(w, http.StatusBadGateway, "GIT_INSPECT_FAILED", "could not inspect the Project workspace")
-			return
-		}
-		if !inspection.Snapshot.Dirty && inspection.Snapshot.HeadSHA != "" &&
-			(preparation.Existing == nil ||
-				!strings.EqualFold(preparation.Existing.HeadSHA, inspection.Snapshot.HeadSHA)) {
-			headSHA, publishErr := a.gitPublisher.PublishWorkspaceGit(syncContext, agent.PublishRequest{
-				UserID: id.UserID, SessionID: conversationID, SCMToken: preparation.Token,
-				RemoteCloneURL: preparation.CloneURL, ExpectedHeadSHA: inspection.Snapshot.HeadSHA,
-				Project: gitContext,
-			})
-			if publishErr != nil || !strings.EqualFold(headSHA, inspection.Snapshot.HeadSHA) {
-				writeErr(w, http.StatusBadGateway, "PROJECT_PUBLISH_FAILED", "could not update the task branch")
-				return
-			}
-		}
-	}
 	result, err := a.projects.RefreshChangeRequest(
 		r.Context(), id, projectID, conversationID,
 	)

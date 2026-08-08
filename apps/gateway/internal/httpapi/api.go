@@ -446,6 +446,8 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.getProjectChangeRequest))))
 	mux.Handle("POST /v1/projects/{id}/tasks/{task}/refresh", a.instrument("POST /v1/projects/{id}/tasks/{task}/refresh",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.refreshProjectChangeRequest))))
+	mux.Handle("POST /v1/projects/{id}/tasks/{task}/update", a.instrument("POST /v1/projects/{id}/tasks/{task}/update",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.updateProjectChangeRequest))))
 	mux.Handle("POST /v1/projects/{id}/tasks/{task}/merge", a.instrument("POST /v1/projects/{id}/tasks/{task}/merge",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.mergeProjectChangeRequest))))
 	mux.Handle("GET /v1/projects/{id}/branches", a.instrument("GET /v1/projects/{id}/branches",

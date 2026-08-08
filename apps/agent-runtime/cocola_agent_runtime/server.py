@@ -787,12 +787,12 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 self._heartbeat_sandbox(box.id, context, asyncio.current_task())
             )
             try:
-                await bootstrap_project(self._executor, box.id, spec, scm_token)
                 result = await inspect_project(
                     self._executor,
                     box.id,
                     spec,
                     str(request.operation or ""),
+                    scm_token,
                     path=str(request.path or ""),
                     diff_target=str(request.diff_target or ""),
                     commit_sha=str(request.commit_sha or ""),
@@ -824,7 +824,6 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 self._heartbeat_sandbox(box.id, context, asyncio.current_task())
             )
             try:
-                await bootstrap_project(self._executor, box.id, spec, scm_token)
                 result = await publish_project(
                     self._executor,
                     box.id,
@@ -1854,7 +1853,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 return None
             try:
                 inspection = await inspect_project(
-                    self._executor, sandbox_id, project_spec, "status"
+                    self._executor, sandbox_id, project_spec, "status", scm_token
                 )
                 await context.write(
                     pb.AgentEvent(

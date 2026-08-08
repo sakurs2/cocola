@@ -23,7 +23,7 @@ const DefaultRegistry = "ghcr.io/sakurs2"
 // CurrentSchemaVersion versions the CLI-owned deployment files independently
 // from the Cocola release. Every incompatible config change must add an
 // explicit migration before this value is incremented.
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 2
 
 const (
 	defaultAgentRuntimeID       = "claude-code"
@@ -32,6 +32,8 @@ const (
 	defaultToolStepTimeoutSecs  = "600"
 	defaultLLMTimeoutSecs       = "600"
 	defaultSandboxTokenTTL      = "604800"
+	defaultInternalSCMAPIURL    = "http://forgejo:3000"
+	defaultInternalSCMHostPort  = 3001
 )
 
 var ErrAlreadyInstalled = errors.New("cocola is already installed in this directory")
@@ -59,21 +61,33 @@ type Options struct {
 	ExternalOpenSandboxURL string
 	SandboxLLMBaseURL      string
 	SessionVolumeSize      string
+	InternalSCM            InternalSCMEndpoint
+}
+
+// InternalSCMEndpoint keeps the three network views of the embedded source
+// control service together. APIURL is container-internal, HostPort is the
+// loopback binding owned by Compose, and SandboxCloneURL is the address a task
+// sandbox can actually reach.
+type InternalSCMEndpoint struct {
+	APIURL          string `json:"api_url"`
+	HostPort        int    `json:"host_port"`
+	SandboxCloneURL string `json:"sandbox_clone_url"`
 }
 
 type State struct {
-	ConfigSchemaVersion    int             `json:"config_schema_version"`
-	Version                string          `json:"version"`
-	LastSuccessfulVersion  string          `json:"last_successful_version,omitempty"`
-	DeploymentRevision     string          `json:"deployment_revision"`
-	LastSuccessfulRevision string          `json:"last_successful_revision,omitempty"`
-	ManagedOpenSandbox     bool            `json:"managed_opensandbox"`
-	SandboxImage           string          `json:"sandbox_image"`
-	PublicURL              string          `json:"public_url"`
-	WebPort                int             `json:"web_port"`
-	GatewayPort            int             `json:"gateway_port"`
-	LLMPort                int             `json:"llm_port"`
-	PendingUpgrade         *PendingUpgrade `json:"pending_upgrade,omitempty"`
+	ConfigSchemaVersion    int                 `json:"config_schema_version"`
+	Version                string              `json:"version"`
+	LastSuccessfulVersion  string              `json:"last_successful_version,omitempty"`
+	DeploymentRevision     string              `json:"deployment_revision"`
+	LastSuccessfulRevision string              `json:"last_successful_revision,omitempty"`
+	ManagedOpenSandbox     bool                `json:"managed_opensandbox"`
+	SandboxImage           string              `json:"sandbox_image"`
+	PublicURL              string              `json:"public_url"`
+	WebPort                int                 `json:"web_port"`
+	GatewayPort            int                 `json:"gateway_port"`
+	LLMPort                int                 `json:"llm_port"`
+	InternalSCM            InternalSCMEndpoint `json:"internal_scm"`
+	PendingUpgrade         *PendingUpgrade     `json:"pending_upgrade,omitempty"`
 }
 
 type PendingUpgrade struct {
@@ -113,6 +127,9 @@ func Defaults(imageTag string) Options {
 		AdminUsername: "admin", AdminEmail: "admin@cocola.local",
 		WebPort: 3000, GatewayPort: 8080, LLMPort: 18091,
 		ManagedOpenSandbox: true, SessionVolumeSize: "2Gi",
+		InternalSCM: InternalSCMEndpoint{
+			APIURL: defaultInternalSCMAPIURL, HostPort: defaultInternalSCMHostPort,
+		},
 	}
 }
 
@@ -179,16 +196,28 @@ func (o Options) Validate() error {
 			return errors.New("admin password cannot contain newlines")
 		}
 	}
-	ports := map[string]int{"web": o.WebPort, "gateway": o.GatewayPort, "llm gateway": o.LLMPort}
+	internalSCM := o.resolvedInternalSCM()
+	ports := []struct {
+		name string
+		port int
+	}{
+		{name: "web", port: o.WebPort},
+		{name: "gateway", port: o.GatewayPort},
+		{name: "llm gateway", port: o.LLMPort},
+		{name: "internal SCM", port: internalSCM.HostPort},
+	}
 	seen := map[int]string{}
-	for name, port := range ports {
-		if port < 1 || port > 65535 {
-			return fmt.Errorf("%s port must be between 1 and 65535", name)
+	for _, candidate := range ports {
+		if candidate.port < 1 || candidate.port > 65535 {
+			return fmt.Errorf("%s port must be between 1 and 65535", candidate.name)
 		}
-		if previous, exists := seen[port]; exists {
-			return fmt.Errorf("%s and %s cannot use the same port %d", previous, name, port)
+		if previous, exists := seen[candidate.port]; exists {
+			return fmt.Errorf(
+				"%s and %s cannot use the same port %d",
+				previous, candidate.name, candidate.port,
+			)
 		}
-		seen[port] = name
+		seen[candidate.port] = candidate.name
 	}
 	if _, err := o.PublicOrigin(); err != nil {
 		return err
@@ -208,9 +237,48 @@ func (o Options) Validate() error {
 			return errors.New("sandbox LLM base URL must be an absolute http(s) URL")
 		}
 	}
+	if !o.ManagedOpenSandbox && strings.TrimSpace(o.InternalSCM.SandboxCloneURL) == "" {
+		return errors.New("sandbox Internal SCM URL is required with external OpenSandbox")
+	}
+	if err := validateInternalSCMEndpoint(internalSCM); err != nil {
+		return err
+	}
 	quantity, err := resource.ParseQuantity(strings.TrimSpace(o.SessionVolumeSize))
 	if err != nil || quantity.Sign() <= 0 || quantity.Value() <= 0 {
 		return errors.New("session volume size must be a positive Kubernetes quantity")
+	}
+	return nil
+}
+
+func (o Options) resolvedInternalSCM() InternalSCMEndpoint {
+	value := o.InternalSCM
+	if strings.TrimSpace(value.APIURL) == "" {
+		value.APIURL = defaultInternalSCMAPIURL
+	}
+	if value.HostPort == 0 {
+		value.HostPort = defaultInternalSCMHostPort
+	}
+	if strings.TrimSpace(value.SandboxCloneURL) == "" && o.ManagedOpenSandbox {
+		value.SandboxCloneURL = fmt.Sprintf("http://host.docker.internal:%d", value.HostPort)
+	}
+	return value
+}
+
+func validateInternalSCMEndpoint(value InternalSCMEndpoint) error {
+	endpoints := []struct {
+		label string
+		raw   string
+	}{
+		{label: "internal SCM API URL", raw: value.APIURL},
+		{label: "sandbox Internal SCM URL", raw: value.SandboxCloneURL},
+	}
+	for _, endpoint := range endpoints {
+		label, raw := endpoint.label, endpoint.raw
+		parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%s must be an absolute http(s) URL without credentials, query, or fragment", label)
+		}
 	}
 	return nil
 }
@@ -289,6 +357,7 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 		SandboxImage: strings.TrimSuffix(options.Registry, "/") + "/cocola-sandbox-runtime:" + options.Version,
 		PublicURL:    publicURLOrDefault(options),
 		WebPort:      options.WebPort, GatewayPort: options.GatewayPort, LLMPort: options.LLMPort,
+		InternalSCM:        options.resolvedInternalSCM(),
 		DeploymentRevision: deploymentRevision(compose),
 	}
 	stateJSON, err := json.MarshalIndent(state, "", "  ")
@@ -368,6 +437,7 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		sandboxLLMBaseURL = fmt.Sprintf("http://host.docker.internal:%d", o.LLMPort)
 	}
 	publicOrigin, _ := o.PublicOrigin()
+	internalSCM := o.resolvedInternalSCM()
 	publicOrigins := []string{
 		fmt.Sprintf("http://127.0.0.1:%d", o.WebPort),
 		fmt.Sprintf("http://localhost:%d", o.WebPort),
@@ -388,8 +458,9 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
 		{"COCOLA_FORGEJO_DB_PASSWORD", s.forgejoDB}, {"COCOLA_FORGEJO_PASSWORD", s.forgejo},
-		{"COCOLA_FORGEJO_HOST_PORT", "3001"},
-		{"COCOLA_FORGEJO_CLONE_URL", "http://host.docker.internal:3001"},
+		{"COCOLA_FORGEJO_HOST_PORT", strconv.Itoa(internalSCM.HostPort)},
+		{"COCOLA_FORGEJO_API_URL", internalSCM.APIURL},
+		{"COCOLA_FORGEJO_CLONE_URL", internalSCM.SandboxCloneURL},
 		{"COCOLA_SCM_SECRET_KEY", s.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
 		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)},

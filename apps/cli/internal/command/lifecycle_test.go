@@ -59,6 +59,7 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 		"--web-port", fmt.Sprint(webPort),
 		"--gateway-port", fmt.Sprint(gatewayPort),
 		"--llm-port", fmt.Sprint(llmPort),
+		"--internal-scm-port", "33004",
 	}, IO{In: &bytes.Buffer{}, Out: &installOutput, Err: &installErrors}); err != nil {
 		t.Fatalf("install: %v, stderr=%s", err, installErrors.String())
 	}
@@ -145,6 +146,7 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 		"--web-port", fmt.Sprint(webPort),
 		"--gateway-port", fmt.Sprint(gatewayPort),
 		"--llm-port", fmt.Sprint(llmPort),
+		"--internal-scm-port", "33104",
 	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &errors}); err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +237,7 @@ func TestFirstStartRejectsPostgresVolumeFromDifferentConfiguration(t *testing.T)
 		"--web-port", fmt.Sprint(webPort),
 		"--gateway-port", fmt.Sprint(gatewayPort),
 		"--llm-port", fmt.Sprint(llmPort),
+		"--internal-scm-port", "33204",
 	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
 		t.Fatal(err)
 	}

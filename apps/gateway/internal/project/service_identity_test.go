@@ -13,15 +13,40 @@ import (
 	"time"
 )
 
-type retryCreateStore struct {
-	Store
-	refreshedAt time.Time
-}
-
 type taskBaseStore struct {
 	Store
 	project   Project
 	workspace *Workspace
+}
+
+type provisionClaimStore struct {
+	Store
+	current     Project
+	claimed     Project
+	claimErr    error
+	attemptID   string
+	staleBefore time.Time
+}
+
+func (s *provisionClaimStore) ClaimProjectProvisionAttempt(
+	_ context.Context,
+	_ Identity,
+	_ string,
+	attemptID string,
+	_ time.Time,
+	staleBefore time.Time,
+) (Project, error) {
+	s.attemptID = attemptID
+	s.staleBefore = staleBefore
+	return s.claimed, s.claimErr
+}
+
+func (s *provisionClaimStore) GetProject(
+	_ context.Context,
+	_ Identity,
+	_ string,
+) (Project, error) {
+	return s.current, nil
 }
 
 func (s *taskBaseStore) GetProject(_ context.Context, _ Identity, projectID string) (Project, error) {
@@ -50,19 +75,6 @@ func (s *taskBaseStore) GetChangeRequest(
 	return ChangeRequest{}, ErrNotFound
 }
 
-func (s *retryCreateStore) RefreshProjectProvisionAttempt(
-	_ context.Context,
-	_ Identity,
-	_ string,
-	now time.Time,
-) (Project, error) {
-	s.refreshedAt = now
-	return Project{
-		ID: "11111111-1111-1111-1111-111111111111", RepositoryName: "example",
-		Description: "description", Visibility: "private", ProvisionStartedAt: now,
-	}, nil
-}
-
 func TestGitAuthorIdentityUsesCocolaEmail(t *testing.T) {
 	name, email := gitAuthorIdentity(Identity{
 		UserID: "user-1", Name: "Alice Example", Username: "alice", Email: "alice@example.com",
@@ -76,6 +88,31 @@ func TestGitAuthorIdentityFallsBackToCocolaUsername(t *testing.T) {
 	name, email := gitAuthorIdentity(Identity{UserID: "user-1", Username: "alice"})
 	if name != "alice" || email != "alice@localhost" {
 		t.Fatalf("gitAuthorIdentity() = %q, %q", name, email)
+	}
+}
+
+func TestClaimProvisionAttemptUsesCASAndRejectsAnActiveAttempt(t *testing.T) {
+	now := time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC)
+	claimed := Project{ID: "project-1", Status: ProjectProvisioning, ProvisionAttemptID: "claimed"}
+	store := &provisionClaimStore{claimed: claimed}
+	service := &Service{store: store, now: func() time.Time { return now }}
+
+	result, err := service.claimProvisionAttempt(
+		context.Background(), Identity{UserID: "user-1"}, Project{ID: "project-1"},
+	)
+	if err != nil || result.ProvisionAttemptID != "claimed" || store.attemptID == "" {
+		t.Fatalf("claim result = %+v, attempt = %q, err = %v", result, store.attemptID, err)
+	}
+	if !store.staleBefore.Equal(now.Add(-projectOperationStaleAfter)) {
+		t.Fatalf("stale before = %v", store.staleBefore)
+	}
+
+	store.claimErr = ErrNotFound
+	store.current = Project{ID: "project-1", Status: ProjectProvisioning}
+	if _, err := service.claimProvisionAttempt(
+		context.Background(), Identity{UserID: "user-1"}, store.current,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("active attempt error = %v", err)
 	}
 }
 
@@ -214,11 +251,10 @@ func TestRetryCreateRepositoryRecreatesConfirmedMissingRepository(t *testing.T) 
 	}))
 	defer server.Close()
 
-	store := &retryCreateStore{}
-	service := &Service{store: store, now: func() time.Time { return now }}
+	service := &Service{now: func() time.Time { return now }}
 	github := &githubClient{http: server.Client(), apiBase: server.URL, userAgent: "test"}
-	value, repo, createdInRetry, err := service.retryCreateRepository(
-		context.Background(), Identity{UserID: "user-a"}, Project{
+	repo, createdInRetry, err := service.retryCreateRepository(
+		context.Background(), Project{
 			ID: "11111111-1111-1111-1111-111111111111", RepositoryName: "example",
 			Description: "description", Visibility: "private",
 		}, "user-token", "alice", github,
@@ -226,9 +262,7 @@ func TestRetryCreateRepositoryRecreatesConfirmedMissingRepository(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created || !createdInRetry || repo.ID != 42 || !value.ProvisionStartedAt.Equal(now) ||
-		!store.refreshedAt.Equal(now) {
-		t.Fatalf("retry result = project:%+v repo:%+v created:%v refreshed:%v",
-			value, repo, createdInRetry, store.refreshedAt)
+	if !created || !createdInRetry || repo.ID != 42 {
+		t.Fatalf("retry result = repo:%+v created:%v", repo, createdInRetry)
 	}
 }

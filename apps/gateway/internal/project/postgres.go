@@ -575,7 +575,10 @@ const projectColumns = `id::text, tenant_id, owner_user_id, name, description, r
 	repository_name, repository_html_url, COALESCE(installation_id, 0), default_branch,
 	visibility, repository_size_kb, repository_has_lfs, repository_has_submodule,
 	status, provision_error_code, provision_request_id,
-	provision_started_at, version, created_at, updated_at, archived_at,
+	COALESCE(provision_attempt_id::text,''), provision_started_at,
+	COALESCE(provision_attempt_started_at, provision_started_at),
+	COALESCE(archive_attempt_id::text,''), archive_error_code,
+	version, created_at, updated_at, archived_at,
 	repository_clone_url, COALESCE(repository_token_id, 0), repository_token_ciphertext`
 
 const joinedProjectColumns = `projects.id::text, projects.tenant_id, projects.owner_user_id,
@@ -585,7 +588,11 @@ const joinedProjectColumns = `projects.id::text, projects.tenant_id, projects.ow
 	COALESCE(projects.installation_id, 0), projects.default_branch, projects.visibility,
 	projects.repository_size_kb, projects.repository_has_lfs, projects.repository_has_submodule,
 	projects.status, projects.provision_error_code,
-	projects.provision_request_id, projects.provision_started_at, projects.version,
+	projects.provision_request_id, COALESCE(projects.provision_attempt_id::text,''),
+	projects.provision_started_at,
+	COALESCE(projects.provision_attempt_started_at, projects.provision_started_at),
+	COALESCE(projects.archive_attempt_id::text,''),
+	projects.archive_error_code, projects.version,
 	projects.created_at, projects.updated_at, projects.archived_at,
 	projects.repository_clone_url, COALESCE(projects.repository_token_id, 0),
 	projects.repository_token_ciphertext`
@@ -597,7 +604,9 @@ func scanProject(row pgx.Row) (Project, error) {
 		&v.RepositoryOwner, &v.RepositoryName, &v.RepositoryHTMLURL, &v.InstallationID,
 		&v.DefaultBranch, &v.Visibility, &v.RepositorySizeKB, &v.RepositoryHasLFS,
 		&v.RepositoryHasSubmodule, &v.Status,
-		&v.ProvisionErrorCode, &v.ProvisionRequestID, &v.ProvisionStartedAt, &v.Version,
+		&v.ProvisionErrorCode, &v.ProvisionRequestID, &v.ProvisionAttemptID,
+		&v.ProvisionStartedAt, &v.ProvisionAttemptStartedAt,
+		&v.ArchiveAttemptID, &v.ArchiveErrorCode, &v.Version,
 		&v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.RepositoryCloneURL,
 		&v.RepositoryTokenID, &v.RepositoryTokenCipher)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -643,36 +652,39 @@ func (p *Postgres) CreateProject(ctx context.Context, v Project) (Project, error
 	const q = `INSERT INTO projects (
 		id, tenant_id, owner_user_id, name, description, runtime_id, repository_mode,
 		repository_provider, repository_external_id, repository_name, default_branch, visibility, status, provision_request_id,
-		provision_started_at, version, created_at, updated_at
-	) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,0),$10,$11,$12,$13,$14,$15,1,$16,$17)
+		provision_attempt_id, provision_started_at, provision_attempt_started_at,
+		version, created_at, updated_at
+	) VALUES ($1::uuid,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,0),$10,$11,$12,$13,$14,NULLIF($15,'')::uuid,$16,$16,1,$17,$18)
 	RETURNING ` + projectColumns
 	result, err := scanProject(p.pool.QueryRow(ctx, q, v.ID, v.TenantID, v.OwnerUserID,
 		v.Name, v.Description, v.RuntimeID, v.RepositoryMode, v.RepositoryProvider,
 		v.RepositoryExternalID, v.RepositoryName, v.DefaultBranch, v.Visibility, v.Status,
-		v.ProvisionRequestID, v.ProvisionStartedAt, v.CreatedAt, v.UpdatedAt))
+		v.ProvisionRequestID, v.ProvisionAttemptID, v.ProvisionStartedAt, v.CreatedAt, v.UpdatedAt))
 	if postgresCode(err, "23505") {
 		return Project{}, ErrConflict
 	}
 	return result, err
 }
 
-func (p *Postgres) RefreshProjectProvisionAttempt(
+func (p *Postgres) ClaimProjectProvisionAttempt(
 	ctx context.Context,
 	id Identity,
 	projectID string,
+	attemptID string,
 	now time.Time,
+	staleBefore time.Time,
 ) (Project, error) {
 	return scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET
-		provision_started_at=$4, status='provisioning', provision_error_code='',
-		version=version+1, updated_at=$4
+		provision_attempt_id=$4::uuid, provision_attempt_started_at=$5,
+		status='provisioning', provision_error_code='', version=version+1, updated_at=$5
 		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
-			AND status IN ('provisioning','failed')
-			AND ((repository_provider='github' AND repository_mode='create')
-				OR repository_provider='local')
-		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, now))
+			AND (status='failed' OR (status='provisioning'
+				AND COALESCE(provision_attempt_started_at, provision_started_at) < $6))
+			AND repository_provider IN ('github','local')
+		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, attemptID, now, staleBefore))
 }
 
-func (p *Postgres) CompleteProject(ctx context.Context, id Identity, projectID string, repo Repository, installationID int64, now time.Time) (Project, error) {
+func (p *Postgres) CompleteProject(ctx context.Context, id Identity, projectID, attemptID string, repo Repository, installationID int64, now time.Time) (Project, error) {
 	visibility := repo.Visibility
 	if visibility == "" {
 		if repo.Private {
@@ -687,18 +699,19 @@ func (p *Postgres) CompleteProject(ctx context.Context, id Identity, projectID s
 		visibility=$10, repository_size_kb=$11, repository_has_lfs=$12,
 		repository_has_submodule=$13, status='ready', provision_error_code='',
 		version=version+1, updated_at=$14
-	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND status IN ('provisioning','failed')
+	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
+		AND status='provisioning' AND provision_attempt_id=$15::uuid
 	RETURNING ` + projectColumns
 	result, err := scanProject(p.pool.QueryRow(ctx, q, projectID, id.TenantID, id.UserID,
 		repo.ID, repo.Owner, repo.Name, repo.HTMLURL, installationID, repo.DefaultBranch,
-		visibility, repo.SizeKB, repo.HasLFS, repo.HasSubmodule, now))
+		visibility, repo.SizeKB, repo.HasLFS, repo.HasSubmodule, now, attemptID))
 	if postgresCode(err, "23505") {
 		return Project{}, ErrConflict
 	}
 	return result, err
 }
 
-func (p *Postgres) CompleteLocalProject(ctx context.Context, id Identity, projectID string,
+func (p *Postgres) CompleteLocalProject(ctx context.Context, id Identity, projectID, attemptID string,
 	repo Repository, tokenID int64, tokenCiphertext, cloneURL string, now time.Time) (Project, error) {
 	return scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET
 		repository_external_id=$4, repository_owner=$5, repository_name=$6,
@@ -707,8 +720,9 @@ func (p *Postgres) CompleteLocalProject(ctx context.Context, id Identity, projec
 		status='ready', provision_error_code='', version=version+1, updated_at=$10
 		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
 			AND repository_provider='local' AND status='provisioning'
+			AND provision_attempt_id=$11::uuid
 		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, repo.ID,
-		repo.Owner, repo.Name, cloneURL, tokenID, tokenCiphertext, now))
+		repo.Owner, repo.Name, cloneURL, tokenID, tokenCiphertext, now, attemptID))
 }
 
 func (p *Postgres) RebindProjectInstallation(
@@ -728,17 +742,19 @@ func (p *Postgres) RebindProjectInstallation(
 		repositoryID, installationID, now))
 }
 
-func (p *Postgres) FailProject(ctx context.Context, id Identity, projectID, code string, now time.Time) (Project, error) {
+func (p *Postgres) FailProject(ctx context.Context, id Identity, projectID, attemptID, code string, now time.Time) (Project, error) {
 	return scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET status='failed',
-		provision_error_code=$4, version=version+1, updated_at=$5
-		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND status <> 'archived'
-		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, code, now))
+		provision_error_code=$5, version=version+1, updated_at=$6
+		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
+			AND status='provisioning' AND provision_attempt_id=$4::uuid
+		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, attemptID, code, now))
 }
 
 func (p *Postgres) UpdateProject(ctx context.Context, id Identity, projectID string, expected int64, name, description, runtimeID string, now time.Time) (Project, error) {
 	v, err := scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET name=$5, description=$6,
 		runtime_id=$7, version=version+1, updated_at=$8
-		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4 AND status <> 'archived'
+		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4
+			AND status IN ('ready','failed','archive_failed')
 		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, expected, name, description, runtimeID, now))
 	if errors.Is(err, ErrNotFound) {
 		if _, getErr := p.GetProject(ctx, id, projectID); getErr == nil {
@@ -751,17 +767,39 @@ func (p *Postgres) UpdateProject(ctx context.Context, id Identity, projectID str
 	return v, err
 }
 
-func (p *Postgres) ArchiveProject(ctx context.Context, id Identity, projectID string, expected int64, now time.Time) (Project, error) {
-	v, err := scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET status='archived',
-		archived_at=$5, version=version+1, updated_at=$5
-		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4 AND status <> 'archived'
-		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, expected, now))
+func (p *Postgres) ClaimProjectArchive(ctx context.Context, id Identity, projectID string,
+	expected int64, attemptID string, now, staleBefore time.Time) (Project, error) {
+	v, err := scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET status='archiving',
+		archive_attempt_id=$5::uuid, archive_error_code='', version=version+1, updated_at=$6
+		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4
+			AND (status IN ('ready','failed','archive_failed')
+				OR (status='archiving' AND updated_at < $7))
+		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, expected, attemptID, now, staleBefore))
 	if errors.Is(err, ErrNotFound) {
 		if _, getErr := p.GetProject(ctx, id, projectID); getErr == nil {
 			return Project{}, ErrVersionConflict
 		}
 	}
 	return v, err
+}
+
+func (p *Postgres) CompleteProjectArchive(ctx context.Context, id Identity, projectID,
+	attemptID string, now time.Time) (Project, error) {
+	return scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET status='archived',
+		archived_at=$5, archive_error_code='', repository_token_id=NULL,
+		repository_token_ciphertext='', version=version+1, updated_at=$5
+		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
+			AND status='archiving' AND archive_attempt_id=$4::uuid
+		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, attemptID, now))
+}
+
+func (p *Postgres) FailProjectArchive(ctx context.Context, id Identity, projectID,
+	attemptID, code string, now time.Time) (Project, error) {
+	return scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET status='archive_failed',
+		archive_error_code=$5, version=version+1, updated_at=$6
+		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
+			AND status='archiving' AND archive_attempt_id=$4::uuid
+		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, attemptID, code, now))
 }
 
 func (p *Postgres) ListTasks(ctx context.Context, id Identity, projectID string) ([]Task, error) {
@@ -771,8 +809,10 @@ func (p *Postgres) ListTasks(ctx context.Context, id Identity, projectID string)
 	const q = `SELECT c.id, c.title, c.runtime_id, c.created_at, c.updated_at,
 		w.conversation_id, w.project_id::text, w.base_ref, w.base_sha, w.branch_name,
 		w.head_sha, w.bootstrap_status, w.bootstrap_error_code, w.git_snapshot_json,
-		w.git_snapshot_at, w.created_at, w.updated_at
+		w.git_snapshot_at, w.created_at, w.updated_at,
+		COALESCE(to_jsonb(cr), 'null'::jsonb)
 	FROM conversations c JOIN project_workspaces w ON w.conversation_id=c.id
+	LEFT JOIN project_change_requests cr ON cr.conversation_id=c.id
 	WHERE c.project_id=$1::uuid AND c.user_id=$2 ORDER BY c.updated_at DESC, c.id DESC`
 	rows, err := p.pool.Query(ctx, q, projectID, id.UserID)
 	if err != nil {
@@ -782,15 +822,23 @@ func (p *Postgres) ListTasks(ctx context.Context, id Identity, projectID string)
 	out := make([]Task, 0)
 	for rows.Next() {
 		var task Task
+		var changeRequestJSON []byte
 		if err := rows.Scan(&task.ID, &task.Title, &task.RuntimeID, &task.CreatedAt, &task.UpdatedAt,
 			&task.Workspace.ConversationID, &task.Workspace.ProjectID, &task.Workspace.BaseRef,
 			&task.Workspace.BaseSHA, &task.Workspace.BranchName, &task.Workspace.HeadSHA,
 			&task.Workspace.BootstrapStatus, &task.Workspace.BootstrapErrorCode,
 			&task.Workspace.GitSnapshotRaw, &task.Workspace.GitSnapshotAt,
-			&task.Workspace.CreatedAt, &task.Workspace.UpdatedAt); err != nil {
+			&task.Workspace.CreatedAt, &task.Workspace.UpdatedAt, &changeRequestJSON); err != nil {
 			return nil, err
 		}
 		decodeSnapshot(&task.Workspace)
+		if string(changeRequestJSON) != "null" {
+			var changeRequest ChangeRequest
+			if err := json.Unmarshal(changeRequestJSON, &changeRequest); err != nil {
+				return nil, err
+			}
+			task.ChangeRequest = &changeRequest
+		}
 		out = append(out, task)
 	}
 	return out, rows.Err()
@@ -807,7 +855,9 @@ func scanWorkspaceProject(row pgx.Row) (Workspace, Project, error) {
 		&v.RepositoryOwner, &v.RepositoryName, &v.RepositoryHTMLURL, &v.InstallationID,
 		&v.DefaultBranch, &v.Visibility, &v.RepositorySizeKB, &v.RepositoryHasLFS,
 		&v.RepositoryHasSubmodule, &v.Status,
-		&v.ProvisionErrorCode, &v.ProvisionRequestID, &v.ProvisionStartedAt,
+		&v.ProvisionErrorCode, &v.ProvisionRequestID, &v.ProvisionAttemptID,
+		&v.ProvisionStartedAt, &v.ProvisionAttemptStartedAt,
+		&v.ArchiveAttemptID, &v.ArchiveErrorCode,
 		&v.Version, &v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.RepositoryCloneURL,
 		&v.RepositoryTokenID, &v.RepositoryTokenCipher)
 	if errors.Is(err, pgx.ErrNoRows) {

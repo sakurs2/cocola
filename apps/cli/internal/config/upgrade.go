@@ -113,6 +113,7 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	state.WebPort = derived.webPort
 	state.GatewayPort = derived.gatewayPort
 	state.LLMPort = derived.llmPort
+	state.InternalSCM = derived.internalSCM
 	state.PendingUpgrade = &PendingUpgrade{
 		FromVersion: fromVersion, ToVersion: targetVersion,
 		FromRevision: fromRevision, ToRevision: targetRevision,
@@ -328,6 +329,7 @@ type derivedEnvironment struct {
 	webPort            int
 	gatewayPort        int
 	llmPort            int
+	internalSCM        InternalSCMEndpoint
 	managedOpenSandbox bool
 }
 
@@ -349,6 +351,13 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 	if err != nil {
 		return nil, derivedEnvironment{}, err
 	}
+	internalSCMPort, err := environmentPort(
+		document, "COCOLA_FORGEJO_HOST_PORT", state.InternalSCM.HostPort,
+		defaults.InternalSCM.HostPort,
+	)
+	if err != nil {
+		return nil, derivedEnvironment{}, err
+	}
 	registry := strings.TrimSuffix(environmentValue(document, "COCOLA_IMAGE_REGISTRY", DefaultRegistry), "/")
 	if registry == "" {
 		return nil, derivedEnvironment{}, errors.New("COCOLA_IMAGE_REGISTRY cannot be empty")
@@ -365,6 +374,30 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 	publicURL := state.PublicURL
 	if publicURL == "" {
 		publicURL = preferredPublicURL(publicOrigins, webPort)
+	}
+	sandboxCloneURL := environmentValue(
+		document, "COCOLA_FORGEJO_CLONE_URL", state.InternalSCM.SandboxCloneURL,
+	)
+	if strings.TrimSpace(sandboxCloneURL) == "" && !managed {
+		return nil, derivedEnvironment{}, errors.New(
+			"COCOLA_FORGEJO_CLONE_URL is required when OpenSandbox is externally managed",
+		)
+	}
+	internalSCM := InternalSCMEndpoint{
+		APIURL:          environmentValue(document, "COCOLA_FORGEJO_API_URL", state.InternalSCM.APIURL),
+		HostPort:        internalSCMPort,
+		SandboxCloneURL: sandboxCloneURL,
+	}
+	if strings.TrimSpace(internalSCM.APIURL) == "" {
+		internalSCM.APIURL = defaultInternalSCMAPIURL
+	}
+	if strings.TrimSpace(internalSCM.SandboxCloneURL) == "" {
+		internalSCM.SandboxCloneURL = fmt.Sprintf(
+			"http://host.docker.internal:%d", internalSCM.HostPort,
+		)
+	}
+	if err := validateInternalSCMEndpoint(internalSCM); err != nil {
+		return nil, derivedEnvironment{}, err
 	}
 
 	generated, err := newSecrets()
@@ -405,8 +438,9 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 		{"COCOLA_MINIO_ROOT_PASSWORD", generated.minio},
 		{"COCOLA_FORGEJO_DB_PASSWORD", generated.forgejoDB},
 		{"COCOLA_FORGEJO_PASSWORD", generated.forgejo},
-		{"COCOLA_FORGEJO_HOST_PORT", "3001"},
-		{"COCOLA_FORGEJO_CLONE_URL", "http://host.docker.internal:3001"},
+		{"COCOLA_FORGEJO_HOST_PORT", strconv.Itoa(internalSCM.HostPort)},
+		{"COCOLA_FORGEJO_API_URL", internalSCM.APIURL},
+		{"COCOLA_FORGEJO_CLONE_URL", internalSCM.SandboxCloneURL},
 		{"COCOLA_SCM_SECRET_KEY", generated.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
 		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", gatewayPort)},
@@ -439,6 +473,7 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 	return document.render(), derivedEnvironment{
 		version: targetVersion, registry: registry, publicURL: publicURL,
 		webPort: webPort, gatewayPort: gatewayPort, llmPort: llmPort,
+		internalSCM:        internalSCM,
 		managedOpenSandbox: managed,
 	}, nil
 }

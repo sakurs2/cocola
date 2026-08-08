@@ -189,7 +189,7 @@ func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *tes
 
 func TestInteractiveCommandFailsClearlyWithoutTTY(t *testing.T) {
 	var output, errors bytes.Buffer
-	err := Execute(context.Background(), []string{"install"}, IO{
+	err := Execute(context.Background(), []string{"install", "--home", t.TempDir()}, IO{
 		In: &bytes.Buffer{}, Out: &output, Err: &errors,
 	})
 	if err == nil || !strings.Contains(err.Error(), "requires an interactive terminal") {

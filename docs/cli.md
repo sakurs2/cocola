@@ -39,13 +39,14 @@ cocola doctor                  检查服务、磁盘、数据卷、镜像和安�
 cocola version                 查看 CLI 构建版本
 ```
 
-`install` 默认进入英文交互式向导，主要配置管理员账号和 Web/Gateway/LLM 端口；内部认证、
+`install` 默认进入英文交互式向导，主要配置管理员账号和 Web/Gateway/LLM/Internal SCM 端口；内部认证、
 加密、数据库、对象存储和 SCM 密钥会自动生成并写入仅当前用户可读的配置文件。Web 默认监听
 `0.0.0.0`，浏览器可直接使用 `http://<server-ip>:<web-port>`，Workspace WebSocket 会按当前
 请求 Host 做同源校验，不需要额外配置。`--public-url https://cocola.example.com` 保留给会改写
 Host 的反向代理，以及 GitHub/飞书等需要生成固定外部回调或跳转地址的集成。
 镜像 Registry/版本以及外部 OpenSandbox 等高级场景仍可使用命令行参数覆盖。使用外部
-OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gateway URL，CLI 会拒绝
+OpenSandbox 时，必须同时提供从远端 sandbox 可达的 LLM Gateway URL 和 Internal SCM URL
+（`--sandbox-internal-scm-url`），CLI 会拒绝
 会产生失联 sandbox 的不完整配置。
 
 支持结构化输出的命令可加 `--json`；`logs` 是原始字节流，不支持 JSON。设置 `NO_COLOR=1`、
@@ -81,8 +82,9 @@ Sandbox Runtime、execd 和 egress 镜像；Registry 不可用但所有目标镜
 
 `install`、`start` 和 `stop` 在同一个安装目录上串行执行。如果另一个变更操作正在运行，CLI
 会显示其命令、PID 和开始时间并立即退出；`status`、`logs` 和只读的 `doctor` 仍可用于观察。
-`doctor` 会检查容器状态、数据卷、当前 PostgreSQL 凭据、本地镜像缓存、安装目录磁盘和可见的
-Docker Root Dir，不会启动容器、拉取镜像或删除资源。
+`doctor` 会检查容器状态、数据卷、当前 PostgreSQL 凭据、本地镜像缓存、安装目录磁盘、可见的
+Docker Root Dir，以及 Internal SCM 配置端口是否确实由 Forgejo 容器持有，不会启动容器、拉取镜像
+或删除资源。
 
 ## 升级
 

@@ -120,6 +120,8 @@ func (a *application) installCommand() *cobra.Command {
 	flags.IntVar(&options.WebPort, "web-port", options.WebPort, "Web host port")
 	flags.IntVar(&options.GatewayPort, "gateway-port", options.GatewayPort, "Gateway host port")
 	flags.IntVar(&options.LLMPort, "llm-port", options.LLMPort, "LLM Gateway host port used by sandboxes")
+	flags.IntVar(&options.InternalSCM.HostPort, "internal-scm-port", options.InternalSCM.HostPort, "Internal SCM loopback host port")
+	flags.StringVar(&options.InternalSCM.SandboxCloneURL, "sandbox-internal-scm-url", options.InternalSCM.SandboxCloneURL, "Internal SCM URL reachable from external sandboxes")
 	flags.BoolVar(&options.ManagedOpenSandbox, "managed-opensandbox", true, "run the bundled OpenSandbox server")
 	flags.StringVar(&options.ExternalOpenSandboxURL, "external-opensandbox-url", "", "use an externally managed OpenSandbox URL")
 	flags.StringVar(&options.SandboxLLMBaseURL, "sandbox-llm-base-url", "", "LLM Gateway URL reachable from external sandboxes")
@@ -154,6 +156,7 @@ func (a *application) runInstallForm(options *config.Options) error {
 	webPort := strconv.Itoa(options.WebPort)
 	gatewayPort := strconv.Itoa(options.GatewayPort)
 	llmPort := strconv.Itoa(options.LLMPort)
+	internalSCMPort := strconv.Itoa(options.InternalSCM.HostPort)
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().
@@ -194,6 +197,11 @@ func (a *application) runInstallForm(options *config.Options) error {
 				Description("Model gateway used by Agent sandboxes.").
 				Value(&llmPort).
 				Validate(validatePort),
+			huh.NewInput().
+				Title("Internal SCM port").
+				Description("Loopback-only Git service used by local Projects.").
+				Value(&internalSCMPort).
+				Validate(validatePort),
 		).Title("Service ports").Description("The defaults work for a standard local installation."),
 		huh.NewGroup(
 			huh.NewNote().
@@ -219,6 +227,9 @@ func (a *application) runInstallForm(options *config.Options) error {
 		return err
 	}
 	if options.LLMPort, err = strconv.Atoi(llmPort); err != nil {
+		return err
+	}
+	if options.InternalSCM.HostPort, err = strconv.Atoi(internalSCMPort); err != nil {
 		return err
 	}
 	return nil

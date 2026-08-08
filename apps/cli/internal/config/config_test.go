@@ -64,6 +64,9 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_SANDBOX_TOKEN_TTL_SECONDS="604800"`,
 		`COCOLA_SCM_SECRET_KEY="`,
 		`COCOLA_SCM_SECRET_KEY_FILE=""`,
+		`COCOLA_FORGEJO_HOST_PORT="3001"`,
+		`COCOLA_FORGEJO_API_URL="http://forgejo:3000"`,
+		`COCOLA_FORGEJO_CLONE_URL="http://host.docker.internal:3001"`,
 		`COCOLA_FEATURE_LOCAL_PROJECTS="true"`,
 		`COCOLA_SANDBOX_PROJECT_BROKER_URL="http://host.docker.internal:8080"`,
 		`COCOLA_SANDBOX_SKILL_BROKER_URL="http://host.docker.internal:8080"`,
@@ -91,7 +94,9 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 	if state.Version != "v0.1.0" || !state.ManagedOpenSandbox ||
 		state.SandboxImage != "ghcr.io/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
 		state.ConfigSchemaVersion != CurrentSchemaVersion || state.DeploymentRevision == "" ||
-		state.LLMPort != 18091 {
+		state.LLMPort != 18091 || state.InternalSCM.HostPort != 3001 ||
+		state.InternalSCM.APIURL != "http://forgejo:3000" ||
+		state.InternalSCM.SandboxCloneURL != "http://host.docker.internal:3001" {
 		t.Fatalf("state = %+v", state)
 	}
 	if _, err := WriteInstallation(paths, options, []byte("different")); !errors.Is(err, ErrAlreadyInstalled) {
@@ -270,6 +275,7 @@ func TestOptionsValidation(t *testing.T) {
 		{"invalid version", func(o *Options) { o.Version = "bad/tag" }},
 		{"invalid version prefix", func(o *Options) { o.Version = ".bad" }},
 		{"duplicate ports", func(o *Options) { o.GatewayPort = o.WebPort }},
+		{"duplicate internal SCM port", func(o *Options) { o.InternalSCM.HostPort = o.WebPort }},
 		{"bad registry", func(o *Options) { o.Registry = "https://ghcr.io/acme" }},
 		{"bad registry slash", func(o *Options) { o.Registry = "ghcr.io/acme/" }},
 		{"email with display name", func(o *Options) { o.AdminEmail = "Admin <admin@example.com>" }},
@@ -277,6 +283,14 @@ func TestOptionsValidation(t *testing.T) {
 		{"external sandbox missing LLM URL", func(o *Options) {
 			o.ManagedOpenSandbox = false
 			o.ExternalOpenSandboxURL = "https://sandbox.example.com/v1"
+		}},
+		{"external sandbox missing SCM URL", func(o *Options) {
+			o.ManagedOpenSandbox = false
+			o.ExternalOpenSandboxURL = "https://sandbox.example.com/v1"
+			o.SandboxLLMBaseURL = "https://llm.example.com"
+		}},
+		{"invalid sandbox SCM URL", func(o *Options) {
+			o.InternalSCM.SandboxCloneURL = "host.docker.internal:3001"
 		}},
 		{"short password", func(o *Options) { o.AdminPassword = "short" }},
 		{"short unicode password", func(o *Options) { o.AdminPassword = "密码密码密码" }},
@@ -295,6 +309,29 @@ func TestOptionsValidation(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+func TestUpgradeRequiresExplicitInternalSCMURLForExternalSandboxes(t *testing.T) {
+	paths := Paths{Home: t.TempDir(), SandboxRoot: t.TempDir()}
+	state := State{ManagedOpenSandbox: false, WebPort: 3000, GatewayPort: 8080, LLMPort: 18091}
+	environment := []byte(strings.Join([]string{
+		`COCOLA_VERSION="v0.1.0"`,
+		`COCOLA_OPENSANDBOX_MANAGED="0"`,
+		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
+		"",
+	}, "\n"))
+
+	if _, _, err := migrateEnvironment(paths, state, "v0.2.0", environment); err == nil ||
+		!strings.Contains(err.Error(), "COCOLA_FORGEJO_CLONE_URL is required") {
+		t.Fatalf("missing external SCM URL error = %v", err)
+	}
+
+	environment = append(environment, []byte(
+		`COCOLA_FORGEJO_CLONE_URL="https://scm.sandbox.example.com"`+"\n",
+	)...)
+	if _, _, err := migrateEnvironment(paths, state, "v0.2.0", environment); err != nil {
+		t.Fatalf("explicit external SCM URL: %v", err)
 	}
 }
 

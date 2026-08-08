@@ -725,6 +725,25 @@ async def test_publish_passes_short_lived_token_only_in_environment():
 
 
 @pytest.mark.asyncio
+async def test_publish_can_lock_the_current_head_inside_the_sandbox():
+    executor = RecordingExecutor({"head_sha": "b" * 40, "snapshot": {"dirty": False}})
+    spec = valid_spec()
+
+    result = await publish_project(
+        executor,
+        "sandbox-1",
+        spec,
+        "publish-token",
+        spec.clone_url,
+        "",
+    )
+
+    assert result["head_sha"] == "b" * 40
+    request = json.loads(executor.calls[0]["stdin"])
+    assert request["expected_head_sha"] == ""
+
+
+@pytest.mark.asyncio
 async def test_inspect_diff_uses_bounded_read_only_operation():
     executor = RecordingExecutor({"snapshot": {"changes": []}, "diff": "patch", "truncated": False})
     result = await inspect_project(
@@ -732,6 +751,7 @@ async def test_inspect_diff_uses_bounded_read_only_operation():
         "sandbox-1",
         valid_spec(),
         "diff",
+        "inspect-token",
         path="src/a file.py",
         diff_target="staged",
     )
@@ -741,7 +761,7 @@ async def test_inspect_diff_uses_bounded_read_only_operation():
     assert request["operation"] == "diff"
     assert request["path"] == "src/a file.py"
     assert request["diff_target"] == "staged"
-    assert "env" not in executor.calls[0]
+    assert executor.calls[0]["env"] == {"COCOLA_SCM_TOKEN": "inspect-token"}
 
 
 @pytest.mark.asyncio
@@ -755,6 +775,7 @@ async def test_inspect_commit_forwards_valid_sha_and_path():
         "sandbox-1",
         valid_spec(),
         "commit",
+        "inspect-token",
         path="src/app.py",
         commit_sha="b" * 40,
     )
@@ -776,6 +797,7 @@ async def test_inspect_commit_rejects_short_sha_before_exec():
             "sandbox-1",
             valid_spec(),
             "commit",
+            "inspect-token",
             commit_sha="abc123",
         )
 

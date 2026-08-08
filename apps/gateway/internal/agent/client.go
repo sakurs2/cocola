@@ -196,6 +196,22 @@ type GitPublisher interface {
 	PublishWorkspaceGit(context.Context, PublishRequest) (string, error)
 }
 
+type GitOperationError struct {
+	Code string
+	Err  error
+}
+
+func (e *GitOperationError) Error() string { return e.Err.Error() }
+func (e *GitOperationError) Unwrap() error { return e.Err }
+
+func GitErrorCode(err error) string {
+	var operationErr *GitOperationError
+	if errors.As(err, &operationErr) {
+		return operationErr.Code
+	}
+	return ""
+}
+
 // Attachment is one user-uploaded file forwarded to agent-runtime. Content is
 // raw bytes (already base64-decoded at the HTTP edge), mapping onto the proto
 // `bytes` field so binaries survive intact.
@@ -541,6 +557,13 @@ func (c *Client) PublishWorkspaceGit(ctx context.Context, request PublishRequest
 		RemoteCloneUrl: request.RemoteCloneURL, ExpectedHeadSha: request.ExpectedHeadSHA,
 	})
 	if err != nil {
+		if value, ok := status.FromError(err); ok {
+			code, _, found := strings.Cut(value.Message(), ":")
+			code = strings.TrimSpace(code)
+			if found && strings.HasPrefix(code, "PROJECT_") {
+				return "", &GitOperationError{Code: code, Err: err}
+			}
+		}
 		return "", fmt.Errorf("agent: publish workspace git: %w", err)
 	}
 	if strings.TrimSpace(response.GetHeadSha()) == "" {

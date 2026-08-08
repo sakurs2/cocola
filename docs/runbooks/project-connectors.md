@@ -37,6 +37,8 @@ Disconnect 会删除 Cocola 保存的用户 Token 和 App 凭据，并尽力撤�
 - `INTERNAL_SCM_INIT_*_FAILED`：按阶段检查 Gateway 镜像中的 Git、AskPass 和内部 Clone URL。
 - `INTERNAL_SCM_PROTECTION_FAILED`：确认 `main` 存在，且保护规则禁止直接 push、允许平台 squash merge。
 - Sandbox Clone 失败而 Gateway API 正常：检查 `COCOLA_FORGEJO_CLONE_URL` 是否能从 Sandbox 网络访问。
+- Internal SCM 端口冲突：首次安装改用 `--internal-scm-port <port>`；`cocola start` 与
+  `cocola doctor` 会校验占用者确实是当前 Forgejo 容器，不会把同名残留容器或其他进程当作可复用服务。
 
 仓库名固定为 `p-<projectUUID>`，Project 改名不会改变远端。普通用户响应、日志和 Workspace marker
 不得包含 Token 密文或内部管理 URL。
@@ -49,14 +51,15 @@ Disconnect 会删除 Cocola 保存的用户 Token 和 App 凭据，并尽力撤�
 
 - SCM 密钥丢失后，GitHub 用户需重建 Connector；Local Project 仓库仍在，但平台无法解密其
   repository token，应在恢复原密钥后再开放 Local Project。
-- Project 永久删除时必须撤销其仓库 Token；Archive 只停止新任务，不删除权威仓库。
+- Archive 会把 Local Project 权威仓库改为只读并撤销仓库 Token；任务历史保留，操作失败可按状态安全重试。
 - Token 不进入 remote URL、Git config、环境快照、模型 Prompt 或 Session Volume。
 
 ## Change Request 排查
 
 - `PROJECT_WORKSPACE_DIRTY`：让用户先显式 commit，平台不会自动提交。
 - `checks_pending`：GitHub required checks 或 mergeability 尚未就绪；刷新后重查 Provider。
-- `conflict`：不要 force push 或改写其他 Task；在当前 Task 解决冲突并提交，再点击 Refresh。
+- `conflict`：不要 force push 或改写其他 Task；在当前 Task 解决冲突并提交，再点击 Update branch，
+  然后刷新 Provider 状态。
 - 重复点击创建或合并：应返回同一个 PR/合并结果，不应产生第二个 PR 或 squash commit。
 - 合并成功：远端 Task 分支删除，Change Request 为 `merged`，对话输入框只读。
 

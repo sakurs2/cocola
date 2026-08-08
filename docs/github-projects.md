@@ -21,8 +21,9 @@ Local 与 GitHub Project 均使用以下流程：
 `Working → Change request open → Checks pending / Conflict → Squash merge → Merged`
 
 用户先在 Task 的 Changes 页面检查并提交文件，再创建 Change Request。平台验证 workspace
-marker、远端、任务分支和预期 head SHA，只推送当前 Task 的精确分支；存在未提交文件时拒绝
-发布，不把未知生成物自动提交。重复创建、刷新或合并会对已有 Provider PR 做幂等协调。
+marker、远端、任务分支和操作时锁定的 head SHA，只推送当前 Task 的精确分支；存在未提交文件时拒绝
+发布，不把未知生成物自动提交。已有 Change Request 检测到新 commit 时显示 `Update branch`；
+`Refresh` 只读取 Provider 状态，不隐式 push。重复创建、更新、刷新或合并会对已有 Provider PR 做幂等协调。
 
 合并固定为 squash merge 到默认分支。成功后远端任务分支被删除，Task 与对话转为只读；继续
 开发需要从最新 `main` 创建新 Task。Local 用户不会看到 Forgejo 名称或链接，GitHub 用户可跳转
@@ -53,6 +54,7 @@ COCOLA_FEATURE_GITHUB_AGENT_WRITE=true
 
 # 内部 SCM。正式 Compose 会生成独立密码并使用同一 PostgreSQL 实例中的独立 database/user。
 COCOLA_FORGEJO_API_URL=http://forgejo:3000
+COCOLA_FORGEJO_HOST_PORT=3001
 COCOLA_FORGEJO_CLONE_URL=http://host.docker.internal:3001
 COCOLA_FORGEJO_USERNAME=cocola
 COCOLA_FORGEJO_PASSWORD=<deployment-secret>

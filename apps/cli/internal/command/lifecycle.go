@@ -246,13 +246,14 @@ func (a *application) backupUpgradeDatabase(
 }
 
 func backupFileMissing(path string) (bool, error) {
-	if _, err := os.Stat(path); err == nil {
+	_, err := os.Stat(path)
+	if err == nil {
 		return false, nil
-	} else if errors.Is(err, os.ErrNotExist) {
-		return true, nil
-	} else {
-		return false, fmt.Errorf("inspect backup %s: %w", filepath.Base(path), err)
 	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, fmt.Errorf("inspect backup %s: %w", filepath.Base(path), err)
 }
 
 func (a *application) restoreFailedUpgrade(

@@ -18,7 +18,8 @@ func TestRunChecksHealthyServicesVolumesImagesAndPostgres(t *testing.T) {
 		t.Fatalf("doctor report = %+v", report)
 	}
 	for _, expected := range []string{
-		"service sandbox-manager", "service minio-init", "postgres credentials", "required images",
+		"service sandbox-manager", "service forgejo", "service minio-init",
+		"internal SCM endpoint", "postgres credentials", "required images",
 	} {
 		check, ok := findCheck(report, expected)
 		if !ok || check.Status != StatusPass {
@@ -62,6 +63,8 @@ if [ "$1" = info ]; then exit 0; fi
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1 $2" = "volume inspect" ]; then exit 0; fi
 if [ "$1 $2" = "image inspect" ]; then exit 0; fi
+if [ "$1 $2" = "ps -q" ]; then printf '%s\n' 'forgejo-container'; exit 0; fi
+if [ "$1 $2 $3" = "port forgejo-container 3000/tcp" ]; then printf '%s\n' '127.0.0.1:3001'; exit 0; fi
 case "$*" in
   *'config --quiet'*) exit 0 ;;
   *'config --images'*) printf '%s\n' 'redis:7.4.10-alpine3.21' 'ghcr.io/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
@@ -88,10 +91,14 @@ exit 1
 	t.Setenv("SERVICE_STATUS_JSON", `[
   {"Service":"redis","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"postgres","State":"running","Health":"healthy","Status":"Up"},
+  {"Service":"forgejo-db-init","State":"exited","ExitCode":0,"Status":"Exited (0)"},
+  {"Service":"forgejo","State":"running","Health":"healthy","Status":"Up"},
+  {"Service":"forgejo-init","State":"exited","ExitCode":0,"Status":"Exited (0)"},
   {"Service":"minio","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"minio-init","State":"exited","ExitCode":0,"Status":"Exited (0)"},
   {"Service":"opensandbox-server","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"sandbox-manager","State":"running","Health":"healthy","Status":"Up"},
+  {"Service":"host-agent","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"llm-gateway","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"admin-api","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"agent-runtime","State":"running","Health":"healthy","Status":"Up"},

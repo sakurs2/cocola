@@ -24,6 +24,7 @@ type RepositoryProvider interface {
 	GetChangeRequestStatus(context.Context, string, Project, int64) (providerChangeRequest, error)
 	SquashMerge(context.Context, string, Project, int64, string, string) (string, error)
 	DeleteTaskBranch(context.Context, string, Project, string) error
+	ArchiveProject(context.Context, string, Project) error
 }
 
 type forgejoRepositoryProvider struct{ client *forgejoClient }
@@ -66,6 +67,12 @@ func (p forgejoRepositoryProvider) DeleteTaskBranch(
 	ctx context.Context, token string, project Project, branch string,
 ) error {
 	return p.client.deleteBranch(ctx, token, project, branch)
+}
+
+func (p forgejoRepositoryProvider) ArchiveProject(
+	ctx context.Context, _ string, project Project,
+) error {
+	return p.client.archiveRepository(ctx, project)
 }
 
 type githubRepositoryProvider struct{ client *githubClient }
@@ -134,4 +141,10 @@ func (p githubRepositoryProvider) DeleteTaskBranch(
 	ctx context.Context, token string, project Project, branch string,
 ) error {
 	return p.client.deleteBranch(ctx, token, project, branch)
+}
+
+func (p githubRepositoryProvider) ArchiveProject(context.Context, string, Project) error {
+	// Cocola never mutates repository lifecycle state for a user-owned GitHub
+	// Project. Archiving only disconnects Cocola's local metadata and leases.
+	return nil
 }

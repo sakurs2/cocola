@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -339,6 +340,11 @@ func (r *Runner) runtimeImages() []string {
 }
 
 func (r *Runner) ServiceRunning(ctx context.Context, service string) (bool, error) {
+	ids, err := r.serviceContainerIDs(ctx, service)
+	return len(ids) > 0, err
+}
+
+func (r *Runner) serviceContainerIDs(ctx context.Context, service string) ([]string, error) {
 	command := exec.CommandContext(
 		ctx,
 		r.docker,
@@ -349,9 +355,52 @@ func (r *Runner) ServiceRunning(ctx context.Context, service string) (bool, erro
 	command.Stderr = r.Err
 	output, err := command.Output()
 	if err != nil {
-		return false, fmt.Errorf("inspect running %s container: %w", service, err)
+		return nil, fmt.Errorf("inspect running %s container: %w", service, err)
 	}
-	return strings.TrimSpace(string(output)) != "", nil
+	return strings.Fields(string(output)), nil
+}
+
+// ServiceOwnsPublishedPort verifies that an occupied host port belongs to the
+// running Cocola service and still maps to the expected container port. This
+// prevents a stale container or an unrelated process from bypassing preflight.
+func (r *Runner) ServiceOwnsPublishedPort(
+	ctx context.Context,
+	service string,
+	containerPort int,
+	hostPort int,
+) (bool, error) {
+	ids, err := r.serviceContainerIDs(ctx, service)
+	if err != nil || len(ids) == 0 {
+		return false, err
+	}
+	portSpec := strconv.Itoa(containerPort) + "/tcp"
+	for _, id := range ids {
+		command := exec.CommandContext(ctx, r.docker, "port", id, portSpec)
+		var diagnostic bytes.Buffer
+		command.Stderr = &diagnostic
+		output, commandErr := command.Output()
+		if commandErr != nil {
+			message := strings.TrimSpace(diagnostic.String())
+			if strings.Contains(strings.ToLower(message), "no public port") {
+				continue
+			}
+			if message == "" {
+				message = commandErr.Error()
+			}
+			return false, fmt.Errorf("inspect published port for %s container: %s", service, message)
+		}
+		for _, binding := range strings.Fields(string(output)) {
+			_, rawPort, splitErr := net.SplitHostPort(binding)
+			if splitErr != nil {
+				continue
+			}
+			publishedPort, parseErr := strconv.Atoi(rawPort)
+			if parseErr == nil && publishedPort == hostPort {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (r *Runner) VolumePresent(ctx context.Context, name string) (bool, error) {

@@ -46,6 +46,8 @@ const STATUS_LABEL: Record<ProjectSummary["status"], string> = {
   ready: "Ready",
   provisioning: "Provisioning",
   failed: "Failed",
+  archiving: "Archiving",
+  archive_failed: "Archive failed",
   archived: "Archived",
 };
 
@@ -248,9 +250,19 @@ export default function ProjectPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expected_version: project.version }),
       });
-      if (!response.ok) throw new Error("Could not archive Project");
+      const result = (await response.json().catch(() => null)) as ProjectSummary | null;
+      if (!response.ok || !result) throw new Error("Could not archive Project");
+      setProject(result);
       refreshProjects();
-      router.push("/projects");
+      if (result.status === "archived") {
+        router.push("/projects");
+        return;
+      }
+      throw new Error(
+        result.archive_error_code
+          ? `Could not archive Project (${result.archive_error_code})`
+          : "Could not archive Project",
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not archive Project");
       setBusy(false);
@@ -281,7 +293,13 @@ export default function ProjectPage() {
 
   const isGithub = project.repository_provider === "github" || Boolean(project.repository_html_url);
   const statusColor =
-    project.status === "ready" ? "success" : project.status === "failed" ? "danger" : "warning";
+    project.status === "ready"
+      ? "success"
+      : project.status === "failed" || project.status === "archive_failed"
+        ? "danger"
+        : project.status === "archived"
+          ? "default"
+          : "warning";
   const repositoryLabel = isGithub
     ? `${project.repository_owner}/${project.repository_name}`
     : "Cocola repository";
@@ -306,7 +324,9 @@ export default function ProjectPage() {
           <h1 className="truncate text-2xl font-semibold tracking-[-0.03em]">{project.name}</h1>
           <p className="text-muted mt-1 text-sm">{project.description || "No description"}</p>
         </div>
-        {project.status !== "archived" ? (
+        {project.status === "ready" ||
+        project.status === "failed" ||
+        project.status === "archive_failed" ? (
           <div className="flex shrink-0 gap-2">
             <Button
               isIconOnly
@@ -376,7 +396,7 @@ export default function ProjectPage() {
             </Card.Description>
           </Card.Header>
         </Card>
-      ) : project.status !== "ready" ? (
+      ) : project.status === "failed" ? (
         <Card className="border-warning/30 bg-warning/10 p-5">
           <Card.Content className="flex-row items-center justify-between gap-4 p-0">
             <span>
@@ -389,6 +409,37 @@ export default function ProjectPage() {
               <RefreshCw className="size-4" />
               Retry reconciliation
             </Button>
+          </Card.Content>
+        </Card>
+      ) : project.status === "archiving" || project.status === "archive_failed" ? (
+        <Card
+          className={
+            project.status === "archive_failed"
+              ? "border-danger/30 bg-danger/10 p-5"
+              : "border-warning/30 bg-warning/10 p-5"
+          }
+        >
+          <Card.Content className="flex-row items-center justify-between gap-4 p-0">
+            <span>
+              <span className="font-medium">{STATUS_LABEL[project.status]}</span>
+              <span className="text-muted mt-1 block text-sm">
+                {project.archive_error_code ||
+                  (project.status === "archiving"
+                    ? "Repository access is being revoked."
+                    : "The repository could not be archived safely.")}
+              </span>
+            </span>
+            {project.status === "archive_failed" ? (
+              <Button
+                isPending={busy}
+                size="sm"
+                variant="outline"
+                onPress={() => setArchiveOpen(true)}
+              >
+                <RefreshCw className="size-4" />
+                Retry archive
+              </Button>
+            ) : null}
           </Card.Content>
         </Card>
       ) : null}
@@ -639,7 +690,7 @@ export default function ProjectPage() {
         description={
           project.repository_provider === "github"
             ? "The GitHub repository will not be deleted."
-            : "Its existing local workspace remains available for review."
+            : "The Cocola repository becomes read-only. Existing task history remains available."
         }
         error={error || null}
         icon={Archive}

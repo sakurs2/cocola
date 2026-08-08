@@ -327,8 +327,9 @@ export type ProjectSummary = {
   visibility: "private" | "public";
   repository_has_lfs?: boolean;
   repository_has_submodules?: boolean;
-  status: "provisioning" | "ready" | "failed" | "archived";
+  status: "provisioning" | "ready" | "failed" | "archiving" | "archive_failed" | "archived";
   provision_error_code?: string;
+  archive_error_code?: string;
   version: number;
   created_at: string;
   updated_at: string;

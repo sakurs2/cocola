@@ -25,6 +25,8 @@ const STATUS_META: Record<
   ready: { color: "success", label: "Ready" },
   provisioning: { color: "warning", label: "Provisioning" },
   failed: { color: "danger", label: "Failed" },
+  archiving: { color: "warning", label: "Archiving" },
+  archive_failed: { color: "danger", label: "Archive failed" },
   archived: { color: "default", label: "Archived" },
 };
 

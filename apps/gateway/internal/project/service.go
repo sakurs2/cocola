@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const projectOperationStaleAfter = 15 * time.Minute
+
 type Config struct {
 	SecretKey               string
 	PublicOrigins           string
@@ -494,6 +496,7 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 	}
 	now := s.now()
 	projectID := uuid.NewString()
+	provisionAttemptID := uuid.NewString()
 	repositoryName := input.RepositoryName
 	status, defaultBranch, visibility := ProjectProvisioning, "", input.Visibility
 	if provider == ProviderLocal {
@@ -507,7 +510,8 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 		RepositoryExternalID: input.RepositoryID, RepositoryName: repositoryName,
 		Visibility: visibility, DefaultBranch: defaultBranch,
 		Status: status, ProvisionRequestID: input.ClientRequestID,
-		ProvisionStartedAt: now, CreatedAt: now, UpdatedAt: now,
+		ProvisionAttemptID: provisionAttemptID, ProvisionStartedAt: now,
+		ProvisionAttemptStartedAt: now, CreatedAt: now, UpdatedAt: now,
 	})
 	if errors.Is(err, ErrConflict) {
 		if existing, lookupErr := s.store.GetProjectByRequest(ctx, id, input.ClientRequestID); lookupErr == nil {
@@ -531,38 +535,36 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 		repo, err = github.repository(ctx, token, input.RepositoryID)
 	}
 	if err != nil {
-		if provider == ProviderGitHub && isDefinitiveGitHubError(err) {
-			failed, failErr := s.store.FailProject(ctx, id, v.ID, githubErrorCode(err), s.now())
-			if failErr == nil {
-				return failed, nil
-			}
+		failed, failErr := s.failProvisionAttempt(ctx, id, v, githubErrorCode(err))
+		if failErr == nil {
+			return failed, nil
 		}
-		// Preserve provisioning on timeouts/5xx: retry can safely reconcile it.
-		return v, nil
+		return Project{}, failErr
 	}
 	if err := s.validateRepository(repo, connection); err != nil {
-		failed, failErr := s.store.FailProject(ctx, id, v.ID, projectErrorCode(err), s.now())
+		failed, failErr := s.failProvisionAttempt(ctx, id, v, projectErrorCode(err))
 		if failErr != nil {
 			return Project{}, failErr
 		}
 		return failed, nil
 	}
-	token, _, github, readyErr := s.readyConnection(ctx, id)
-	if readyErr != nil {
-		return v, nil
-	}
 	if installErr := s.ensureInstalledRepository(ctx, github, token, connection, repo.ID); installErr != nil {
-		if !errors.Is(installErr, ErrNotFound) {
-			return v, nil
+		code := githubErrorCode(installErr)
+		if errors.Is(installErr, ErrNotFound) {
+			code = projectErrorCode(ErrRepositoryNotInstalled)
 		}
-		failed, failErr := s.store.FailProject(ctx, id, v.ID, projectErrorCode(ErrRepositoryNotInstalled), s.now())
+		failed, failErr := s.failProvisionAttempt(ctx, id, v, code)
 		if failErr != nil {
 			return Project{}, failErr
 		}
 		return failed, nil
 	}
 	repo = github.repositoryWarnings(ctx, token, repo)
-	return s.store.CompleteProject(ctx, id, v.ID, repo, connection.InstallationID, s.now())
+	completeContext, completeCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer completeCancel()
+	return s.store.CompleteProject(
+		completeContext, id, v.ID, v.ProvisionAttemptID, repo, connection.InstallationID, s.now(),
+	)
 }
 
 func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Project, error) {
@@ -583,64 +585,111 @@ func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Pro
 		v, _, _, _, err = s.currentProjectInstallation(ctx, id, v)
 		return v, err
 	}
+	if v.Status == ProjectArchiving || v.Status == ProjectArchiveFailed {
+		return Project{}, ErrConflict
+	}
+	v, err = s.claimProvisionAttempt(ctx, id, v)
+	if err != nil {
+		return Project{}, err
+	}
+	if v.Status == ProjectReady || v.Status == ProjectArchived {
+		return v, nil
+	}
 	if v.RepositoryProvider == ProviderLocal {
 		if !s.LocalProjectsEnabled() {
-			return Project{}, ErrInternalSCMUnavailable
-		}
-		v, err = s.store.RefreshProjectProvisionAttempt(ctx, id, v.ID, s.now())
-		if err != nil {
-			return Project{}, err
+			return s.failProvisionAttempt(ctx, id, v, "INTERNAL_SCM_UNAVAILABLE")
 		}
 		return s.provisionLocalProject(ctx, id, v)
 	}
 	token, c, github, err := s.readyConnection(ctx, id)
 	if err != nil {
-		return Project{}, err
+		return s.failProvisionAttempt(ctx, id, v, githubErrorCode(err))
 	}
 	var repo Repository
 	createdInRetry := false
 	if v.RepositoryMode == "create" {
-		v, repo, createdInRetry, err = s.retryCreateRepository(
-			ctx, id, v, token, c.ExternalLogin, github,
-		)
+		repo, createdInRetry, err = s.retryCreateRepository(ctx, v, token, c.ExternalLogin, github)
 	} else if v.RepositoryMode == "import" && v.RepositoryExternalID > 0 {
 		repo, err = github.repository(ctx, token, v.RepositoryExternalID)
 	} else {
-		return Project{}, ErrInvalidArgument
+		return s.failProvisionAttempt(ctx, id, v, "REPOSITORY_CONFIGURATION_INVALID")
 	}
 	if err != nil {
-		return Project{}, err
+		return s.failProvisionAttempt(ctx, id, v, githubErrorCode(err))
 	}
-	if repo.OwnerID != c.ExternalUserID || (v.RepositoryMode == "create" && !createdInRetry &&
-		(repo.CreatedAt.Before(v.ProvisionStartedAt.Add(-2*time.Minute)) ||
-			repo.CreatedAt.After(v.ProvisionStartedAt.Add(2*time.Minute)))) {
-		return Project{}, ErrConflict
+	if repo.OwnerID != c.ExternalUserID ||
+		(v.RepositoryMode == "create" && !createdInRetry &&
+			!repositoryCreatedNear(repo, v.ProvisionStartedAt)) {
+		return s.failProvisionAttempt(ctx, id, v, "REPOSITORY_RECONCILIATION_CONFLICT")
 	}
 	if err := s.validateRepository(repo, c); err != nil {
-		return Project{}, err
+		return s.failProvisionAttempt(ctx, id, v, projectErrorCode(err))
 	}
 	if err := s.ensureInstalledRepository(ctx, github, token, c, repo.ID); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return Project{}, ErrRepositoryNotInstalled
+			return s.failProvisionAttempt(ctx, id, v, projectErrorCode(ErrRepositoryNotInstalled))
 		}
-		return Project{}, err
+		return s.failProvisionAttempt(ctx, id, v, githubErrorCode(err))
 	}
 	repo = github.repositoryWarnings(ctx, token, repo)
-	return s.store.CompleteProject(ctx, id, v.ID, repo, c.InstallationID, s.now())
+	completeContext, completeCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer completeCancel()
+	return s.store.CompleteProject(
+		completeContext, id, v.ID, v.ProvisionAttemptID, repo, c.InstallationID, s.now(),
+	)
+}
+
+func (s *Service) claimProvisionAttempt(
+	ctx context.Context,
+	id Identity,
+	value Project,
+) (Project, error) {
+	now := s.now()
+	claimed, err := s.store.ClaimProjectProvisionAttempt(
+		ctx, id, value.ID, uuid.NewString(), now, now.Add(-projectOperationStaleAfter),
+	)
+	if !errors.Is(err, ErrNotFound) {
+		return claimed, err
+	}
+	current, getErr := s.store.GetProject(ctx, id, value.ID)
+	if getErr != nil {
+		return Project{}, getErr
+	}
+	if current.Status == ProjectReady || current.Status == ProjectArchived {
+		return current, nil
+	}
+	return Project{}, ErrConflict
+}
+
+func (s *Service) failProvisionAttempt(
+	ctx context.Context,
+	id Identity,
+	value Project,
+	code string,
+) (Project, error) {
+	failContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	failed, err := s.store.FailProject(
+		failContext, id, value.ID, value.ProvisionAttemptID, code, s.now(),
+	)
+	if !errors.Is(err, ErrNotFound) {
+		return failed, err
+	}
+	return s.store.GetProject(failContext, id, value.ID)
 }
 
 func (s *Service) provisionLocalProject(ctx context.Context, id Identity, value Project) (Project, error) {
 	repo, err := s.forgejo.createRepository(ctx, value.ID, value.Description)
 	if err != nil {
-		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_PROVISION_FAILED")
+		return s.failLocalProject(ctx, id, value, "INTERNAL_SCM_PROVISION_FAILED")
 	}
 	tokenName := "cocola-project-" + value.ID
 	if err := s.forgejo.deleteRepositoryTokensByName(ctx, tokenName); err != nil {
-		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_TOKEN_FAILED")
+		return s.failLocalProject(ctx, id, value, "INTERNAL_SCM_TOKEN_FAILED")
 	}
 	tokenID, token, err := s.forgejo.createRepositoryToken(ctx, repo, value.ID)
 	if err != nil {
-		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_TOKEN_FAILED")
+		return s.failLocalProject(ctx, id, value, "INTERNAL_SCM_TOKEN_FAILED")
 	}
 	cleanupToken := true
 	defer func() {
@@ -650,20 +699,23 @@ func (s *Service) provisionLocalProject(ctx context.Context, id Identity, value 
 	}()
 	if _, err = s.forgejo.branchSHA(ctx, token, repo.Owner, repo.Name, "main"); forgejoStatus(err, http.StatusNotFound) {
 		if _, err = s.forgejo.initializeRepository(ctx, repo, token); err != nil {
-			return s.failLocalProject(ctx, id, value.ID, forgejoInitializationErrorCode(err))
+			return s.failLocalProject(ctx, id, value, forgejoInitializationErrorCode(err))
 		}
 	} else if err != nil {
-		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_INIT_FAILED")
+		return s.failLocalProject(ctx, id, value, "INTERNAL_SCM_INIT_FAILED")
 	}
 	if err = s.forgejo.protectMain(ctx, repo); err != nil {
-		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_PROTECTION_FAILED")
+		return s.failLocalProject(ctx, id, value, "INTERNAL_SCM_PROTECTION_FAILED")
 	}
 	ciphertext, err := s.box.encrypt(token, projectTokenAAD(id, value.ID))
 	if err != nil {
-		return Project{}, err
+		return s.failLocalProject(ctx, id, value, "INTERNAL_SCM_CREDENTIAL_ENCRYPT_FAILED")
 	}
+	completeContext, completeCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer completeCancel()
 	completed, err := s.store.CompleteLocalProject(
-		ctx, id, value.ID, repo, tokenID, ciphertext, repo.CloneURL, s.now(),
+		completeContext, id, value.ID, value.ProvisionAttemptID,
+		repo, tokenID, ciphertext, repo.CloneURL, s.now(),
 	)
 	if err != nil {
 		return Project{}, err
@@ -684,32 +736,27 @@ func forgejoInitializationErrorCode(err error) string {
 func (s *Service) failLocalProject(
 	ctx context.Context,
 	id Identity,
-	projectID string,
+	value Project,
 	code string,
 ) (Project, error) {
-	return s.store.FailProject(ctx, id, projectID, code, s.now())
+	return s.failProvisionAttempt(ctx, id, value, code)
 }
 
 func (s *Service) retryCreateRepository(
 	ctx context.Context,
-	id Identity,
 	value Project,
 	token string,
 	owner string,
 	github *githubClient,
-) (Project, Repository, bool, error) {
+) (Repository, bool, error) {
 	repo, err := github.repositoryByName(ctx, token, owner, value.RepositoryName)
 	if !githubStatus(err, http.StatusNotFound) {
-		return value, repo, false, err
-	}
-	value, err = s.store.RefreshProjectProvisionAttempt(ctx, id, value.ID, s.now())
-	if err != nil {
-		return Project{}, Repository{}, false, err
+		return repo, false, err
 	}
 	repo, err = github.createRepository(
 		ctx, token, value.RepositoryName, value.Description, value.Visibility == "private",
 	)
-	return value, repo, err == nil, err
+	return repo, err == nil, err
 }
 
 func (s *Service) List(ctx context.Context, id Identity) ([]Project, error) {
@@ -758,15 +805,72 @@ func (s *Service) Archive(ctx context.Context, id Identity, projectID string, ex
 	if err != nil {
 		return Project{}, err
 	}
+	if value.Status == ProjectArchived {
+		return value, nil
+	}
 	if value.Version != expected {
+		return Project{}, ErrVersionConflict
+	}
+	if value.Status != ProjectReady && value.Status != ProjectFailed &&
+		value.Status != ProjectArchiveFailed && value.Status != ProjectArchiving {
 		return Project{}, ErrConflict
 	}
-	if value.RepositoryExternalID > 0 {
-		if err := s.revokeProjectTokenLeases(ctx, id, projectID); err != nil && !errors.Is(err, ErrNotFound) {
-			return Project{}, err
+	now := s.now()
+	attemptID := uuid.NewString()
+	value, err = s.store.ClaimProjectArchive(
+		ctx, id, projectID, expected, attemptID, now, now.Add(-projectOperationStaleAfter),
+	)
+	if err != nil {
+		return Project{}, err
+	}
+	operationContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
+	defer cancel()
+	if value.RepositoryProvider == ProviderLocal {
+		provider := forgejoRepositoryProvider{client: s.forgejo}
+		if s.forgejo == nil {
+			return s.failArchiveAttempt(operationContext, id, value, "INTERNAL_SCM_UNAVAILABLE")
+		}
+		if err := provider.ArchiveProject(operationContext, "", value); err != nil {
+			return s.failArchiveAttempt(operationContext, id, value, "INTERNAL_SCM_ARCHIVE_FAILED")
+		}
+		if value.RepositoryTokenID > 0 {
+			err = s.forgejo.deleteRepositoryToken(operationContext, value.RepositoryTokenID)
+		} else {
+			err = s.forgejo.deleteRepositoryTokensByName(
+				operationContext, "cocola-project-"+value.ID,
+			)
+		}
+		if err != nil {
+			return s.failArchiveAttempt(operationContext, id, value, "INTERNAL_SCM_TOKEN_REVOKE_FAILED")
 		}
 	}
-	return s.store.ArchiveProject(ctx, id, projectID, expected, s.now())
+	if value.RepositoryExternalID > 0 {
+		if err := s.revokeProjectTokenLeases(operationContext, id, projectID); err != nil && !errors.Is(err, ErrNotFound) {
+			return s.failArchiveAttempt(operationContext, id, value, "SCM_LEASE_REVOKE_FAILED")
+		}
+	}
+	completed, err := s.store.CompleteProjectArchive(
+		operationContext, id, projectID, attemptID, s.now(),
+	)
+	if errors.Is(err, ErrNotFound) {
+		return s.store.GetProject(operationContext, id, projectID)
+	}
+	return completed, err
+}
+
+func (s *Service) failArchiveAttempt(
+	ctx context.Context,
+	id Identity,
+	value Project,
+	code string,
+) (Project, error) {
+	failed, err := s.store.FailProjectArchive(
+		ctx, id, value.ID, value.ArchiveAttemptID, code, s.now(),
+	)
+	if errors.Is(err, ErrNotFound) {
+		return s.store.GetProject(ctx, id, value.ID)
+	}
+	return failed, err
 }
 
 func (s *Service) Tasks(ctx context.Context, id Identity, projectID string) ([]Task, error) {
@@ -776,14 +880,6 @@ func (s *Service) Tasks(ctx context.Context, id Identity, projectID string) ([]T
 	tasks, err := s.store.ListTasks(ctx, id, projectID)
 	if err != nil {
 		return nil, err
-	}
-	for index := range tasks {
-		changeRequest, changeErr := s.store.GetChangeRequest(ctx, id, tasks[index].ID)
-		if changeErr == nil {
-			tasks[index].ChangeRequest = &changeRequest
-		} else if !errors.Is(changeErr, ErrNotFound) {
-			return nil, changeErr
-		}
 	}
 	return tasks, nil
 }
@@ -805,26 +901,17 @@ func (s *Service) PrepareChangeRequest(ctx context.Context, id Identity, project
 	} else if !errors.Is(existingErr, ErrNotFound) {
 		return ChangeRequestPreparation{}, existingErr
 	}
-	contextValue, token, err := s.ProjectContext(ctx, id, conversationID)
+	permissions := map[string]string{"contents": "read"}
+	if value.RepositoryProvider == ProviderGitHub {
+		permissions = map[string]string{"contents": "write", "pull_requests": "write"}
+	}
+	contextValue, token, workspace, value, err := s.projectContextForWorkspace(
+		ctx, id, workspace, value, permissions,
+	)
 	if err != nil {
 		return ChangeRequestPreparation{}, err
 	}
 	cloneURL := contextValue.CloneURL
-	if value.RepositoryProvider == ProviderGitHub {
-		// ProjectContext intentionally grants read-only clone access. Replace it
-		// with a short-lived token that can publish only this repository.
-		s.RevokeGitHubToken(context.WithoutCancel(ctx), id, token)
-		value, _, connection, github, installErr := s.currentProjectInstallation(ctx, id, value)
-		if installErr != nil {
-			return ChangeRequestPreparation{}, installErr
-		}
-		token, _, err = github.installationToken(ctx, connection.InstallationID,
-			value.RepositoryExternalID, map[string]string{"contents": "write", "pull_requests": "write"})
-		if err != nil {
-			return ChangeRequestPreparation{}, err
-		}
-		cloneURL = "https://github.com/" + value.RepositoryOwner + "/" + value.RepositoryName + ".git"
-	}
 	return ChangeRequestPreparation{
 		Project: value, Workspace: workspace, Context: contextValue,
 		Token: token, CloneURL: cloneURL, Existing: existing,
@@ -833,8 +920,13 @@ func (s *Service) PrepareChangeRequest(ctx context.Context, id Identity, project
 
 func (s *Service) CompleteChangeRequest(ctx context.Context, id Identity, preparation ChangeRequestPreparation, headSHA string) (ChangeRequest, error) {
 	if preparation.Existing != nil {
-		return s.RefreshChangeRequest(
-			ctx, id, preparation.Project.ID, preparation.Existing.ConversationID,
+		provider, err := s.repositoryProvider(ctx, id, preparation.Project)
+		if err != nil {
+			return ChangeRequest{}, err
+		}
+		return s.refreshChangeRequestWithAccess(
+			ctx, id, *preparation.Existing, preparation.Workspace, preparation.Project,
+			provider, preparation.Token,
 		)
 	}
 	if len(headSHA) != 40 {
@@ -876,11 +968,28 @@ func (s *Service) RefreshChangeRequest(ctx context.Context, id Identity, project
 	if value.Status == "merged" || value.Status == "closed" {
 		return value, nil
 	}
-	provider, token, release, err := s.changeRequestAccess(ctx, id, projectValue)
+	provider, token, release, err := s.changeRequestAccess(ctx, id, projectValue, false)
 	if err != nil {
 		return ChangeRequest{}, err
 	}
 	defer release()
+	return s.refreshChangeRequestWithAccess(
+		ctx, id, value, workspace, projectValue, provider, token,
+	)
+}
+
+func (s *Service) refreshChangeRequestWithAccess(
+	ctx context.Context,
+	id Identity,
+	value ChangeRequest,
+	workspace Workspace,
+	projectValue Project,
+	provider RepositoryProvider,
+	token string,
+) (ChangeRequest, error) {
+	if value.Status == "merged" || value.Status == "closed" {
+		return value, nil
+	}
 	providerValue, err := provider.GetChangeRequestStatus(
 		ctx, token, projectValue, value.ExternalNumber,
 	)
@@ -897,7 +1006,28 @@ func (s *Service) RefreshChangeRequest(ctx context.Context, id Identity, project
 }
 
 func (s *Service) MergeChangeRequest(ctx context.Context, id Identity, projectID, conversationID string) (ChangeRequest, error) {
-	value, err := s.RefreshChangeRequest(ctx, id, projectID, conversationID)
+	value, err := s.store.GetChangeRequest(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	if value.ProjectID != projectID {
+		return ChangeRequest{}, ErrNotFound
+	}
+	if value.Status == "merged" {
+		return value, nil
+	}
+	workspace, projectValue, err := s.store.GetWorkspace(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	provider, token, release, err := s.changeRequestAccess(ctx, id, projectValue, true)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	defer release()
+	value, err = s.refreshChangeRequestWithAccess(
+		ctx, id, value, workspace, projectValue, provider, token,
+	)
 	if err != nil {
 		return ChangeRequest{}, err
 	}
@@ -907,15 +1037,6 @@ func (s *Service) MergeChangeRequest(ctx context.Context, id Identity, projectID
 	if value.Status != "open" {
 		return ChangeRequest{}, ErrChangeRequestNotReady
 	}
-	_, projectValue, err := s.store.GetWorkspace(ctx, id, conversationID)
-	if err != nil {
-		return ChangeRequest{}, err
-	}
-	provider, token, release, err := s.changeRequestAccess(ctx, id, projectValue)
-	if err != nil {
-		return ChangeRequest{}, err
-	}
-	defer release()
 	title := "Cocola task " + shortTaskID(conversationID)
 	mergeSHA, err := provider.SquashMerge(
 		ctx, token, projectValue, value.ExternalNumber, value.HeadSHA, title,
@@ -924,18 +1045,17 @@ func (s *Service) MergeChangeRequest(ctx context.Context, id Identity, projectID
 		// Provider merge is atomic on the expected head SHA. If the response was
 		// lost or a concurrent retry won, reconcile instead of surfacing a false
 		// failure or attempting a second merge commit.
-		reconciled, refreshErr := s.RefreshChangeRequest(ctx, id, projectID, conversationID)
+		reconciled, refreshErr := s.refreshChangeRequestWithAccess(
+			ctx, id, value, workspace, projectValue, provider, token,
+		)
 		if refreshErr == nil && reconciled.Status == "merged" {
 			return reconciled, nil
 		}
 		return ChangeRequest{}, err
 	}
-	workspace, _, workspaceErr := s.store.GetWorkspace(ctx, id, conversationID)
-	if workspaceErr == nil {
-		_ = provider.DeleteTaskBranch(
-			context.WithoutCancel(ctx), token, projectValue, workspace.BranchName,
-		)
-	}
+	_ = provider.DeleteTaskBranch(
+		context.WithoutCancel(ctx), token, projectValue, workspace.BranchName,
+	)
 	now := s.now()
 	value.Status, value.MergeSHA, value.MergedAt, value.UpdatedAt = "merged", mergeSHA, &now, now
 	return s.store.UpsertChangeRequest(ctx, id, value)
@@ -952,7 +1072,11 @@ func (s *Service) repositoryProvider(
 		}
 		return forgejoRepositoryProvider{client: s.forgejo}, nil
 	}
-	_, _, _, github, err := s.currentProjectInstallation(ctx, id, value)
+	registration, err := s.store.GetAppRegistration(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	github, err := s.githubForRegistration(id, registration)
 	if err != nil {
 		return nil, err
 	}
@@ -963,12 +1087,13 @@ func (s *Service) changeRequestAccess(
 	ctx context.Context,
 	id Identity,
 	value Project,
+	write bool,
 ) (RepositoryProvider, string, func(), error) {
-	provider, err := s.repositoryProvider(ctx, id, value)
-	if err != nil {
-		return nil, "", func() {}, err
-	}
 	if value.RepositoryProvider == ProviderLocal {
+		provider, err := s.repositoryProvider(ctx, id, value)
+		if err != nil {
+			return nil, "", func() {}, err
+		}
 		token, tokenErr := s.localProjectToken(id, value)
 		return provider, token, func() {}, tokenErr
 	}
@@ -976,9 +1101,23 @@ func (s *Service) changeRequestAccess(
 	if err != nil {
 		return nil, "", func() {}, err
 	}
-	token, _, err := github.installationToken(ctx, connection.InstallationID, value.RepositoryExternalID,
-		map[string]string{"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"})
-	return provider, token, func() { _ = github.revokeInstallationToken(context.Background(), token) }, err
+	provider := githubRepositoryProvider{client: github}
+	permissions := map[string]string{
+		"contents": "read", "pull_requests": "read", "checks": "read", "statuses": "read",
+	}
+	if write {
+		permissions["contents"] = "write"
+		permissions["pull_requests"] = "write"
+	}
+	token, _, err := github.installationToken(
+		ctx, connection.InstallationID, value.RepositoryExternalID, permissions,
+	)
+	release := func() {
+		revokeContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = github.revokeInstallationToken(revokeContext, token)
+	}
+	return provider, token, release, err
 }
 
 func shortTaskID(value string) string {
@@ -1176,17 +1315,30 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 	if err != nil {
 		return ProjectContext{}, "", err
 	}
+	result, token, _, _, err := s.projectContextForWorkspace(
+		ctx, id, w, v, map[string]string{"contents": "read"},
+	)
+	return result, token, err
+}
+
+func (s *Service) projectContextForWorkspace(
+	ctx context.Context,
+	id Identity,
+	w Workspace,
+	v Project,
+	permissions map[string]string,
+) (ProjectContext, string, Workspace, Project, error) {
 	if v.Status != ProjectReady {
-		return ProjectContext{}, "", ErrProjectNotReady
+		return ProjectContext{}, "", Workspace{}, Project{}, ErrProjectNotReady
 	}
 	gitAuthorName, gitAuthorEmail := gitAuthorIdentity(id)
 	if v.RepositoryProvider == ProviderLocal {
 		if !s.LocalProjectsEnabled() {
-			return ProjectContext{}, "", ErrLocalProjectsDisabled
+			return ProjectContext{}, "", Workspace{}, Project{}, ErrLocalProjectsDisabled
 		}
 		token, tokenErr := s.localProjectToken(id, v)
 		if tokenErr != nil {
-			return ProjectContext{}, "", tokenErr
+			return ProjectContext{}, "", Workspace{}, Project{}, tokenErr
 		}
 		baseRef := strings.TrimSpace(w.BaseRef)
 		if baseRef == "" {
@@ -1195,12 +1347,13 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 		if w.BaseSHA == "" {
 			sha, branchErr := s.forgejo.branchSHA(ctx, token, v.RepositoryOwner, v.RepositoryName, baseRef)
 			if branchErr != nil {
-				return ProjectContext{}, "", branchErr
+				return ProjectContext{}, "", Workspace{}, Project{}, branchErr
 			}
-			w, err = s.store.LockBaseSHA(ctx, id, conversationID, sha, s.now())
-			if err != nil {
-				return ProjectContext{}, "", err
+			locked, lockErr := s.store.LockBaseSHA(ctx, id, w.ConversationID, sha, s.now())
+			if lockErr != nil {
+				return ProjectContext{}, "", Workspace{}, Project{}, lockErr
 			}
+			w = locked
 		}
 		return ProjectContext{
 			ProjectID: v.ID, RepositoryExternalID: v.RepositoryExternalID,
@@ -1210,11 +1363,11 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 			RepositoryProvider: ProviderLocal,
 			RepositoryFullName: strings.Trim(v.RepositoryOwner+"/"+v.RepositoryName, "/"),
 			CredentialMode:     "ephemeral",
-		}, token, nil
+		}, token, w, v, nil
 	}
 	v, _, connection, github, err := s.currentProjectInstallation(ctx, id, v)
 	if err != nil {
-		return ProjectContext{}, "", err
+		return ProjectContext{}, "", Workspace{}, Project{}, err
 	}
 	installationID := connection.InstallationID
 	cloneURL := "https://github.com/" + v.RepositoryOwner + "/" + v.RepositoryName + ".git"
@@ -1222,10 +1375,11 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 	if baseRef == "" {
 		baseRef = v.DefaultBranch
 	}
-	token, _, err := github.installationToken(ctx, v.InstallationID, v.RepositoryExternalID,
-		map[string]string{"contents": "read"})
+	token, _, err := github.installationToken(
+		ctx, v.InstallationID, v.RepositoryExternalID, permissions,
+	)
 	if err != nil {
-		return ProjectContext{}, "", err
+		return ProjectContext{}, "", Workspace{}, Project{}, err
 	}
 	if w.BaseSHA == "" {
 		var sha string
@@ -1233,12 +1387,12 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 		sha, branchErr = github.branchSHA(ctx, token, v.RepositoryOwner, v.RepositoryName, baseRef)
 		if branchErr != nil {
 			_ = github.revokeInstallationToken(ctx, token)
-			return ProjectContext{}, "", branchErr
+			return ProjectContext{}, "", Workspace{}, Project{}, branchErr
 		}
-		w, err = s.store.LockBaseSHA(ctx, id, conversationID, sha, s.now())
+		w, err = s.store.LockBaseSHA(ctx, id, w.ConversationID, sha, s.now())
 		if err != nil {
 			_ = github.revokeInstallationToken(ctx, token)
-			return ProjectContext{}, "", err
+			return ProjectContext{}, "", Workspace{}, Project{}, err
 		}
 	}
 	return ProjectContext{
@@ -1249,7 +1403,7 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 		InstallationID: installationID, RepositoryProvider: v.RepositoryProvider,
 		RepositoryFullName: v.RepositoryOwner + "/" + v.RepositoryName,
 		CredentialMode:     "ephemeral",
-	}, token, nil
+	}, token, w, v, nil
 }
 
 func (s *Service) localProjectToken(id Identity, value Project) (string, error) {
@@ -1644,11 +1798,6 @@ func decodeCursor(value string) (int, error) {
 		return 0, ErrInvalidArgument
 	}
 	return page, nil
-}
-
-func isDefinitiveGitHubError(err error) bool {
-	var httpErr *githubHTTPError
-	return errors.As(err, &httpErr) && httpErr.Status >= 400 && httpErr.Status < 500 && httpErr.Status != http.StatusRequestTimeout && httpErr.Status != http.StatusTooManyRequests
 }
 
 func githubStatus(err error, status int) bool {

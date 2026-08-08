@@ -41,10 +41,12 @@ const (
 	ConnectionReady                = "ready"
 	ConnectionReauthorization      = "reauthorization_required"
 
-	ProjectProvisioning = "provisioning"
-	ProjectReady        = "ready"
-	ProjectFailed       = "failed"
-	ProjectArchived     = "archived"
+	ProjectProvisioning  = "provisioning"
+	ProjectReady         = "ready"
+	ProjectFailed        = "failed"
+	ProjectArchiving     = "archiving"
+	ProjectArchiveFailed = "archive_failed"
+	ProjectArchived      = "archived"
 )
 
 const (
@@ -130,35 +132,39 @@ type ConnectorResult struct {
 }
 
 type Project struct {
-	ID                     string     `json:"id"`
-	TenantID               string     `json:"-"`
-	OwnerUserID            string     `json:"-"`
-	Name                   string     `json:"name"`
-	Description            string     `json:"description"`
-	RuntimeID              string     `json:"runtime_id"`
-	RepositoryMode         string     `json:"repository_mode"`
-	RepositoryProvider     string     `json:"repository_provider"`
-	RepositoryExternalID   int64      `json:"repository_external_id,omitempty"`
-	RepositoryOwner        string     `json:"repository_owner"`
-	RepositoryName         string     `json:"repository_name"`
-	RepositoryHTMLURL      string     `json:"repository_html_url"`
-	InstallationID         int64      `json:"installation_id,omitempty"`
-	DefaultBranch          string     `json:"default_branch"`
-	Visibility             string     `json:"visibility"`
-	RepositorySizeKB       int64      `json:"repository_size_kb"`
-	Status                 string     `json:"status"`
-	ProvisionErrorCode     string     `json:"provision_error_code,omitempty"`
-	ProvisionRequestID     string     `json:"-"`
-	ProvisionStartedAt     time.Time  `json:"-"`
-	Version                int64      `json:"version"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	ArchivedAt             *time.Time `json:"archived_at,omitempty"`
-	RepositoryHasLFS       bool       `json:"repository_has_lfs,omitempty"`
-	RepositoryHasSubmodule bool       `json:"repository_has_submodules,omitempty"`
-	RepositoryCloneURL     string     `json:"-"`
-	RepositoryTokenID      int64      `json:"-"`
-	RepositoryTokenCipher  string     `json:"-"`
+	ID                        string     `json:"id"`
+	TenantID                  string     `json:"-"`
+	OwnerUserID               string     `json:"-"`
+	Name                      string     `json:"name"`
+	Description               string     `json:"description"`
+	RuntimeID                 string     `json:"runtime_id"`
+	RepositoryMode            string     `json:"repository_mode"`
+	RepositoryProvider        string     `json:"repository_provider"`
+	RepositoryExternalID      int64      `json:"repository_external_id,omitempty"`
+	RepositoryOwner           string     `json:"repository_owner"`
+	RepositoryName            string     `json:"repository_name"`
+	RepositoryHTMLURL         string     `json:"repository_html_url"`
+	InstallationID            int64      `json:"installation_id,omitempty"`
+	DefaultBranch             string     `json:"default_branch"`
+	Visibility                string     `json:"visibility"`
+	RepositorySizeKB          int64      `json:"repository_size_kb"`
+	Status                    string     `json:"status"`
+	ProvisionErrorCode        string     `json:"provision_error_code,omitempty"`
+	ProvisionRequestID        string     `json:"-"`
+	ProvisionAttemptID        string     `json:"-"`
+	ProvisionStartedAt        time.Time  `json:"-"`
+	ProvisionAttemptStartedAt time.Time  `json:"-"`
+	ArchiveAttemptID          string     `json:"-"`
+	ArchiveErrorCode          string     `json:"archive_error_code,omitempty"`
+	Version                   int64      `json:"version"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	ArchivedAt                *time.Time `json:"archived_at,omitempty"`
+	RepositoryHasLFS          bool       `json:"repository_has_lfs,omitempty"`
+	RepositoryHasSubmodule    bool       `json:"repository_has_submodules,omitempty"`
+	RepositoryCloneURL        string     `json:"-"`
+	RepositoryTokenID         int64      `json:"-"`
+	RepositoryTokenCipher     string     `json:"-"`
 }
 
 type Repository struct {
@@ -427,13 +433,15 @@ type Store interface {
 	GetProject(context.Context, Identity, string) (Project, error)
 	GetProjectByRequest(context.Context, Identity, string) (Project, error)
 	CreateProject(context.Context, Project) (Project, error)
-	RefreshProjectProvisionAttempt(context.Context, Identity, string, time.Time) (Project, error)
-	CompleteProject(context.Context, Identity, string, Repository, int64, time.Time) (Project, error)
-	CompleteLocalProject(context.Context, Identity, string, Repository, int64, string, string, time.Time) (Project, error)
+	ClaimProjectProvisionAttempt(context.Context, Identity, string, string, time.Time, time.Time) (Project, error)
+	CompleteProject(context.Context, Identity, string, string, Repository, int64, time.Time) (Project, error)
+	CompleteLocalProject(context.Context, Identity, string, string, Repository, int64, string, string, time.Time) (Project, error)
 	RebindProjectInstallation(context.Context, Identity, string, int64, int64, time.Time) (Project, error)
-	FailProject(context.Context, Identity, string, string, time.Time) (Project, error)
+	FailProject(context.Context, Identity, string, string, string, time.Time) (Project, error)
 	UpdateProject(context.Context, Identity, string, int64, string, string, string, time.Time) (Project, error)
-	ArchiveProject(context.Context, Identity, string, int64, time.Time) (Project, error)
+	ClaimProjectArchive(context.Context, Identity, string, int64, string, time.Time, time.Time) (Project, error)
+	CompleteProjectArchive(context.Context, Identity, string, string, time.Time) (Project, error)
+	FailProjectArchive(context.Context, Identity, string, string, string, time.Time) (Project, error)
 	ListTasks(context.Context, Identity, string) ([]Task, error)
 
 	GetWorkspace(context.Context, Identity, string) (Workspace, Project, error)

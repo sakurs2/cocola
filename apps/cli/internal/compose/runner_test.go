@@ -473,6 +473,32 @@ func TestStopContinuesAfterAnEarlierPhaseFails(t *testing.T) {
 	})
 }
 
+func TestServiceOwnsPublishedPortRequiresExactBinding(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+if [ "$1 $2" = "ps -q" ]; then printf '%s\n' 'forgejo-container'; exit 0; fi
+if [ "$1 $2 $3" = "port forgejo-container 3000/tcp" ]; then printf '%s\n' "$PUBLISHED_BINDING"; exit 0; fi
+exit 1
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &Runner{docker: dockerPath, Err: &bytes.Buffer{}}
+
+	t.Setenv("PUBLISHED_BINDING", "127.0.0.1:3001")
+	owned, err := runner.ServiceOwnsPublishedPort(context.Background(), "forgejo", 3000, 3001)
+	if err != nil || !owned {
+		t.Fatalf("exact binding owned = %v, err = %v", owned, err)
+	}
+
+	t.Setenv("PUBLISHED_BINDING", "127.0.0.1:3002")
+	owned, err = runner.ServiceOwnsPublishedPort(context.Background(), "forgejo", 3000, 3001)
+	if err != nil || owned {
+		t.Fatalf("mismatched binding owned = %v, err = %v", owned, err)
+	}
+}
+
 func newRecordingRunner(t *testing.T, managed bool) (*Runner, string, config.Paths) {
 	t.Helper()
 	directory := t.TempDir()

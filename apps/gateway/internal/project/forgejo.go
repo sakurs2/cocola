@@ -85,10 +85,6 @@ func newForgejoClient(client *http.Client, apiBase, cloneBase, username, passwor
 	return &forgejoClient{http: client, apiBase: apiBase, cloneBase: cloneBase, username: username, password: password}, nil
 }
 
-func (f *forgejoClient) health(ctx context.Context) error {
-	return f.request(ctx, http.MethodGet, "/api/healthz", "", nil, nil)
-}
-
 func (f *forgejoClient) createRepository(ctx context.Context, projectID, description string) (Repository, error) {
 	name := "p-" + strings.ReplaceAll(projectID, "-", "")
 	var payload struct {
@@ -123,19 +119,28 @@ func (f *forgejoClient) createRepository(ctx context.Context, projectID, descrip
 }
 
 func (f *forgejoClient) deleteRepositoryTokensByName(ctx context.Context, name string) error {
-	var tokens []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := f.request(ctx, http.MethodGet,
-		"/api/v1/users/"+url.PathEscape(f.username)+"/tokens", "", nil, &tokens); err != nil {
-		return err
-	}
-	for _, token := range tokens {
-		if token.Name == name {
-			if err := f.deleteRepositoryToken(ctx, token.ID); err != nil {
-				return err
+	ids := make([]int64, 0)
+	for page := 1; page <= 1000; page++ {
+		var tokens []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		path := "/api/v1/users/" + url.PathEscape(f.username) + "/tokens?limit=100&page=" + strconv.Itoa(page)
+		if err := f.request(ctx, http.MethodGet, path, "", nil, &tokens); err != nil {
+			return err
+		}
+		for _, token := range tokens {
+			if token.Name == name {
+				ids = append(ids, token.ID)
 			}
+		}
+		if len(tokens) < 100 {
+			break
+		}
+	}
+	for _, tokenID := range ids {
+		if err := f.deleteRepositoryToken(ctx, tokenID); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -204,8 +209,30 @@ func (f *forgejoClient) deleteRepositoryToken(ctx context.Context, tokenID int64
 	if tokenID <= 0 {
 		return nil
 	}
-	return f.request(ctx, http.MethodDelete,
+	err := f.request(ctx, http.MethodDelete,
 		"/api/v1/users/"+url.PathEscape(f.username)+"/tokens/"+strconv.FormatInt(tokenID, 10), "", nil, nil)
+	if forgejoStatus(err, http.StatusNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (f *forgejoClient) archiveRepository(ctx context.Context, project Project) error {
+	owner := strings.TrimSpace(project.RepositoryOwner)
+	if owner == "" {
+		owner = f.username
+	}
+	name := strings.TrimSpace(project.RepositoryName)
+	if name == "" {
+		name = "p-" + strings.ReplaceAll(project.ID, "-", "")
+	}
+	err := f.request(ctx, http.MethodPatch,
+		"/api/v1/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name), "",
+		map[string]any{"archived": true}, nil)
+	if forgejoStatus(err, http.StatusNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (f *forgejoClient) initializeRepository(ctx context.Context, repo Repository, token string) (string, error) {

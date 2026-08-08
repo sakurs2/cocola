@@ -64,6 +64,7 @@ func (f *fakeProjectStore) FailProject(
 	_ context.Context,
 	_ project.Identity,
 	_ string,
+	_ string,
 	code string,
 	updatedAt time.Time,
 ) (project.Project, error) {

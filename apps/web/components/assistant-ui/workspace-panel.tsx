@@ -88,6 +88,7 @@ import {
   RefreshCw,
   SquareTerminal,
   ExternalLink,
+  UploadCloud,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -567,6 +568,7 @@ function GitPage({
           {...changeRequestState}
           workspaceDirty={Boolean(snapshot?.dirty)}
           hasCommits={Boolean(snapshot?.ahead)}
+          workspaceHeadSHA={snapshot?.head_sha || ""}
         />
         {error ? (
           <div className="border-danger/20 bg-danger-soft text-danger m-3 rounded-2xl border px-3 py-2 text-sm">
@@ -706,9 +708,11 @@ function ChangeRequestCard({
   request,
   workspaceDirty,
   hasCommits,
+  workspaceHeadSHA,
 }: ReturnType<typeof useProjectChangeRequest> & {
   workspaceDirty: boolean;
   hasCommits: boolean;
+  workspaceHeadSHA: string;
 }) {
   const status = changeRequest?.status || "working";
   const merged = status === "merged";
@@ -716,29 +720,40 @@ function ChangeRequestCard({
   const checksFailed = status === "failed" && changeRequest?.error_code === "CHECKS_FAILED";
   const blocked = conflict || status === "failed";
   const pending = status === "checks_pending";
+  const hasUnpublishedCommits = Boolean(
+    changeRequest?.head_sha &&
+    workspaceHeadSHA &&
+    changeRequest.head_sha.toLowerCase() !== workspaceHeadSHA.toLowerCase(),
+  );
   const copy = merged
     ? "Merged into main as one reviewed change."
-    : checksFailed
-      ? "Provider checks failed. Fix the reported issue, push a new commit, then refresh."
-      : blocked
-        ? "The branch cannot merge cleanly. Resolve the conflict in this task, then refresh."
-        : pending
-          ? "Provider checks are still running. Refresh before merging."
-          : changeRequest
-            ? "The task branch is published and ready for review."
-            : workspaceDirty
-              ? "Commit the current changes before opening a review."
-              : hasCommits
-                ? "Publish this task branch for review and squash merge."
-                : "Make and commit a change before opening a review.";
+    : workspaceDirty
+      ? changeRequest
+        ? "Commit the current changes before updating the review branch."
+        : "Commit the current changes before opening a review."
+      : hasUnpublishedCommits
+        ? "New local commits are ready to publish to this change request."
+        : checksFailed
+          ? "Provider checks failed. Fix the reported issue, push a new commit, then refresh."
+          : blocked
+            ? "The branch cannot merge cleanly. Resolve the conflict in this task, then refresh."
+            : pending
+              ? "Provider checks are still running. Refresh before merging."
+              : changeRequest
+                ? "The task branch is published and ready for review."
+                : hasCommits
+                  ? "Publish this task branch for review and squash merge."
+                  : "Make and commit a change before opening a review.";
 
   const action = !changeRequest
     ? { label: "Create change request", kind: "create" as const }
-    : status === "open"
-      ? { label: "Squash merge", kind: "merge" as const }
-      : merged || status === "closed"
-        ? null
-        : { label: "Refresh status", kind: "refresh" as const };
+    : merged || status === "closed"
+      ? null
+      : hasUnpublishedCommits
+        ? { label: "Update branch", kind: "update" as const }
+        : status === "open"
+          ? { label: "Squash merge", kind: "merge" as const }
+          : { label: "Refresh status", kind: "refresh" as const };
 
   return (
     <Card className="m-3 mb-0 border border-border/70 bg-surface-secondary/35 shadow-none">
@@ -795,7 +810,7 @@ function ChangeRequestCard({
         {error ? <p className="text-[11px] text-danger">{error}</p> : null}
         {action ? (
           <div className="flex justify-end gap-2">
-            {changeRequest?.external_url ? (
+            {changeRequest?.provider === "github" && changeRequest.external_url ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -806,7 +821,7 @@ function ChangeRequestCard({
                 Open on GitHub
               </Button>
             ) : null}
-            {changeRequest && status === "open" ? (
+            {changeRequest && action.kind !== "refresh" ? (
               <Button size="sm" variant="ghost" onPress={() => void request("refresh")}>
                 Refresh
               </Button>
@@ -814,18 +829,26 @@ function ChangeRequestCard({
             <Button
               size="sm"
               isPending={loading}
-              isDisabled={!changeRequest && (workspaceDirty || !hasCommits)}
+              isDisabled={
+                action.kind === "create"
+                  ? workspaceDirty || !hasCommits
+                  : action.kind === "update"
+                    ? workspaceDirty
+                    : false
+              }
               onPress={() => void request(action.kind)}
             >
               {action.kind === "merge" ? (
                 <GitMerge className="size-3.5" />
+              ) : action.kind === "update" ? (
+                <UploadCloud className="size-3.5" />
               ) : (
                 <GitPullRequest className="size-3.5" />
               )}
               {action.label}
             </Button>
           </div>
-        ) : changeRequest?.external_url ? (
+        ) : changeRequest?.provider === "github" && changeRequest.external_url ? (
           <div className="flex justify-end">
             <Button
               size="sm"

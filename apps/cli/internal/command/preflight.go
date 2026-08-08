@@ -26,22 +26,29 @@ func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, e
 		return nil, fmt.Errorf("validate deployment configuration: %w", err)
 	}
 	ports := []struct {
-		name    string
-		service string
-		port    int
+		name          string
+		service       string
+		containerPort int
+		port          int
 	}{
-		{name: "Web", service: "web", port: runner.State.WebPort},
-		{name: "Gateway", service: "gateway", port: runner.State.GatewayPort},
-		{name: "LLM Gateway", service: "llm-gateway", port: runner.State.LLMPort},
+		{name: "Web", service: "web", containerPort: 3000, port: runner.State.WebPort},
+		{name: "Gateway", service: "gateway", containerPort: 8080, port: runner.State.GatewayPort},
+		{name: "LLM Gateway", service: "llm-gateway", containerPort: 8080, port: runner.State.LLMPort},
+		{name: "Internal SCM", service: "forgejo", containerPort: 3000, port: runner.State.InternalSCM.HostPort},
 	}
 	for _, candidate := range ports {
 		if err := checkPortAvailable(candidate.port); err != nil {
-			running, inspectErr := runner.ServiceRunning(ctx, candidate.service)
+			owned, inspectErr := runner.ServiceOwnsPublishedPort(
+				ctx, candidate.service, candidate.containerPort, candidate.port,
+			)
 			if inspectErr != nil {
 				return nil, inspectErr
 			}
-			if !running {
-				return nil, fmt.Errorf("%s port %d is unavailable: %w", candidate.name, candidate.port, err)
+			if !owned {
+				return nil, fmt.Errorf(
+					"%s port %d is unavailable and is not owned by the configured Cocola service: %w",
+					candidate.name, candidate.port, err,
+				)
 			}
 		}
 	}
