@@ -576,7 +576,7 @@ const projectColumns = `id::text, tenant_id, owner_user_id, name, description, r
 	visibility, repository_size_kb, repository_has_lfs, repository_has_submodule,
 	status, provision_error_code, provision_request_id,
 	provision_started_at, version, created_at, updated_at, archived_at,
-	COALESCE(primary_conversation_id, ''), github_publish_status`
+	repository_clone_url, COALESCE(repository_token_id, 0), repository_token_ciphertext`
 
 const joinedProjectColumns = `projects.id::text, projects.tenant_id, projects.owner_user_id,
 	projects.name, projects.description, projects.runtime_id, projects.repository_mode,
@@ -587,7 +587,8 @@ const joinedProjectColumns = `projects.id::text, projects.tenant_id, projects.ow
 	projects.status, projects.provision_error_code,
 	projects.provision_request_id, projects.provision_started_at, projects.version,
 	projects.created_at, projects.updated_at, projects.archived_at,
-	COALESCE(projects.primary_conversation_id, ''), projects.github_publish_status`
+	projects.repository_clone_url, COALESCE(projects.repository_token_id, 0),
+	projects.repository_token_ciphertext`
 
 func scanProject(row pgx.Row) (Project, error) {
 	var v Project
@@ -597,8 +598,8 @@ func scanProject(row pgx.Row) (Project, error) {
 		&v.DefaultBranch, &v.Visibility, &v.RepositorySizeKB, &v.RepositoryHasLFS,
 		&v.RepositoryHasSubmodule, &v.Status,
 		&v.ProvisionErrorCode, &v.ProvisionRequestID, &v.ProvisionStartedAt, &v.Version,
-		&v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.PrimaryConversationID,
-		&v.GitHubPublishStatus)
+		&v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.RepositoryCloneURL,
+		&v.RepositoryTokenID, &v.RepositoryTokenCipher)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Project{}, ErrNotFound
 	}
@@ -666,7 +667,8 @@ func (p *Postgres) RefreshProjectProvisionAttempt(
 		version=version+1, updated_at=$4
 		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
 			AND status IN ('provisioning','failed')
-			AND repository_provider='github' AND repository_mode='create'
+			AND ((repository_provider='github' AND repository_mode='create')
+				OR repository_provider='local')
 		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, now))
 }
 
@@ -684,7 +686,7 @@ func (p *Postgres) CompleteProject(ctx context.Context, id Identity, projectID s
 		repository_html_url=$7, installation_id=$8, default_branch=$9,
 		visibility=$10, repository_size_kb=$11, repository_has_lfs=$12,
 		repository_has_submodule=$13, status='ready', provision_error_code='',
-		github_publish_status='published', version=version+1, updated_at=$14
+		version=version+1, updated_at=$14
 	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND status IN ('provisioning','failed')
 	RETURNING ` + projectColumns
 	result, err := scanProject(p.pool.QueryRow(ctx, q, projectID, id.TenantID, id.UserID,
@@ -696,105 +698,17 @@ func (p *Postgres) CompleteProject(ctx context.Context, id Identity, projectID s
 	return result, err
 }
 
-func (p *Postgres) BeginLocalProjectPublishIntent(
-	ctx context.Context,
-	id Identity,
-	projectID string,
-	expected int64,
-	repositoryName string,
-	visibility string,
-	now time.Time,
-) (Project, error) {
-	const query = `UPDATE projects SET
-		repository_name=$5, visibility=$6, github_publish_status='pending',
-		provision_started_at=$7, version=version+1, updated_at=$7
-	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4
-		AND repository_provider='local' AND repository_mode='empty'
-		AND repository_external_id IS NULL AND github_publish_status='unpublished'
-		AND status='ready'
-	RETURNING ` + projectColumns
-	value, err := scanProject(p.pool.QueryRow(ctx, query,
-		projectID, id.TenantID, id.UserID, expected, repositoryName, visibility, now))
-	if errors.Is(err, ErrNotFound) {
-		if existing, getErr := p.GetProject(ctx, id, projectID); getErr == nil {
-			if existing.Version != expected {
-				return Project{}, ErrVersionConflict
-			}
-			return Project{}, ErrConflict
-		}
-	}
-	if postgresCode(err, "23505") {
-		return Project{}, ErrConflict
-	}
-	return value, err
-}
-
-func (p *Postgres) BindLocalProjectPublishRepository(
-	ctx context.Context,
-	id Identity,
-	projectID string,
-	expected int64,
-	repo Repository,
-	installationID int64,
-	now time.Time,
-) (Project, error) {
-	visibility := repo.Visibility
-	if visibility == "" {
-		if repo.Private {
-			visibility = "private"
-		} else {
-			visibility = "public"
-		}
-	}
-	const query = `UPDATE projects SET
-		repository_external_id=$5, repository_owner=$6, repository_html_url=$7,
-		installation_id=$8, visibility=$9, repository_size_kb=$10,
-		version=version+1, updated_at=$11
-	WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4
-		AND repository_provider='local' AND repository_mode='empty'
-		AND repository_external_id IS NULL AND github_publish_status='pending'
-		AND LOWER(repository_name)=LOWER($12) AND status='ready'
-	RETURNING ` + projectColumns
-	value, err := scanProject(p.pool.QueryRow(ctx, query,
-		projectID, id.TenantID, id.UserID, expected, repo.ID, repo.Owner,
-		repo.HTMLURL, installationID, visibility, repo.SizeKB, now, repo.Name))
-	if errors.Is(err, ErrNotFound) {
-		if existing, getErr := p.GetProject(ctx, id, projectID); getErr == nil {
-			if existing.Version != expected {
-				return Project{}, ErrVersionConflict
-			}
-			return Project{}, ErrConflict
-		}
-	}
-	if postgresCode(err, "23505") {
-		return Project{}, ErrConflict
-	}
-	return value, err
-}
-
-func (p *Postgres) CancelLocalProjectPublishIntent(
-	ctx context.Context,
-	id Identity,
-	projectID string,
-	expected int64,
-	now time.Time,
-) (Project, error) {
-	value, err := scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET
-		repository_name='', visibility='private', github_publish_status='unpublished',
-		version=version+1, updated_at=$5
-		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4
-			AND repository_provider='local' AND repository_external_id IS NULL
-			AND github_publish_status='pending' AND status='ready'
-		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, expected, now))
-	if errors.Is(err, ErrNotFound) {
-		if existing, getErr := p.GetProject(ctx, id, projectID); getErr == nil {
-			if existing.Version != expected {
-				return Project{}, ErrVersionConflict
-			}
-			return Project{}, ErrConflict
-		}
-	}
-	return value, err
+func (p *Postgres) CompleteLocalProject(ctx context.Context, id Identity, projectID string,
+	repo Repository, tokenID int64, tokenCiphertext, cloneURL string, now time.Time) (Project, error) {
+	return scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET
+		repository_external_id=$4, repository_owner=$5, repository_name=$6,
+		repository_html_url='', repository_clone_url=$7, repository_token_id=$8,
+		repository_token_ciphertext=$9, default_branch='main', visibility='private',
+		status='ready', provision_error_code='', version=version+1, updated_at=$10
+		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
+			AND repository_provider='local' AND status='provisioning'
+		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, repo.ID,
+		repo.Owner, repo.Name, cloneURL, tokenID, tokenCiphertext, now))
 }
 
 func (p *Postgres) RebindProjectInstallation(
@@ -809,33 +723,9 @@ func (p *Postgres) RebindProjectInstallation(
 		installation_id=$5, version=version+1, updated_at=$6
 		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3
 			AND repository_external_id=$4 AND status='ready'
-			AND (repository_provider='github' OR
-				(repository_provider='local' AND github_publish_status IN ('pending','published')))
+			AND repository_provider='github'
 		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID,
 		repositoryID, installationID, now))
-}
-
-func (p *Postgres) CompleteLocalProjectPublish(
-	ctx context.Context,
-	id Identity,
-	projectID string,
-	expected int64,
-	now time.Time,
-) (Project, error) {
-	value, err := scanProject(p.pool.QueryRow(ctx, `UPDATE projects SET
-		github_publish_status='published', version=version+1, updated_at=$5
-		WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 AND version=$4
-			AND repository_provider='local' AND github_publish_status='pending'
-		RETURNING `+projectColumns, projectID, id.TenantID, id.UserID, expected, now))
-	if errors.Is(err, ErrNotFound) {
-		if existing, getErr := p.GetProject(ctx, id, projectID); getErr == nil {
-			if existing.Version != expected {
-				return Project{}, ErrVersionConflict
-			}
-			return Project{}, ErrConflict
-		}
-	}
-	return value, err
 }
 
 func (p *Postgres) FailProject(ctx context.Context, id Identity, projectID, code string, now time.Time) (Project, error) {
@@ -918,8 +808,8 @@ func scanWorkspaceProject(row pgx.Row) (Workspace, Project, error) {
 		&v.DefaultBranch, &v.Visibility, &v.RepositorySizeKB, &v.RepositoryHasLFS,
 		&v.RepositoryHasSubmodule, &v.Status,
 		&v.ProvisionErrorCode, &v.ProvisionRequestID, &v.ProvisionStartedAt,
-		&v.Version, &v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.PrimaryConversationID,
-		&v.GitHubPublishStatus)
+		&v.Version, &v.CreatedAt, &v.UpdatedAt, &v.ArchivedAt, &v.RepositoryCloneURL,
+		&v.RepositoryTokenID, &v.RepositoryTokenCipher)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Workspace{}, Project{}, ErrNotFound
 	}
@@ -997,6 +887,54 @@ func (p *Postgres) MarkBootstrapFailed(ctx context.Context, id Identity, convers
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (p *Postgres) GetChangeRequest(ctx context.Context, id Identity, conversationID string) (ChangeRequest, error) {
+	return scanChangeRequest(p.pool.QueryRow(ctx, `SELECT cr.conversation_id, cr.project_id::text,
+		cr.provider, COALESCE(cr.external_number,0), cr.external_url, cr.status,
+		cr.base_sha, cr.head_sha, cr.merge_sha, cr.error_code, cr.version,
+		cr.created_at, cr.updated_at, cr.merged_at
+		FROM project_change_requests cr
+		JOIN projects p ON p.id=cr.project_id
+		JOIN conversations c ON c.id=cr.conversation_id
+		WHERE cr.conversation_id=$1 AND c.user_id=$2 AND p.tenant_id=$3 AND p.owner_user_id=$2`,
+		conversationID, id.UserID, id.TenantID))
+}
+
+func (p *Postgres) UpsertChangeRequest(ctx context.Context, id Identity, value ChangeRequest) (ChangeRequest, error) {
+	return scanChangeRequest(p.pool.QueryRow(ctx, `INSERT INTO project_change_requests (
+		conversation_id, project_id, provider, external_number, external_url, status,
+		base_sha, head_sha, merge_sha, error_code, version, created_at, updated_at, merged_at
+	) SELECT $1, $2::uuid, $3, NULLIF($4,0), $5, $6, $7, $8, $9, $10, 1, $11, $12, $13
+		FROM projects p JOIN conversations c ON c.project_id=p.id
+		WHERE p.id=$2::uuid AND c.id=$1 AND c.user_id=$14 AND p.tenant_id=$15 AND p.owner_user_id=$14
+		ON CONFLICT (conversation_id) DO UPDATE SET
+			external_number=COALESCE(NULLIF(EXCLUDED.external_number,0),project_change_requests.external_number),
+			external_url=CASE WHEN EXCLUDED.external_url='' THEN project_change_requests.external_url ELSE EXCLUDED.external_url END,
+			status=CASE WHEN project_change_requests.status='merged' THEN 'merged' ELSE EXCLUDED.status END,
+			base_sha=EXCLUDED.base_sha, head_sha=EXCLUDED.head_sha,
+			merge_sha=CASE WHEN project_change_requests.status='merged' THEN project_change_requests.merge_sha ELSE EXCLUDED.merge_sha END,
+			error_code=CASE WHEN project_change_requests.status='merged' THEN project_change_requests.error_code ELSE EXCLUDED.error_code END,
+			version=project_change_requests.version+1, updated_at=EXCLUDED.updated_at,
+			merged_at=COALESCE(project_change_requests.merged_at,EXCLUDED.merged_at)
+		RETURNING conversation_id, project_id::text, provider, COALESCE(external_number,0),
+		external_url, status, base_sha, head_sha, merge_sha, error_code, version,
+		created_at, updated_at, merged_at`, value.ConversationID, value.ProjectID, value.Provider,
+		value.ExternalNumber, value.ExternalURL, value.Status, value.BaseSHA, value.HeadSHA,
+		value.MergeSHA, value.ErrorCode, value.CreatedAt, value.UpdatedAt, value.MergedAt,
+		id.UserID, id.TenantID))
+}
+
+func scanChangeRequest(row pgx.Row) (ChangeRequest, error) {
+	var value ChangeRequest
+	err := row.Scan(&value.ConversationID, &value.ProjectID, &value.Provider,
+		&value.ExternalNumber, &value.ExternalURL, &value.Status, &value.BaseSHA,
+		&value.HeadSHA, &value.MergeSHA, &value.ErrorCode, &value.Version,
+		&value.CreatedAt, &value.UpdatedAt, &value.MergedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ChangeRequest{}, ErrNotFound
+	}
+	return value, err
 }
 
 func decodeSnapshot(w *Workspace) {

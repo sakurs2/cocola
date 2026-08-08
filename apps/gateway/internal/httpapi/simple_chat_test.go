@@ -19,6 +19,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
+	"github.com/cocola-project/cocola/apps/gateway/internal/secretbox"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
 )
 
@@ -140,6 +141,14 @@ func (s *planWorkspaceStore) GetWorkspace(
 		return project.Workspace{}, project.Project{}, project.ErrNotFound
 	}
 	return s.workspace, s.project, nil
+}
+
+func (s *planWorkspaceStore) GetChangeRequest(
+	context.Context,
+	project.Identity,
+	string,
+) (project.ChangeRequest, error) {
+	return project.ChangeRequest{}, project.ErrNotFound
 }
 
 func (s *planWorkspaceStore) RevokeBrokerRun(
@@ -1008,21 +1017,41 @@ func TestPlanApprovalSerializesWorkspaceValidationWithNormalRunStart(t *testing.
 	const (
 		projectID      = "11111111-1111-4111-8111-111111111111"
 		conversationID = "conversation-plan-workspace"
+		secretKey      = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 	)
+	box, err := secretbox.New(secretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositoryToken, err := box.Encrypt("local-project-token", []byte(
+		"cocola:scm:forgejo:"+auth.DevIdentity.TenantID+":"+auth.DevIdentity.UserID+
+			":project:"+projectID+":token",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
 	streamer := newBlockingPlanWorkspaceStreamer()
 	conversations := convo.NewMemory()
 	runs := chatrun.NewMemory(conversations)
 	projectStore := &planWorkspaceStore{
 		project: project.Project{
 			ID: projectID, Status: project.ProjectReady, RepositoryProvider: project.ProviderLocal,
-			DefaultBranch: "main", RuntimeID: "claude-code",
+			DefaultBranch: "main", RuntimeID: "claude-code", RepositoryOwner: "cocola",
+			RepositoryName: "p-project", RepositoryCloneURL: "http://forgejo.local/cocola/p-project.git",
+			RepositoryTokenCipher: repositoryToken,
 		},
 		workspace: project.Workspace{
 			ConversationID: conversationID, ProjectID: projectID, BaseRef: "main",
+			BaseSHA: "1111111111111111111111111111111111111111", BranchName: "cocola/task-plan",
 		},
 	}
 	projectService, err := project.New(projectStore, project.Config{
 		MaxRepositoryMB: 512, DisableGitHubConnector: true, DisableGitHubAgentWrite: true,
+		SecretKey:       secretKey,
+		ForgejoAPIURL:   "http://forgejo.local",
+		ForgejoCloneURL: "http://forgejo.local",
+		ForgejoUsername: "cocola",
+		ForgejoPassword: "test-password",
 	})
 	if err != nil {
 		t.Fatal(err)

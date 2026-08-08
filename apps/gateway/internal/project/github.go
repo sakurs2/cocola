@@ -61,6 +61,24 @@ type githubHTTPError struct {
 	Message string
 }
 
+type githubPull struct {
+	Number         int64      `json:"number"`
+	HTMLURL        string     `json:"html_url"`
+	State          string     `json:"state"`
+	Draft          bool       `json:"draft"`
+	Merged         bool       `json:"merged"`
+	Mergeable      *bool      `json:"mergeable"`
+	MergeableState string     `json:"mergeable_state"`
+	MergedAt       *time.Time `json:"merged_at"`
+	Head           struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Base struct {
+		SHA string `json:"sha"`
+	} `json:"base"`
+}
+
 func (e *githubHTTPError) Error() string {
 	return fmt.Sprintf("github request failed with status %d", e.Status)
 }
@@ -337,6 +355,109 @@ func (g *githubClient) branchSHA(ctx context.Context, token, owner, repo, branch
 		"/branches/" + url.PathEscape(branch)
 	err := g.api(ctx, http.MethodGet, endpoint, token, nil, &payload)
 	return payload.Commit.SHA, err
+}
+
+func (g *githubClient) createPull(ctx context.Context, token string, project Project, workspace Workspace, title string) (githubPull, error) {
+	var result githubPull
+	endpoint := "/repos/" + url.PathEscape(project.RepositoryOwner) + "/" + url.PathEscape(project.RepositoryName) + "/pulls"
+	err := g.api(ctx, http.MethodPost, endpoint, token, map[string]any{
+		"title": title, "body": "Created by Cocola.", "head": workspace.BranchName,
+		"base": project.DefaultBranch,
+	}, &result)
+	if githubStatus(err, http.StatusUnprocessableEntity) {
+		var pulls []githubPull
+		listEndpoint := endpoint + "?state=all&per_page=50&base=" +
+			url.QueryEscape(project.DefaultBranch)
+		if listErr := g.api(ctx, http.MethodGet, listEndpoint, token, nil, &pulls); listErr != nil {
+			return githubPull{}, err
+		}
+		for _, pull := range pulls {
+			if pull.Head.Ref == workspace.BranchName {
+				return pull, nil
+			}
+		}
+	}
+	return result, err
+}
+
+func (g *githubClient) commitChecks(
+	ctx context.Context,
+	token string,
+	project Project,
+	headSHA string,
+) (pending bool, failed bool, err error) {
+	base := "/repos/" + url.PathEscape(project.RepositoryOwner) + "/" +
+		url.PathEscape(project.RepositoryName) + "/commits/" + url.PathEscape(headSHA)
+	var statuses struct {
+		State    string `json:"state"`
+		Statuses []struct {
+			State string `json:"state"`
+		} `json:"statuses"`
+	}
+	if err = g.api(ctx, http.MethodGet, base+"/status", token, nil, &statuses); err != nil {
+		return false, false, err
+	}
+	if len(statuses.Statuses) > 0 {
+		switch statuses.State {
+		case "pending":
+			pending = true
+		case "failure", "error":
+			failed = true
+		}
+	}
+	var checks struct {
+		TotalCount int `json:"total_count"`
+		CheckRuns  []struct {
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"check_runs"`
+	}
+	if err = g.api(ctx, http.MethodGet, base+"/check-runs?per_page=100", token, nil, &checks); err != nil {
+		return false, false, err
+	}
+	for _, check := range checks.CheckRuns {
+		if check.Status != "completed" {
+			pending = true
+			continue
+		}
+		switch check.Conclusion {
+		case "success", "neutral", "skipped":
+		default:
+			failed = true
+		}
+	}
+	return pending, failed, nil
+}
+
+func (g *githubClient) pull(ctx context.Context, token string, project Project, number int64) (githubPull, error) {
+	var result githubPull
+	endpoint := "/repos/" + url.PathEscape(project.RepositoryOwner) + "/" + url.PathEscape(project.RepositoryName) + "/pulls/" + strconv.FormatInt(number, 10)
+	err := g.api(ctx, http.MethodGet, endpoint, token, nil, &result)
+	return result, err
+}
+
+func (g *githubClient) mergePull(ctx context.Context, token string, project Project, number int64, expectedHead, title string) (string, error) {
+	var result struct {
+		SHA    string `json:"sha"`
+		Merged bool   `json:"merged"`
+	}
+	endpoint := "/repos/" + url.PathEscape(project.RepositoryOwner) + "/" + url.PathEscape(project.RepositoryName) + "/pulls/" + strconv.FormatInt(number, 10) + "/merge"
+	err := g.api(ctx, http.MethodPut, endpoint, token, map[string]any{
+		"sha": expectedHead, "merge_method": "squash", "commit_title": title,
+	}, &result)
+	if githubStatus(err, http.StatusMethodNotAllowed) || githubStatus(err, http.StatusConflict) ||
+		githubStatus(err, http.StatusUnprocessableEntity) {
+		return "", ErrChangeRequestNotReady
+	}
+	if err == nil && !result.Merged {
+		return "", ErrChangeRequestNotReady
+	}
+	return result.SHA, err
+}
+
+func (g *githubClient) deleteBranch(ctx context.Context, token string, project Project, branch string) error {
+	endpoint := "/repos/" + url.PathEscape(project.RepositoryOwner) + "/" + url.PathEscape(project.RepositoryName) + "/git/refs/heads/" + url.PathEscape(branch)
+	return g.api(ctx, http.MethodDelete, endpoint, token, nil, nil)
 }
 
 func (g *githubClient) repositoryWarnings(ctx context.Context, token string, repo Repository) Repository {

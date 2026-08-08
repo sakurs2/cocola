@@ -295,6 +295,55 @@ esac
 	}
 }
 
+func TestBackupForgejoDatabaseAndDataAreAtomicAndPrivate(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+case "$*" in
+  *'exec -T postgres pg_dump -U cocola -d forgejo --format=custom'*) printf 'forgejo-database' ;;
+  *'run --rm --no-deps --entrypoint tar forgejo -C /data -czf - .'*) printf 'forgejo-data' ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	paths := writeRunnerState(t, directory, false)
+	runner, err := New(paths, nil, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		contents string
+		backup   func(context.Context, string) error
+	}{
+		{name: "forgejo-postgres.dump", contents: "forgejo-database", backup: runner.BackupForgejoDatabase},
+		{name: "forgejo-data.tar.gz", contents: "forgejo-data", backup: runner.BackupForgejoData},
+	}
+	for _, test := range tests {
+		destination := filepath.Join(directory, test.name)
+		if err := test.backup(context.Background(), destination); err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		contents, err := os.ReadFile(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(contents) != test.contents {
+			t.Fatalf("%s = %q", test.name, contents)
+		}
+		info, err := os.Stat(destination)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode = %o", test.name, info.Mode().Perm())
+		}
+	}
+}
+
 func TestVolumePresentFindsDataWithoutAServiceContainer(t *testing.T) {
 	directory := t.TempDir()
 	dockerPath := filepath.Join(directory, "docker")

@@ -14,24 +14,38 @@ import {
   type ReactNode,
 } from "react";
 
-const ProjectComposerBranchContext = createContext<ReactNode>(null);
+type ProjectComposerContextValue = {
+  control: ReactNode;
+  readOnly: boolean;
+};
+
+const ProjectComposerBranchContext = createContext<ProjectComposerContextValue>({
+  control: null,
+  readOnly: false,
+});
 
 export function ProjectComposerBranchProvider({
   children,
   control,
+  readOnly = false,
 }: {
   children: ReactNode;
   control: ReactNode;
+  readOnly?: boolean;
 }) {
   return (
-    <ProjectComposerBranchContext.Provider value={control}>
+    <ProjectComposerBranchContext.Provider value={{ control, readOnly }}>
       {children}
     </ProjectComposerBranchContext.Provider>
   );
 }
 
 export function useProjectComposerBranchControl() {
-  return useContext(ProjectComposerBranchContext);
+  return useContext(ProjectComposerBranchContext).control;
+}
+
+export function useProjectComposerReadOnly() {
+  return useContext(ProjectComposerBranchContext).readOnly;
 }
 
 type BranchOption = {

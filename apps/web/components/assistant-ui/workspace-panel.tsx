@@ -1,7 +1,7 @@
 "use client";
 
 import { useThread } from "@assistant-ui/react";
-import { Button, Chip, ScrollShadow, Tooltip } from "@heroui/react";
+import { Button, Card, Chip, ScrollShadow, Tooltip } from "@heroui/react";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { ListView } from "@cocola/ui-compat/list-view";
 import { Segment } from "@cocola/ui-compat/segment";
@@ -24,6 +24,7 @@ import {
   type GitSnapshot,
   useGitWorkspace,
 } from "@/components/assistant-ui/use-git-workspace";
+import { useProjectChangeRequest } from "@/components/assistant-ui/use-project-change-request";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,6 +82,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitMerge,
+  GitPullRequest,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -518,8 +520,18 @@ function GitPage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
-  const { closeCommit, closeDiff, commitDetail, diff, error, inspect, loading, snapshot } =
-    useGitWorkspace(sessionID, active);
+  const {
+    closeCommit,
+    closeDiff,
+    commitDetail,
+    diff,
+    error,
+    inspect,
+    loading,
+    projectID,
+    snapshot,
+  } = useGitWorkspace(sessionID, active);
+  const changeRequestState = useProjectChangeRequest(projectID, sessionID, active);
   const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
 
   useEffect(() => {
@@ -551,6 +563,11 @@ function GitPage({
     <>
       <div className="cocola-git-panel flex h-full min-h-0 flex-col bg-background">
         <GitSnapshotHeader snapshot={snapshot} />
+        <ChangeRequestCard
+          {...changeRequestState}
+          workspaceDirty={Boolean(snapshot?.dirty)}
+          hasCommits={Boolean(snapshot?.ahead)}
+        />
         {error ? (
           <div className="border-danger/20 bg-danger-soft text-danger m-3 rounded-2xl border px-3 py-2 text-sm">
             {error}
@@ -679,6 +696,150 @@ function GitPage({
         </Sheet.Backdrop>
       </Sheet>
     </>
+  );
+}
+
+function ChangeRequestCard({
+  changeRequest,
+  error,
+  loading,
+  request,
+  workspaceDirty,
+  hasCommits,
+}: ReturnType<typeof useProjectChangeRequest> & {
+  workspaceDirty: boolean;
+  hasCommits: boolean;
+}) {
+  const status = changeRequest?.status || "working";
+  const merged = status === "merged";
+  const conflict = status === "conflict";
+  const checksFailed = status === "failed" && changeRequest?.error_code === "CHECKS_FAILED";
+  const blocked = conflict || status === "failed";
+  const pending = status === "checks_pending";
+  const copy = merged
+    ? "Merged into main as one reviewed change."
+    : checksFailed
+      ? "Provider checks failed. Fix the reported issue, push a new commit, then refresh."
+      : blocked
+        ? "The branch cannot merge cleanly. Resolve the conflict in this task, then refresh."
+        : pending
+          ? "Provider checks are still running. Refresh before merging."
+          : changeRequest
+            ? "The task branch is published and ready for review."
+            : workspaceDirty
+              ? "Commit the current changes before opening a review."
+              : hasCommits
+                ? "Publish this task branch for review and squash merge."
+                : "Make and commit a change before opening a review.";
+
+  const action = !changeRequest
+    ? { label: "Create change request", kind: "create" as const }
+    : status === "open"
+      ? { label: "Squash merge", kind: "merge" as const }
+      : merged || status === "closed"
+        ? null
+        : { label: "Refresh status", kind: "refresh" as const };
+
+  return (
+    <Card className="m-3 mb-0 border border-border/70 bg-surface-secondary/35 shadow-none">
+      <Card.Content className="gap-3 p-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
+            {merged ? <GitMerge className="size-4" /> : <GitPullRequest className="size-4" />}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-semibold">Change request</span>
+              <Chip
+                color={merged ? "success" : blocked ? "danger" : pending ? "warning" : "accent"}
+                size="sm"
+                variant="soft"
+              >
+                {merged
+                  ? "Merged"
+                  : checksFailed
+                    ? "Checks failed"
+                    : blocked
+                      ? "Conflict"
+                      : pending
+                        ? "Checks pending"
+                        : changeRequest
+                          ? "In review"
+                          : "Working"}
+              </Chip>
+            </div>
+            <p className="mt-1 text-[11.5px] leading-4 text-muted">{copy}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5" aria-label="Change request progress">
+          {["Changes", "Review", "Main"].map((label, index) => {
+            const complete = merged || (changeRequest ? index < 2 : index === 0 && hasCommits);
+            return (
+              <div key={label} className="flex min-w-0 flex-1 items-center gap-1.5">
+                <span
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    complete
+                      ? "bg-success"
+                      : index === 1 && changeRequest
+                        ? "bg-accent"
+                        : "bg-border",
+                  )}
+                />
+                <span className="truncate text-[10px] font-medium text-muted">{label}</span>
+                {index < 2 ? <span className="h-px min-w-2 flex-1 bg-border" /> : null}
+              </div>
+            );
+          })}
+        </div>
+        {error ? <p className="text-[11px] text-danger">{error}</p> : null}
+        {action ? (
+          <div className="flex justify-end gap-2">
+            {changeRequest?.external_url ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() =>
+                  window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
+                }
+              >
+                Open on GitHub
+              </Button>
+            ) : null}
+            {changeRequest && status === "open" ? (
+              <Button size="sm" variant="ghost" onPress={() => void request("refresh")}>
+                Refresh
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              isPending={loading}
+              isDisabled={!changeRequest && (workspaceDirty || !hasCommits)}
+              onPress={() => void request(action.kind)}
+            >
+              {action.kind === "merge" ? (
+                <GitMerge className="size-3.5" />
+              ) : (
+                <GitPullRequest className="size-3.5" />
+              )}
+              {action.label}
+            </Button>
+          </div>
+        ) : changeRequest?.external_url ? (
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() =>
+                window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
+              }
+            >
+              Open on GitHub
+            </Button>
+          </div>
+        ) : null}
+      </Card.Content>
+    </Card>
   );
 }
 

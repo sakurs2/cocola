@@ -61,7 +61,7 @@ OpenSandbox 时，必须同时提供一个从远端 sandbox 可达的 LLM Gatewa
 ├── config.env      0600，镜像、端口和生成的 Secret
 ├── state.json      0600，CLI 管理状态
 ├── .operation.lock install/start/stop 的安装目录级操作锁
-├── backups/        升级前的部署文件与 PostgreSQL 备份
+├── backups/        升级前的部署、Cocola PostgreSQL 与 Internal SCM 一致性备份
 └── sandboxes/      OpenSandbox Docker runtime 的宿主目录
 ```
 
@@ -99,10 +99,12 @@ cocola start
 `~/.cocola/backups/upgrade-<time>-<from>-to-<to>/`。
 
 应用升级时，如果当前安装已有 PostgreSQL 数据卷，`start` 会先生成 owner-only 的
-`postgres.dump`，再拉取和启动目标版本。目标版本拉取或健康检查失败时，CLI 会恢复旧部署
+`postgres.dump`；存在 Internal SCM 时还会短暂停止其写入入口并生成
+`forgejo-postgres.dump` 与 `forgejo-data.tar.gz`，随后恢复原服务，再拉取和启动目标版本。
+目标版本拉取或健康检查失败时，CLI 会恢复旧部署
 文件，但不会在失败处理过程中继续编排容器。失败输出会分别给出 `cocola start` 恢复上一版，
 以及重新执行 `cocola install --version <target>` 后再 `cocola start` 重试目标升级的命令。
-数据库 dump 不会被自动还原，数据库备份和部署备份始终保留，供人工恢复。第三方
+数据库与 Forgejo 数据不会被自动还原，数据备份和部署备份始终保留，供人工恢复。第三方
 基础镜像使用固定版本，避免一次普通重启隐式升级 Redis、PostgreSQL、MinIO 或 OpenSandbox。
 
 `cocola stop` 会先停止 Web、Gateway 和 Agent Runtime，避免产生新任务；Sandbox Manager

@@ -1459,6 +1459,7 @@ func TestArchitectureGraph(t *testing.T) {
 	t.Setenv("COCOLA_PG_DSN", "postgres://cocola:secret@postgres.local:5432/cocola?sslmode=disable")
 	t.Setenv("COCOLA_AGENT_ADDR", "agent-runtime.local:50061")
 	t.Setenv("COCOLA_SANDBOX_ADDR", "sandbox-manager.local:50051")
+	t.Setenv("COCOLA_FORGEJO_API_URL", "http://forgejo.local:3000")
 
 	api := newTestArchitectureAPI("k", fakeArchitectureChecker{
 		http: map[string]bool{
@@ -1466,6 +1467,7 @@ func TestArchitectureGraph(t *testing.T) {
 			"http://llm-gateway.local:8080/healthz":     true,
 			"http://opensandbox.local:8090/health":      true,
 			"http://minio.local:9000/minio/health/live": false,
+			"http://forgejo.local:3000/api/healthz":     true,
 		},
 		tcp: map[string]bool{
 			"agent-runtime.local:50061":   true,
@@ -1482,8 +1484,8 @@ func TestArchitectureGraph(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &graph); err != nil {
 		t.Fatalf("decode architecture: %v", err)
 	}
-	if len(graph.Nodes) != 11 {
-		t.Fatalf("expected 11 nodes, got %d", len(graph.Nodes))
+	if len(graph.Nodes) != 12 {
+		t.Fatalf("expected 12 nodes, got %d", len(graph.Nodes))
 	}
 	if len(graph.Edges) == 0 {
 		t.Fatal("expected edges")
@@ -1501,6 +1503,9 @@ func TestArchitectureGraph(t *testing.T) {
 	if nodes["sandbox-manager"].Status != service.ArchitectureUnhealthy {
 		t.Fatalf("sandbox-manager status = %q", nodes["sandbox-manager"].Status)
 	}
+	if nodes["internal-scm"].Status != service.ArchitectureHealthy {
+		t.Fatalf("internal SCM status = %q", nodes["internal-scm"].Status)
+	}
 	if nodes["user-sandboxes"].Metadata["running_sandboxes"].(float64) != 1 {
 		t.Fatalf("bad sandbox metadata: %+v", nodes["user-sandboxes"].Metadata)
 	}
@@ -1516,6 +1521,7 @@ func TestArchitectureUnconfiguredInfraIsUnknown(t *testing.T) {
 	t.Setenv("COCOLA_MINIO_ENDPOINT", "")
 	t.Setenv("COCOLA_REDIS_ADDR", "")
 	t.Setenv("COCOLA_PG_DSN", "")
+	t.Setenv("COCOLA_FORGEJO_API_URL", "")
 
 	api := newTestArchitectureAPI("k", fakeArchitectureChecker{})
 	rec := do(t, api.Router(), http.MethodGet, "/admin/architecture", "k", nil)
@@ -1530,7 +1536,7 @@ func TestArchitectureUnconfiguredInfraIsUnknown(t *testing.T) {
 	for _, node := range graph.Nodes {
 		nodes[node.ID] = node
 	}
-	for _, id := range []string{"postgres", "redis", "minio"} {
+	for _, id := range []string{"postgres", "redis", "minio", "internal-scm"} {
 		if nodes[id].Status != service.ArchitectureUnknown {
 			t.Fatalf("%s status = %q", id, nodes[id].Status)
 		}

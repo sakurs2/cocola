@@ -109,6 +109,11 @@ func registrationAAD(identity Identity, registrationID, field string) []byte {
 		identity.TenantID, identity.UserID, registrationID, field))
 }
 
+func projectTokenAAD(identity Identity, projectID string) []byte {
+	return []byte(fmt.Sprintf("cocola:scm:forgejo:%s:%s:project:%s:token",
+		identity.TenantID, identity.UserID, projectID))
+}
+
 func (b *secretBox) signBrokerCredential(claims BrokerCredentialClaims) (string, error) {
 	payload, err := json.Marshal(claims)
 	if err != nil {

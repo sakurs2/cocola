@@ -327,8 +327,6 @@ export type ProjectSummary = {
   visibility: "private" | "public";
   repository_has_lfs?: boolean;
   repository_has_submodules?: boolean;
-  primary_conversation_id?: string;
-  github_publish_status: "unpublished" | "pending" | "published";
   status: "provisioning" | "ready" | "failed" | "archived";
   provision_error_code?: string;
   version: number;

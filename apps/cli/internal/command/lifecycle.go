@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
@@ -83,7 +84,7 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 	backupDir := ""
 	if pending != nil {
 		backupDir = pending.BackupDir
-		printer.Info("Backing up the existing Cocola database")
+		printer.Info("Backing up the existing Cocola and Internal SCM data")
 		if err := a.backupUpgradeDatabase(ctx, runner.Paths, pending); err != nil {
 			return err
 		}
@@ -156,7 +157,7 @@ func (a *application) backupUpgradeDatabase(
 	ctx context.Context,
 	paths config.Paths,
 	pending *config.PendingUpgrade,
-) error {
+) (resultErr error) {
 	backupPaths, err := config.BackupPaths(paths, pending.BackupDir)
 	if err != nil {
 		return err
@@ -169,22 +170,89 @@ func (a *application) backupUpgradeDatabase(
 	if err != nil {
 		return err
 	}
+	hasForgejoData, err := backupRunner.VolumePresent(ctx, "forgejodata")
+	if err != nil {
+		return err
+	}
 	if !hasDatabase {
+		if hasForgejoData {
+			return errors.New("Forgejo data volume exists but the PostgreSQL volume is missing")
+		}
 		return nil
 	}
-	destination := config.DatabaseBackupPath(pending.BackupDir)
-	if _, err := os.Stat(destination); err == nil {
+	postgresDestination := config.DatabaseBackupPath(pending.BackupDir)
+	postgresMissing, err := backupFileMissing(postgresDestination)
+	if err != nil {
+		return err
+	}
+	forgejoDatabaseDestination := config.ForgejoDatabaseBackupPath(pending.BackupDir)
+	forgejoDataDestination := config.ForgejoDataBackupPath(pending.BackupDir)
+	forgejoDatabaseMissing, forgejoDataMissing := false, false
+	if hasForgejoData {
+		forgejoDatabaseMissing, err = backupFileMissing(forgejoDatabaseDestination)
+		if err != nil {
+			return err
+		}
+		forgejoDataMissing, err = backupFileMissing(forgejoDataDestination)
+		if err != nil {
+			return err
+		}
+	}
+	if !postgresMissing && !forgejoDatabaseMissing && !forgejoDataMissing {
 		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect PostgreSQL backup: %w", err)
 	}
 	if err := backupRunner.StartService(ctx, "postgres"); err != nil {
 		return fmt.Errorf("start PostgreSQL for backup: %w", err)
 	}
-	if err := backupRunner.BackupDatabase(ctx, destination); err != nil {
-		return err
+	stoppedServices := make([]string, 0, 3)
+	if hasForgejoData && (forgejoDatabaseMissing || forgejoDataMissing) {
+		defer func() {
+			for index := len(stoppedServices) - 1; index >= 0; index-- {
+				if restartErr := backupRunner.StartService(context.WithoutCancel(ctx), stoppedServices[index]); restartErr != nil {
+					resultErr = errors.Join(resultErr, fmt.Errorf("restart %s after backup: %w", stoppedServices[index], restartErr))
+				}
+			}
+		}()
+		for _, service := range []string{"gateway", "agent-runtime", "forgejo"} {
+			running, runningErr := backupRunner.ServiceRunning(ctx, service)
+			if runningErr != nil {
+				return runningErr
+			}
+			if !running {
+				continue
+			}
+			if stopErr := backupRunner.StopService(ctx, service); stopErr != nil {
+				return fmt.Errorf("stop %s for a consistent backup: %w", service, stopErr)
+			}
+			stoppedServices = append(stoppedServices, service)
+		}
+	}
+	if postgresMissing {
+		if err := backupRunner.BackupDatabase(ctx, postgresDestination); err != nil {
+			return err
+		}
+	}
+	if forgejoDatabaseMissing {
+		if err := backupRunner.BackupForgejoDatabase(ctx, forgejoDatabaseDestination); err != nil {
+			return err
+		}
+	}
+	if forgejoDataMissing {
+		if err := backupRunner.BackupForgejoData(ctx, forgejoDataDestination); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func backupFileMissing(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return false, nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	} else {
+		return false, fmt.Errorf("inspect backup %s: %w", filepath.Base(path), err)
+	}
 }
 
 func (a *application) restoreFailedUpgrade(

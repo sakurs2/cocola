@@ -2,6 +2,8 @@ package chatrun
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -94,19 +96,15 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			effective.ChatType = "chat"
 		}
 		var projectDefaultBranch string
-		var projectProvider string
-		var projectPrimaryConversationID string
 		if effective.ProjectID != "" {
 			if effective.FolderID != "" || effective.ChatType != "chat" {
 				return StartResult{}, ErrProjectNotFound
 			}
 			var projectRuntime, projectStatus string
-			projectErr := tx.QueryRow(ctx, `SELECT default_branch, runtime_id, status,
-				repository_provider, COALESCE(primary_conversation_id, '') FROM projects
+			projectErr := tx.QueryRow(ctx, `SELECT default_branch, runtime_id, status FROM projects
 				WHERE id=$1::uuid AND tenant_id=$2 AND owner_user_id=$3 FOR UPDATE`,
 				effective.ProjectID, effective.TenantID, effective.UserID).Scan(
-				&projectDefaultBranch, &projectRuntime, &projectStatus, &projectProvider,
-				&projectPrimaryConversationID)
+				&projectDefaultBranch, &projectRuntime, &projectStatus)
 			if projectErr == pgx.ErrNoRows {
 				return StartResult{}, ErrProjectNotFound
 			}
@@ -115,10 +113,6 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 			}
 			if projectStatus != "ready" {
 				return StartResult{}, ErrProjectNotReady
-			}
-			if projectProvider == "local" && projectPrimaryConversationID != "" &&
-				projectPrimaryConversationID != effective.ID {
-				return StartResult{}, ErrProjectSingleTask
 			}
 			if effective.RuntimeID == "" {
 				effective.RuntimeID = projectRuntime
@@ -169,18 +163,6 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 					projectBaseRef = projectDefaultBranch
 				}
 				branchName := taskBranch(effective.ID)
-				if projectProvider == "local" {
-					branchName = "main"
-					tag, insertErr = tx.Exec(ctx, `UPDATE projects SET primary_conversation_id=$2
-						WHERE id=$1::uuid AND (primary_conversation_id IS NULL OR primary_conversation_id=$2)`,
-						effective.ProjectID, effective.ID)
-					if insertErr != nil {
-						return StartResult{}, insertErr
-					}
-					if tag.RowsAffected() != 1 {
-						return StartResult{}, ErrProjectSingleTask
-					}
-				}
 				_, insertErr = tx.Exec(ctx, `INSERT INTO project_workspaces
 					(conversation_id, project_id, base_ref, base_sha, branch_name, created_at, updated_at)
 					VALUES ($1,$2::uuid,$3,$4,$5,$6,$6)`, effective.ID, effective.ProjectID,
@@ -352,7 +334,17 @@ func scanConversation(row pgx.Row) (convo.Conversation, error) {
 }
 
 func taskBranch(conversationID string) string {
-	short := strings.ReplaceAll(strings.TrimSpace(conversationID), "-", "")
+	raw := strings.TrimSpace(conversationID)
+	short := strings.ReplaceAll(raw, "-", "")
+	for _, char := range short {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' {
+			continue
+		}
+		digest := sha256.Sum256([]byte(raw))
+		short = hex.EncodeToString(digest[:6])
+		break
+	}
 	if len(short) > 12 {
 		short = short[:12]
 	}

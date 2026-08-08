@@ -22,13 +22,22 @@ type Config struct {
 	DisableLocalProjects    bool
 	DisableGitHubConnector  bool
 	DisableGitHubAgentWrite bool
+	ForgejoAPIURL           string
+	ForgejoCloneURL         string
+	ForgejoUsername         string
+	ForgejoPassword         string
 }
 
 func (c Config) validate() error {
 	if c.MaxRepositoryMB <= 0 {
 		return errors.New("COCOLA_PROJECT_MAX_REPOSITORY_MB must be positive")
 	}
-	if strings.TrimSpace(c.SecretKey) == "" && (!c.DisableGitHubConnector || !c.DisableGitHubAgentWrite) {
+	localConfigured := strings.TrimSpace(c.ForgejoAPIURL) != "" ||
+		strings.TrimSpace(c.ForgejoCloneURL) != "" || strings.TrimSpace(c.ForgejoUsername) != "" ||
+		strings.TrimSpace(c.ForgejoPassword) != ""
+	if strings.TrimSpace(c.SecretKey) == "" &&
+		(!c.DisableGitHubConnector || !c.DisableGitHubAgentWrite ||
+			(!c.DisableLocalProjects && localConfigured)) {
 		return errors.New("COCOLA_SCM_SECRET_KEY is required")
 	}
 	return nil
@@ -77,21 +86,6 @@ type UpdateInput struct {
 	RuntimeID       string `json:"runtime_id"`
 }
 
-type PublishInput struct {
-	ExpectedVersion int64  `json:"expected_version"`
-	RepositoryName  string `json:"repository_name"`
-	Visibility      string `json:"visibility"`
-}
-
-type PublishPreparation struct {
-	Project        Project
-	Workspace      Workspace
-	Repository     Repository
-	CloneURL       string
-	Token          string
-	InstallationID int64
-}
-
 type Service struct {
 	store                   Store
 	box                     *secretBox
@@ -102,6 +96,7 @@ type Service struct {
 	githubConnectorEnabled  bool
 	githubAgentWriteEnabled bool
 	localProjectsEnabled    bool
+	forgejo                 *forgejoClient
 }
 
 func New(store Store, cfg Config) (*Service, error) {
@@ -120,13 +115,23 @@ func New(store Store, cfg Config) (*Service, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
+	var forgejo *forgejoClient
+	if !cfg.DisableLocalProjects {
+		var forgejoErr error
+		forgejo, forgejoErr = newForgejoClient(client, cfg.ForgejoAPIURL, cfg.ForgejoCloneURL,
+			cfg.ForgejoUsername, cfg.ForgejoPassword)
+		if forgejoErr != nil && !errors.Is(forgejoErr, ErrInternalSCMUnavailable) {
+			return nil, forgejoErr
+		}
+	}
 	s := &Service{
 		store: store, box: box, http: client, maxKB: cfg.MaxRepositoryMB * 1024,
 		publicOrigins:           parsePublicOrigins(cfg.PublicOrigins),
 		now:                     func() time.Time { return time.Now().UTC() },
 		githubConnectorEnabled:  !cfg.DisableGitHubConnector,
 		githubAgentWriteEnabled: !cfg.DisableGitHubAgentWrite,
-		localProjectsEnabled:    !cfg.DisableLocalProjects,
+		localProjectsEnabled:    !cfg.DisableLocalProjects && forgejo != nil,
+		forgejo:                 forgejo,
 	}
 	return s, nil
 }
@@ -488,13 +493,15 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 		return Project{}, ErrDisabled
 	}
 	now := s.now()
+	projectID := uuid.NewString()
 	repositoryName := input.RepositoryName
 	status, defaultBranch, visibility := ProjectProvisioning, "", input.Visibility
 	if provider == ProviderLocal {
-		status, defaultBranch, visibility = ProjectReady, "main", "private"
+		status, defaultBranch, visibility = ProjectProvisioning, "main", "private"
+		repositoryName = "p-" + strings.ReplaceAll(projectID, "-", "")
 	}
 	v, err := s.store.CreateProject(ctx, Project{
-		ID: uuid.NewString(), TenantID: id.TenantID, OwnerUserID: id.UserID,
+		ID: projectID, TenantID: id.TenantID, OwnerUserID: id.UserID,
 		Name: input.Name, Description: input.Description, RuntimeID: input.RuntimeID,
 		RepositoryMode: input.Mode, RepositoryProvider: provider,
 		RepositoryExternalID: input.RepositoryID, RepositoryName: repositoryName,
@@ -511,7 +518,7 @@ func (s *Service) Create(ctx context.Context, id Identity, input CreateInput) (P
 		return Project{}, err
 	}
 	if provider == ProviderLocal {
-		return v, nil
+		return s.provisionLocalProject(ctx, id, v)
 	}
 	var repo Repository
 	var connection Connection
@@ -577,7 +584,14 @@ func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Pro
 		return v, err
 	}
 	if v.RepositoryProvider == ProviderLocal {
-		return v, nil
+		if !s.LocalProjectsEnabled() {
+			return Project{}, ErrInternalSCMUnavailable
+		}
+		v, err = s.store.RefreshProjectProvisionAttempt(ctx, id, v.ID, s.now())
+		if err != nil {
+			return Project{}, err
+		}
+		return s.provisionLocalProject(ctx, id, v)
 	}
 	token, c, github, err := s.readyConnection(ctx, id)
 	if err != nil {
@@ -613,6 +627,67 @@ func (s *Service) Retry(ctx context.Context, id Identity, projectID string) (Pro
 	}
 	repo = github.repositoryWarnings(ctx, token, repo)
 	return s.store.CompleteProject(ctx, id, v.ID, repo, c.InstallationID, s.now())
+}
+
+func (s *Service) provisionLocalProject(ctx context.Context, id Identity, value Project) (Project, error) {
+	repo, err := s.forgejo.createRepository(ctx, value.ID, value.Description)
+	if err != nil {
+		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_PROVISION_FAILED")
+	}
+	tokenName := "cocola-project-" + value.ID
+	if err := s.forgejo.deleteRepositoryTokensByName(ctx, tokenName); err != nil {
+		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_TOKEN_FAILED")
+	}
+	tokenID, token, err := s.forgejo.createRepositoryToken(ctx, repo, value.ID)
+	if err != nil {
+		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_TOKEN_FAILED")
+	}
+	cleanupToken := true
+	defer func() {
+		if cleanupToken {
+			_ = s.forgejo.deleteRepositoryToken(context.WithoutCancel(ctx), tokenID)
+		}
+	}()
+	if _, err = s.forgejo.branchSHA(ctx, token, repo.Owner, repo.Name, "main"); forgejoStatus(err, http.StatusNotFound) {
+		if _, err = s.forgejo.initializeRepository(ctx, repo, token); err != nil {
+			return s.failLocalProject(ctx, id, value.ID, forgejoInitializationErrorCode(err))
+		}
+	} else if err != nil {
+		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_INIT_FAILED")
+	}
+	if err = s.forgejo.protectMain(ctx, repo); err != nil {
+		return s.failLocalProject(ctx, id, value.ID, "INTERNAL_SCM_PROTECTION_FAILED")
+	}
+	ciphertext, err := s.box.encrypt(token, projectTokenAAD(id, value.ID))
+	if err != nil {
+		return Project{}, err
+	}
+	completed, err := s.store.CompleteLocalProject(
+		ctx, id, value.ID, repo, tokenID, ciphertext, repo.CloneURL, s.now(),
+	)
+	if err != nil {
+		return Project{}, err
+	}
+	cleanupToken = false
+	return completed, nil
+}
+
+func forgejoInitializationErrorCode(err error) string {
+	var gitErr *forgejoGitError
+	if !errors.As(err, &gitErr) {
+		return "INTERNAL_SCM_INIT_FAILED"
+	}
+	stage := strings.ToUpper(strings.ReplaceAll(gitErr.Stage, "-", "_"))
+	return "INTERNAL_SCM_INIT_" + stage + "_FAILED"
+}
+
+func (s *Service) failLocalProject(
+	ctx context.Context,
+	id Identity,
+	projectID string,
+	code string,
+) (Project, error) {
+	return s.store.FailProject(ctx, id, projectID, code, s.now())
 }
 
 func (s *Service) retryCreateRepository(
@@ -661,135 +736,6 @@ func (s *Service) Update(ctx context.Context, id Identity, projectID string, inp
 	return s.store.UpdateProject(ctx, id, projectID, input.ExpectedVersion, input.Name, input.Description, input.RuntimeID, s.now())
 }
 
-func (s *Service) PrepareLocalPublish(
-	ctx context.Context,
-	id Identity,
-	projectID string,
-	input PublishInput,
-) (PublishPreparation, error) {
-	if !s.GitHubConnectorEnabled() {
-		return PublishPreparation{}, ErrDisabled
-	}
-	if _, err := uuid.Parse(projectID); err != nil {
-		return PublishPreparation{}, ErrInvalidArgument
-	}
-	input.RepositoryName = strings.TrimSpace(input.RepositoryName)
-	input.Visibility = strings.TrimSpace(input.Visibility)
-	if input.ExpectedVersion <= 0 || (input.Visibility != "private" && input.Visibility != "public") ||
-		!validRepositoryName(input.RepositoryName) {
-		return PublishPreparation{}, ErrInvalidArgument
-	}
-	value, err := s.store.GetProject(ctx, id, projectID)
-	if err != nil {
-		return PublishPreparation{}, err
-	}
-	if value.Version != input.ExpectedVersion {
-		return PublishPreparation{}, ErrVersionConflict
-	}
-	if value.Status != ProjectReady || value.RepositoryProvider != ProviderLocal ||
-		value.RepositoryMode != "empty" || value.PrimaryConversationID == "" ||
-		value.GitHubPublishStatus == "published" {
-		return PublishPreparation{}, ErrConflict
-	}
-	userToken, connection, github, err := s.readyConnection(ctx, id)
-	if err != nil {
-		return PublishPreparation{}, err
-	}
-	var repo Repository
-	if value.RepositoryExternalID == 0 {
-		newIntent := value.GitHubPublishStatus == "unpublished"
-		createdInRequest := false
-		if !newIntent && (value.GitHubPublishStatus != "pending" ||
-			!strings.EqualFold(value.RepositoryName, input.RepositoryName) ||
-			value.Visibility != input.Visibility) {
-			return PublishPreparation{}, ErrConflict
-		}
-		if newIntent {
-			if _, lookupErr := github.repositoryByName(ctx, userToken, connection.ExternalLogin,
-				input.RepositoryName); lookupErr == nil {
-				return PublishPreparation{}, ErrConflict
-			} else if !githubStatus(lookupErr, http.StatusNotFound) {
-				return PublishPreparation{}, lookupErr
-			}
-			value, err = s.store.BeginLocalProjectPublishIntent(ctx, id, value.ID, value.Version,
-				input.RepositoryName, input.Visibility, s.now())
-			if err != nil {
-				return PublishPreparation{}, err
-			}
-		}
-		if newIntent {
-			repo, err = github.createEmptyRepository(ctx, userToken, value.RepositoryName,
-				value.Description, value.Visibility == "private")
-			createdInRequest = err == nil
-		} else {
-			repo, err = github.repositoryByName(ctx, userToken, connection.ExternalLogin,
-				value.RepositoryName)
-			if githubStatus(err, http.StatusNotFound) {
-				repo, err = github.createEmptyRepository(ctx, userToken, value.RepositoryName,
-					value.Description, value.Visibility == "private")
-				createdInRequest = err == nil
-			}
-		}
-		if err != nil {
-			if isDefinitiveGitHubError(err) {
-				_, _ = s.store.CancelLocalProjectPublishIntent(ctx, id, value.ID, value.Version, s.now())
-			}
-			return PublishPreparation{}, err
-		}
-		if !createdInRequest && !repositoryCreatedNear(repo, value.ProvisionStartedAt) {
-			_, _ = s.store.CancelLocalProjectPublishIntent(ctx, id, value.ID, value.Version, s.now())
-			return PublishPreparation{}, ErrConflict
-		}
-		if err := s.validatePublishRepository(repo, connection); err != nil {
-			return PublishPreparation{}, err
-		}
-		repo.DefaultBranch = "main"
-		value, err = s.store.BindLocalProjectPublishRepository(ctx, id, value.ID, value.Version,
-			repo, connection.InstallationID, s.now())
-		if err != nil {
-			return PublishPreparation{}, err
-		}
-	} else {
-		repo, err = github.repository(ctx, userToken, value.RepositoryExternalID)
-		if err != nil {
-			return PublishPreparation{}, err
-		}
-		if err := s.validatePublishRepository(repo, connection); err != nil {
-			return PublishPreparation{}, err
-		}
-	}
-	if err := s.ensureInstalledRepository(ctx, github, userToken, connection, repo.ID); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return PublishPreparation{}, ErrRepositoryNotInstalled
-		}
-		return PublishPreparation{}, err
-	}
-	token, _, err := github.installationToken(ctx, connection.InstallationID, repo.ID,
-		map[string]string{"contents": "write"})
-	if err != nil {
-		return PublishPreparation{}, err
-	}
-	workspace, _, err := s.store.GetWorkspace(ctx, id, value.PrimaryConversationID)
-	if err != nil {
-		_ = github.revokeInstallationToken(ctx, token)
-		return PublishPreparation{}, err
-	}
-	return PublishPreparation{
-		Project: value, Workspace: workspace, Repository: repo,
-		CloneURL: "https://github.com/" + repo.Owner + "/" + repo.Name + ".git",
-		Token:    token, InstallationID: connection.InstallationID,
-	}, nil
-}
-
-func (s *Service) CompleteLocalPublish(
-	ctx context.Context,
-	id Identity,
-	preparation PublishPreparation,
-) (Project, error) {
-	return s.store.CompleteLocalProjectPublish(ctx, id, preparation.Project.ID,
-		preparation.Project.Version, s.now())
-}
-
 func (s *Service) RevokeGitHubToken(ctx context.Context, id Identity, token string) {
 	if strings.TrimSpace(token) == "" {
 		return
@@ -827,7 +773,229 @@ func (s *Service) Tasks(ctx context.Context, id Identity, projectID string) ([]T
 	if _, err := uuid.Parse(projectID); err != nil {
 		return nil, ErrInvalidArgument
 	}
-	return s.store.ListTasks(ctx, id, projectID)
+	tasks, err := s.store.ListTasks(ctx, id, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range tasks {
+		changeRequest, changeErr := s.store.GetChangeRequest(ctx, id, tasks[index].ID)
+		if changeErr == nil {
+			tasks[index].ChangeRequest = &changeRequest
+		} else if !errors.Is(changeErr, ErrNotFound) {
+			return nil, changeErr
+		}
+	}
+	return tasks, nil
+}
+
+func (s *Service) PrepareChangeRequest(ctx context.Context, id Identity, projectID, conversationID string) (ChangeRequestPreparation, error) {
+	workspace, value, err := s.store.GetWorkspace(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequestPreparation{}, err
+	}
+	if value.ID != projectID || value.Status != ProjectReady || workspace.BootstrapStatus != "ready" {
+		return ChangeRequestPreparation{}, ErrProjectNotReady
+	}
+	var existing *ChangeRequest
+	if current, existingErr := s.store.GetChangeRequest(ctx, id, conversationID); existingErr == nil {
+		if current.Status == "merged" {
+			return ChangeRequestPreparation{}, ErrChangeRequestMerged
+		}
+		existing = &current
+	} else if !errors.Is(existingErr, ErrNotFound) {
+		return ChangeRequestPreparation{}, existingErr
+	}
+	contextValue, token, err := s.ProjectContext(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequestPreparation{}, err
+	}
+	cloneURL := contextValue.CloneURL
+	if value.RepositoryProvider == ProviderGitHub {
+		// ProjectContext intentionally grants read-only clone access. Replace it
+		// with a short-lived token that can publish only this repository.
+		s.RevokeGitHubToken(context.WithoutCancel(ctx), id, token)
+		value, _, connection, github, installErr := s.currentProjectInstallation(ctx, id, value)
+		if installErr != nil {
+			return ChangeRequestPreparation{}, installErr
+		}
+		token, _, err = github.installationToken(ctx, connection.InstallationID,
+			value.RepositoryExternalID, map[string]string{"contents": "write", "pull_requests": "write"})
+		if err != nil {
+			return ChangeRequestPreparation{}, err
+		}
+		cloneURL = "https://github.com/" + value.RepositoryOwner + "/" + value.RepositoryName + ".git"
+	}
+	return ChangeRequestPreparation{
+		Project: value, Workspace: workspace, Context: contextValue,
+		Token: token, CloneURL: cloneURL, Existing: existing,
+	}, nil
+}
+
+func (s *Service) CompleteChangeRequest(ctx context.Context, id Identity, preparation ChangeRequestPreparation, headSHA string) (ChangeRequest, error) {
+	if preparation.Existing != nil {
+		return s.RefreshChangeRequest(
+			ctx, id, preparation.Project.ID, preparation.Existing.ConversationID,
+		)
+	}
+	if len(headSHA) != 40 {
+		return ChangeRequest{}, ErrInvalidArgument
+	}
+	title := "Cocola task " + shortTaskID(preparation.Workspace.ConversationID)
+	now := s.now()
+	value := ChangeRequest{
+		ConversationID: preparation.Workspace.ConversationID, ProjectID: preparation.Project.ID,
+		Provider: preparation.Project.RepositoryProvider, Status: "open",
+		BaseSHA: preparation.Workspace.BaseSHA, HeadSHA: headSHA, CreatedAt: now, UpdatedAt: now,
+	}
+	provider, err := s.repositoryProvider(ctx, id, preparation.Project)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	pull, err := provider.CreateChangeRequest(
+		ctx, preparation.Token, preparation.Project, preparation.Workspace, title,
+	)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	value.ExternalNumber, value.ExternalURL = pull.Number, pull.URL
+	return s.store.UpsertChangeRequest(ctx, id, value)
+}
+
+func (s *Service) RefreshChangeRequest(ctx context.Context, id Identity, projectID, conversationID string) (ChangeRequest, error) {
+	value, err := s.store.GetChangeRequest(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	if value.ProjectID != projectID {
+		return ChangeRequest{}, ErrNotFound
+	}
+	workspace, projectValue, err := s.store.GetWorkspace(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	if value.Status == "merged" || value.Status == "closed" {
+		return value, nil
+	}
+	provider, token, release, err := s.changeRequestAccess(ctx, id, projectValue)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	defer release()
+	providerValue, err := provider.GetChangeRequestStatus(
+		ctx, token, projectValue, value.ExternalNumber,
+	)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	value.Status, value.ErrorCode = providerValue.Status, providerValue.ErrorCode
+	value.HeadSHA, value.MergedAt, value.UpdatedAt = providerValue.HeadSHA, providerValue.MergedAt, s.now()
+	if providerValue.URL != "" {
+		value.ExternalURL = providerValue.URL
+	}
+	value.BaseSHA = workspace.BaseSHA
+	return s.store.UpsertChangeRequest(ctx, id, value)
+}
+
+func (s *Service) MergeChangeRequest(ctx context.Context, id Identity, projectID, conversationID string) (ChangeRequest, error) {
+	value, err := s.RefreshChangeRequest(ctx, id, projectID, conversationID)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	if value.Status == "merged" {
+		return value, nil
+	}
+	if value.Status != "open" {
+		return ChangeRequest{}, ErrChangeRequestNotReady
+	}
+	_, projectValue, err := s.store.GetWorkspace(ctx, id, conversationID)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	provider, token, release, err := s.changeRequestAccess(ctx, id, projectValue)
+	if err != nil {
+		return ChangeRequest{}, err
+	}
+	defer release()
+	title := "Cocola task " + shortTaskID(conversationID)
+	mergeSHA, err := provider.SquashMerge(
+		ctx, token, projectValue, value.ExternalNumber, value.HeadSHA, title,
+	)
+	if err != nil {
+		// Provider merge is atomic on the expected head SHA. If the response was
+		// lost or a concurrent retry won, reconcile instead of surfacing a false
+		// failure or attempting a second merge commit.
+		reconciled, refreshErr := s.RefreshChangeRequest(ctx, id, projectID, conversationID)
+		if refreshErr == nil && reconciled.Status == "merged" {
+			return reconciled, nil
+		}
+		return ChangeRequest{}, err
+	}
+	workspace, _, workspaceErr := s.store.GetWorkspace(ctx, id, conversationID)
+	if workspaceErr == nil {
+		_ = provider.DeleteTaskBranch(
+			context.WithoutCancel(ctx), token, projectValue, workspace.BranchName,
+		)
+	}
+	now := s.now()
+	value.Status, value.MergeSHA, value.MergedAt, value.UpdatedAt = "merged", mergeSHA, &now, now
+	return s.store.UpsertChangeRequest(ctx, id, value)
+}
+
+func (s *Service) repositoryProvider(
+	ctx context.Context,
+	id Identity,
+	value Project,
+) (RepositoryProvider, error) {
+	if value.RepositoryProvider == ProviderLocal {
+		if s.forgejo == nil {
+			return nil, ErrInternalSCMUnavailable
+		}
+		return forgejoRepositoryProvider{client: s.forgejo}, nil
+	}
+	_, _, _, github, err := s.currentProjectInstallation(ctx, id, value)
+	if err != nil {
+		return nil, err
+	}
+	return githubRepositoryProvider{client: github}, nil
+}
+
+func (s *Service) changeRequestAccess(
+	ctx context.Context,
+	id Identity,
+	value Project,
+) (RepositoryProvider, string, func(), error) {
+	provider, err := s.repositoryProvider(ctx, id, value)
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+	if value.RepositoryProvider == ProviderLocal {
+		token, tokenErr := s.localProjectToken(id, value)
+		return provider, token, func() {}, tokenErr
+	}
+	value, _, connection, github, err := s.currentProjectInstallation(ctx, id, value)
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+	token, _, err := github.installationToken(ctx, connection.InstallationID, value.RepositoryExternalID,
+		map[string]string{"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read"})
+	return provider, token, func() { _ = github.revokeInstallationToken(context.Background(), token) }, err
+}
+
+func shortTaskID(value string) string {
+	raw := strings.TrimSpace(value)
+	value = strings.ReplaceAll(raw, "-", "")
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '.' || character == '_' {
+			continue
+		}
+		digest := sha256.Sum256([]byte(raw))
+		return base64.RawURLEncoding.EncodeToString(digest[:9])
+	}
+	if len(value) > 12 {
+		return value[:12]
+	}
+	return value
 }
 
 func (s *Service) Branches(
@@ -921,6 +1089,11 @@ func (s *Service) PrepareTaskBase(
 				return TaskBase{}, connectionErr
 			}
 		}
+		if changeRequest, changeErr := s.store.GetChangeRequest(ctx, id, conversationID); changeErr == nil && changeRequest.Status == "merged" {
+			return TaskBase{}, ErrChangeRequestMerged
+		} else if changeErr != nil && !errors.Is(changeErr, ErrNotFound) {
+			return TaskBase{}, changeErr
+		}
 		return TaskBase{Project: value, Ref: baseRef, SHA: workspace.BaseSHA}, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return TaskBase{}, err
@@ -943,7 +1116,15 @@ func (s *Service) PrepareTaskBase(
 		if baseRef != "main" {
 			return TaskBase{}, ErrBaseRefNotFound
 		}
-		return TaskBase{Project: value, Ref: "main"}, nil
+		token, tokenErr := s.localProjectToken(id, value)
+		if tokenErr != nil {
+			return TaskBase{}, tokenErr
+		}
+		sha, branchErr := s.forgejo.branchSHA(ctx, token, value.RepositoryOwner, value.RepositoryName, baseRef)
+		if branchErr != nil {
+			return TaskBase{}, branchErr
+		}
+		return TaskBase{Project: value, Ref: "main", SHA: sha}, nil
 	}
 	value, _, connection, github, err := s.currentProjectInstallation(ctx, id, value)
 	if err != nil {
@@ -1003,24 +1184,33 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 		if !s.LocalProjectsEnabled() {
 			return ProjectContext{}, "", ErrLocalProjectsDisabled
 		}
-		repositoryID := int64(0)
-		installationID := int64(0)
-		repositoryFullName := ""
-		credentialMode := "none"
-		if v.RepositoryExternalID > 0 && v.GitHubPublishStatus == "published" {
-			repositoryID = v.RepositoryExternalID
-			installationID = v.InstallationID
-			repositoryFullName = strings.Trim(v.RepositoryOwner+"/"+v.RepositoryName, "/")
-			credentialMode = "broker"
+		token, tokenErr := s.localProjectToken(id, v)
+		if tokenErr != nil {
+			return ProjectContext{}, "", tokenErr
+		}
+		baseRef := strings.TrimSpace(w.BaseRef)
+		if baseRef == "" {
+			baseRef = v.DefaultBranch
+		}
+		if w.BaseSHA == "" {
+			sha, branchErr := s.forgejo.branchSHA(ctx, token, v.RepositoryOwner, v.RepositoryName, baseRef)
+			if branchErr != nil {
+				return ProjectContext{}, "", branchErr
+			}
+			w, err = s.store.LockBaseSHA(ctx, id, conversationID, sha, s.now())
+			if err != nil {
+				return ProjectContext{}, "", err
+			}
 		}
 		return ProjectContext{
-			ProjectID: v.ID, RepositoryExternalID: repositoryID,
-			DefaultBranch: "main", BaseRef: "main", BaseSHA: w.BaseSHA, BranchName: "main",
+			ProjectID: v.ID, RepositoryExternalID: v.RepositoryExternalID,
+			CloneURL:      v.RepositoryCloneURL,
+			DefaultBranch: v.DefaultBranch, BaseRef: baseRef, BaseSHA: w.BaseSHA, BranchName: w.BranchName,
 			GitAuthorName: gitAuthorName, GitAuthorEmail: gitAuthorEmail,
-			InstallationID: installationID, RepositoryProvider: ProviderLocal,
-			RepositoryFullName: repositoryFullName,
-			CredentialMode:     credentialMode,
-		}, "", nil
+			RepositoryProvider: ProviderLocal,
+			RepositoryFullName: strings.Trim(v.RepositoryOwner+"/"+v.RepositoryName, "/"),
+			CredentialMode:     "ephemeral",
+		}, token, nil
 	}
 	v, _, connection, github, err := s.currentProjectInstallation(ctx, id, v)
 	if err != nil {
@@ -1060,6 +1250,13 @@ func (s *Service) ProjectContext(ctx context.Context, id Identity, conversationI
 		RepositoryFullName: v.RepositoryOwner + "/" + v.RepositoryName,
 		CredentialMode:     "ephemeral",
 	}, token, nil
+}
+
+func (s *Service) localProjectToken(id Identity, value Project) (string, error) {
+	if s == nil || s.box == nil || s.forgejo == nil || value.RepositoryTokenCipher == "" {
+		return "", ErrInternalSCMUnavailable
+	}
+	return s.box.decrypt(value.RepositoryTokenCipher, projectTokenAAD(id, value.ID))
 }
 
 func validBaseRef(value string) bool {

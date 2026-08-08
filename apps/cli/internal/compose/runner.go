@@ -372,6 +372,10 @@ func (r *Runner) StartService(ctx context.Context, service string) error {
 	return r.run(ctx, "up", "-d", "--wait", service)
 }
 
+func (r *Runner) StopService(ctx context.Context, service string) error {
+	return r.run(ctx, "stop", "--timeout", "30", service)
+}
+
 // PrepareExistingPostgres starts an already-created PostgreSQL volume without
 // waiting on its healthcheck, then verifies that the current deployment secret
 // can authenticate. This distinguishes a resumable partial first start from a
@@ -430,17 +434,35 @@ func (r *Runner) CheckPostgresCredentials(ctx context.Context) error {
 // BackupDatabase writes a compressed pg_dump from the existing PostgreSQL
 // service. The destination is installed atomically with owner-only access.
 func (r *Runner) BackupDatabase(ctx context.Context, destination string) error {
-	temporary, err := os.CreateTemp(filepath.Dir(destination), ".postgres-dump-*")
+	return r.backupStream(ctx, destination, "PostgreSQL", []string{
+		"exec", "-T", "postgres", "pg_dump", "-U", "cocola", "-d", "cocola", "--format=custom",
+	})
+}
+
+func (r *Runner) BackupForgejoDatabase(ctx context.Context, destination string) error {
+	return r.backupStream(ctx, destination, "Forgejo PostgreSQL", []string{
+		"exec", "-T", "postgres", "pg_dump", "-U", "cocola", "-d", "forgejo", "--format=custom",
+	})
+}
+
+func (r *Runner) BackupForgejoData(ctx context.Context, destination string) error {
+	return r.backupStream(ctx, destination, "Forgejo data", []string{
+		"run", "--rm", "--no-deps", "--entrypoint", "tar", "forgejo", "-C", "/data", "-czf", "-", ".",
+	})
+}
+
+func (r *Runner) backupStream(ctx context.Context, destination, label string, args []string) error {
+	temporary, err := os.CreateTemp(filepath.Dir(destination), ".cocola-backup-*")
 	if err != nil {
-		return fmt.Errorf("create PostgreSQL backup: %w", err)
+		return fmt.Errorf("create %s backup: %w", label, err)
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	if err := temporary.Chmod(0o600); err != nil {
 		temporary.Close()
-		return fmt.Errorf("secure PostgreSQL backup: %w", err)
+		return fmt.Errorf("secure %s backup: %w", label, err)
 	}
-	command, err := r.command(ctx, "exec", "-T", "postgres", "pg_dump", "-U", "cocola", "-d", "cocola", "--format=custom")
+	command, err := r.command(ctx, args...)
 	if err != nil {
 		temporary.Close()
 		return err
@@ -449,17 +471,17 @@ func (r *Runner) BackupDatabase(ctx context.Context, destination string) error {
 	command.Stderr = r.Err
 	if err := command.Run(); err != nil {
 		temporary.Close()
-		return fmt.Errorf("back up PostgreSQL: %w", err)
+		return fmt.Errorf("back up %s: %w", label, err)
 	}
 	if err := temporary.Sync(); err != nil {
 		temporary.Close()
-		return fmt.Errorf("sync PostgreSQL backup: %w", err)
+		return fmt.Errorf("sync %s backup: %w", label, err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close PostgreSQL backup: %w", err)
+		return fmt.Errorf("close %s backup: %w", label, err)
 	}
 	if err := os.Rename(temporaryPath, destination); err != nil {
-		return fmt.Errorf("install PostgreSQL backup: %w", err)
+		return fmt.Errorf("install %s backup: %w", label, err)
 	}
 	return nil
 }

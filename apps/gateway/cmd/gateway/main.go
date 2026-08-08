@@ -308,6 +308,10 @@ func main() {
 			DisableLocalProjects:    !mustEnvBool(log, "COCOLA_FEATURE_LOCAL_PROJECTS", true),
 			DisableGitHubConnector:  !mustEnvBool(log, "COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR", true),
 			DisableGitHubAgentWrite: !mustEnvBool(log, "COCOLA_FEATURE_GITHUB_AGENT_WRITE", true),
+			ForgejoAPIURL:           strings.TrimSpace(os.Getenv("COCOLA_FORGEJO_API_URL")),
+			ForgejoCloneURL:         strings.TrimSpace(os.Getenv("COCOLA_FORGEJO_CLONE_URL")),
+			ForgejoUsername:         strings.TrimSpace(os.Getenv("COCOLA_FORGEJO_USERNAME")),
+			ForgejoPassword:         config.SecretFromEnv("COCOLA_FORGEJO_PASSWORD"),
 		})
 		if projectErr != nil {
 			log.Fatal("Project configuration failed: " + projectErr.Error())

@@ -1,7 +1,6 @@
 "use client";
 
 import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
-import { Segment } from "@cocola/ui-compat/segment";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   AlertTriangle,
@@ -40,6 +39,7 @@ type ProjectTask = {
     bootstrap_status: string;
     git_snapshot?: { dirty?: boolean; captured_at?: string };
   };
+  change_request?: { status: string };
 };
 
 const STATUS_LABEL: Record<ProjectSummary["status"], string> = {
@@ -47,6 +47,15 @@ const STATUS_LABEL: Record<ProjectSummary["status"], string> = {
   provisioning: "Provisioning",
   failed: "Failed",
   archived: "Archived",
+};
+
+const CHANGE_REQUEST_LABEL: Record<string, string> = {
+  open: "In review",
+  checks_pending: "Checks pending",
+  conflict: "Conflict",
+  merged: "Merged",
+  closed: "Closed",
+  failed: "Failed",
 };
 
 export default function ProjectPage() {
@@ -77,10 +86,7 @@ export default function ProjectPage() {
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftRuntime, setDraftRuntime] = useState("");
-  const [showPublish, setShowPublish] = useState(false);
   const [selectedBaseRef, setSelectedBaseRef] = useState("");
-  const [publishRepository, setPublishRepository] = useState("");
-  const [publishVisibility, setPublishVisibility] = useState<"private" | "public">("private");
   const preparedProject = useRef<string | null>(null);
   const preparedSession = useRef<string | null>(null);
   const initializedBaseProject = useRef<string | null>(null);
@@ -137,8 +143,7 @@ export default function ProjectPage() {
       !tasksLoaded ||
       project.status !== "ready" ||
       !selectedBaseRef ||
-      preparedProject.current === project.id ||
-      (project.repository_provider === "local" && tasks.length > 0)
+      preparedProject.current === project.id
     )
       return;
     preparedProject.current = project.id;
@@ -233,55 +238,6 @@ export default function ProjectPage() {
     }
   };
 
-  const startPublishing = () => {
-    if (!project) return;
-    const fallback = project.name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 100);
-    setPublishRepository(project.repository_name || fallback || "cocola-project");
-    setPublishVisibility(project.visibility === "public" ? "public" : "private");
-    setShowPublish(true);
-  };
-
-  const publish = async () => {
-    if (!project || !publishRepository.trim()) return;
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(project.id)}/publish`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          expected_version: project.version,
-          repository_name: publishRepository.trim(),
-          visibility: publishVisibility,
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as ProjectSummary & {
-        error?: { code?: string; message?: string };
-      };
-      if (!response.ok) {
-        const message =
-          body.error?.code === "GITHUB_CONNECTION_REQUIRED"
-            ? "Connect GitHub in Connectors before publishing."
-            : body.error?.code === "REPOSITORY_NOT_INSTALLED"
-              ? "Grant the GitHub App access to the repository, then retry."
-              : body.error?.message || "Could not publish this Project";
-        throw new Error(message);
-      }
-      setProject(body);
-      setShowPublish(false);
-      refreshProjects();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not publish this Project");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const archive = async () => {
     if (!project) return;
     setBusy(true);
@@ -328,7 +284,7 @@ export default function ProjectPage() {
     project.status === "ready" ? "success" : project.status === "failed" ? "danger" : "warning";
   const repositoryLabel = isGithub
     ? `${project.repository_owner}/${project.repository_name}`
-    : "Local workspace";
+    : "Cocola repository";
 
   return (
     <div className="cocola-web-page mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
@@ -352,14 +308,6 @@ export default function ProjectPage() {
         </div>
         {project.status !== "archived" ? (
           <div className="flex shrink-0 gap-2">
-            {project.repository_provider === "local" &&
-            project.github_publish_status !== "published" &&
-            project.primary_conversation_id ? (
-              <Button size="sm" variant="outline" onPress={startPublishing}>
-                <GitFork className="size-4" />
-                {project.github_publish_status === "pending" ? "Retry publish" : "Publish"}
-              </Button>
-            ) : null}
             <Button
               isIconOnly
               aria-label="Project settings"
@@ -382,7 +330,7 @@ export default function ProjectPage() {
           {STATUS_LABEL[project.status]}
         </Chip>
         <Chip size="sm" variant="soft">
-          {project.repository_provider === "github" ? "GitHub" : "Local"}
+          {project.repository_provider === "github" ? "GitHub" : "Cocola SCM"}
         </Chip>
         {isGithub ? (
           <Chip size="sm" variant="soft">
@@ -407,54 +355,6 @@ export default function ProjectPage() {
           </Button>
         ) : null}
       </div>
-
-      {showPublish ? (
-        <Card className="p-5">
-          <Card.Header className="p-0">
-            <Card.Title>Publish to GitHub</Card.Title>
-            <Card.Description>
-              Cocola will push the committed main branch using a short-lived repository token.
-            </Card.Description>
-          </Card.Header>
-          <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
-            <TextField
-              value={publishRepository}
-              variant="secondary"
-              onChange={setPublishRepository}
-            >
-              <Label>Repository name</Label>
-              <Input disabled={project.github_publish_status === "pending"} />
-            </TextField>
-            <div>
-              <Label>Visibility</Label>
-              <Segment
-                aria-label="Repository visibility"
-                className="mt-2"
-                selectedKey={publishVisibility}
-                onSelectionChange={(key) =>
-                  setPublishVisibility(String(key) === "public" ? "public" : "private")
-                }
-              >
-                <Segment.Item id="private">Private</Segment.Item>
-                <Segment.Item id="public">Public</Segment.Item>
-              </Segment>
-            </div>
-          </Card.Content>
-          <Card.Footer className="mt-5 justify-end gap-2 p-0">
-            <Button variant="outline" onPress={() => setShowPublish(false)}>
-              Cancel
-            </Button>
-            <Button
-              isDisabled={!publishRepository.trim()}
-              isPending={busy}
-              onPress={() => void publish()}
-            >
-              <GitFork className="size-4" />
-              Publish
-            </Button>
-          </Card.Footer>
-        </Card>
-      ) : null}
 
       {project.repository_has_lfs || project.repository_has_submodules ? (
         <div className="bg-warning/10 text-warning flex items-start gap-2 rounded-2xl px-4 py-3 text-sm">
@@ -502,10 +402,10 @@ export default function ProjectPage() {
           <Card.Content className="mt-5 grid gap-3 p-0">
             <Info
               label="Provider"
-              value={project.repository_provider === "github" ? "GitHub" : "Local"}
+              value={project.repository_provider === "github" ? "GitHub" : "Cocola SCM"}
             />
             <Info label="Default branch" value={project.default_branch || "Preparing"} />
-            <Info label="Visibility" value={isGithub ? project.visibility : "Local only"} />
+            <Info label="Visibility" value={isGithub ? project.visibility : "Private"} />
           </Card.Content>
         </Card>
         <Card className="p-5">
@@ -528,12 +428,7 @@ export default function ProjectPage() {
       </div>
 
       {project.status === "ready" ? (
-        project.repository_provider === "local" && tasks.length > 0 ? (
-          <div className="bg-warning/10 text-warning flex items-start gap-2 rounded-2xl px-4 py-3 text-sm">
-            <AlertTriangle className="mt-0.5 size-4" />
-            Non-GitHub Projects support only a single workspace.
-          </div>
-        ) : !tasksLoaded || !composerReady ? (
+        !tasksLoaded || !composerReady ? (
           <Card className="p-5">
             <Card.Header className="p-0">
               <Card.Title>Preparing Project workspace</Card.Title>
@@ -545,15 +440,10 @@ export default function ProjectPage() {
         ) : (
           <Card className="p-5">
             <Card.Header className="p-0">
-              <Card.Title>
-                {project.repository_provider === "local"
-                  ? "Start new workspace"
-                  : "Start project work"}
-              </Card.Title>
+              <Card.Title>Start project work</Card.Title>
               <Card.Description>
-                {project.repository_provider === "local"
-                  ? "Create the first conversation in this local workspace."
-                  : "Choose a base branch. Cocola locks its current revision when you send the first message."}
+                Choose a base branch. Cocola locks its current revision when you send the first
+                message.
               </Card.Description>
             </Card.Header>
             <Card.Content className="mt-4 p-0">
@@ -578,9 +468,7 @@ export default function ProjectPage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold">
-            {project.repository_provider === "local" ? "Workspace" : "Project tasks"}
-          </h2>
+          <h2 className="font-semibold">Project tasks</h2>
           <p className="text-muted mt-1 text-sm">
             Project conversations stay separate from the global Chats list.
           </p>
@@ -608,7 +496,22 @@ export default function ProjectPage() {
                     <span className="bg-indigo-500/15 text-indigo-600 grid size-10 place-items-center rounded-2xl dark:text-indigo-300">
                       <GitFork className="size-5" />
                     </span>
-                    {task.workspace.git_snapshot?.dirty ? (
+                    {task.change_request ? (
+                      <Chip
+                        color={
+                          task.change_request.status === "merged"
+                            ? "success"
+                            : task.change_request.status === "conflict" ||
+                                task.change_request.status === "failed"
+                              ? "danger"
+                              : "accent"
+                        }
+                        size="sm"
+                        variant="soft"
+                      >
+                        {CHANGE_REQUEST_LABEL[task.change_request.status] || "Working"}
+                      </Chip>
+                    ) : task.workspace.git_snapshot?.dirty ? (
                       <Chip color="warning" size="sm" variant="soft">
                         Modified
                       </Chip>

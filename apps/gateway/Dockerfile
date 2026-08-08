@@ -19,7 +19,7 @@ RUN GOWORK=off CGO_ENABLED=0 GOOS=linux go build \
 
 # ---- runtime stage -------------------------------------------------------
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates git
 COPY --from=build /out/gateway /usr/local/bin/gateway
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/gateway"]

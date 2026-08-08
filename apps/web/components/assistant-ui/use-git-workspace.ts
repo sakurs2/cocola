@@ -71,6 +71,7 @@ export function useGitWorkspace(sessionID: string, active: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetail | null>(null);
   const [diff, setDiff] = useState<GitDiff | null>(null);
+  const [projectID, setProjectID] = useState("");
   const requestSequence = useRef(0);
 
   const loadStored = useCallback(async () => {
@@ -84,13 +85,14 @@ export function useGitWorkspace(sessionID: string, active: boolean) {
       );
       if (!response.ok) throw new Error("Could not load the saved Git snapshot");
       const body = (await response.json()) as {
-        workspace?: { git_snapshot?: GitSnapshot; branch_name?: string };
+        workspace?: { project_id?: string; git_snapshot?: GitSnapshot; branch_name?: string };
       };
       if (requestID !== requestSequence.current) return;
       setSnapshot({
         ...(body.workspace?.git_snapshot ?? {}),
         branch: body.workspace?.git_snapshot?.branch || body.workspace?.branch_name,
       });
+      setProjectID(body.workspace?.project_id || "");
     } catch (loadError) {
       if (requestID === requestSequence.current) {
         setError(loadError instanceof Error ? loadError.message : "Could not load Git status");
@@ -191,6 +193,7 @@ export function useGitWorkspace(sessionID: string, active: boolean) {
     error,
     inspect,
     loading,
+    projectID,
     snapshot,
   };
 }

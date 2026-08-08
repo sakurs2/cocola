@@ -76,6 +76,8 @@ func (a *Admin) architectureNodes(ctx context.Context, checker ArchitectureHealt
 	llmURL := llmGatewayURL()
 	openSandboxURL := strings.TrimSpace(os.Getenv("COCOLA_OPENSANDBOX_URL"))
 	minioURL := minioHealthBaseURL()
+	forgejoURL := strings.TrimSpace(os.Getenv("COCOLA_FORGEJO_API_URL"))
+	forgejoVersion := envString("COCOLA_FORGEJO_VERSION", "16.0.1")
 
 	agentAddr := envString("COCOLA_AGENT_ADDR", "127.0.0.1:50061")
 	sandboxAddr := envString("COCOLA_SANDBOX_ADDR", "127.0.0.1:50051")
@@ -90,6 +92,7 @@ func (a *Admin) architectureNodes(ctx context.Context, checker ArchitectureHealt
 	postgresStatus := tcpStatus(ctx, checker, pgAddr)
 	redisStatus := tcpStatus(ctx, checker, redisAddr)
 	minioStatus := httpStatus(ctx, checker, healthURL(minioURL, "/minio/health/live"), minioURL != "")
+	forgejoStatus := httpStatus(ctx, checker, healthURL(forgejoURL, "/api/healthz"), forgejoURL != "")
 
 	nodes := []ArchitectureNode{
 		{
@@ -161,6 +164,19 @@ func (a *Admin) architectureNodes(ctx context.Context, checker ArchitectureHealt
 			AdminHref: "/admin/sandbox-nodes",
 		},
 		a.userSandboxesNode(ctx),
+		{
+			ID:     "internal-scm",
+			Label:  "Internal SCM",
+			Kind:   "source-control",
+			Layer:  "Infrastructure",
+			Status: forgejoStatus,
+			Detail: internalSCMDetail(forgejoStatus, forgejoURL != "", forgejoVersion),
+			Metadata: map[string]any{
+				"version":  forgejoVersion,
+				"database": "PostgreSQL",
+				"storage":  "persistent volume",
+			},
+		},
 		{
 			ID:        "postgres",
 			Label:     "Postgres",
@@ -242,6 +258,8 @@ func architectureEdges() []ArchitectureEdge {
 		{From: "gateway", To: "agent-runtime", Label: "stream", Kind: "grpc"},
 		{From: "gateway", To: "postgres", Label: "history", Kind: "sql"},
 		{From: "gateway", To: "minio", Label: "artifacts", Kind: "s3"},
+		{From: "gateway", To: "internal-scm", Label: "Local Projects", Kind: "git+http"},
+		{From: "internal-scm", To: "postgres", Label: "metadata", Kind: "sql"},
 		{From: "admin-api", To: "postgres", Label: "config", Kind: "sql"},
 		{From: "admin-api", To: "redis", Label: "events", Kind: "redis"},
 		{From: "admin-api", To: "minio", Label: "skills", Kind: "s3"},
@@ -256,6 +274,16 @@ func architectureEdges() []ArchitectureEdge {
 		{From: "llm-gateway", To: "redis", Label: "quota", Kind: "redis"},
 		{From: "llm-gateway", To: "postgres", Label: "models", Kind: "sql"},
 	}
+}
+
+func internalSCMDetail(status ArchitectureStatus, configured bool, version string) string {
+	if !configured || status == ArchitectureUnknown {
+		return "Not configured"
+	}
+	if status != ArchitectureHealthy {
+		return "Unavailable"
+	}
+	return "v" + version + " · PostgreSQL · persistent volume"
 }
 
 func (c defaultArchitectureHealthChecker) CheckHTTP(ctx context.Context, rawURL string) bool {

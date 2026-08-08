@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ChevronLeft, GitBranch } from "lucide-react";
+import { ChevronLeft, GitBranch, GitMerge } from "lucide-react";
 import { Button, Chip } from "@heroui/react";
 import { useCocola } from "@/app/runtime-provider";
 import {
@@ -10,6 +10,10 @@ import {
   ProjectComposerBranchProvider,
 } from "@/components/assistant-ui/project-branch-control";
 import Home from "@/app/page";
+import {
+  PROJECT_CHANGE_REQUEST_EVENT,
+  type ProjectChangeRequest,
+} from "@/components/assistant-ui/use-project-change-request";
 
 type ProjectWorkspace = {
   branch_name: string;
@@ -24,6 +28,7 @@ export default function ProjectTaskPage() {
   const project = projects.find((item) => item.id === params.id);
   const [projectName, setProjectName] = useState("");
   const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
+  const [merged, setMerged] = useState(false);
   const conversation = conversations.find((item) => item.id === params.conversationId);
 
   useEffect(() => {
@@ -62,10 +67,42 @@ export default function ProjectTaskPage() {
     };
   }, [params.conversationId]);
 
-  const fallbackBranch =
-    project?.repository_provider === "local"
-      ? "main"
-      : `cocola/task-${params.conversationId.replaceAll("-", "").slice(0, 12)}`;
+  useEffect(() => {
+    let cancelled = false;
+    setMerged(false);
+    void fetch(
+      `/api/projects/${encodeURIComponent(params.id)}/tasks/${encodeURIComponent(params.conversationId)}/change-request`,
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json()) as { status?: string };
+        if (!cancelled) setMerged(body.status === "merged");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [params.conversationId, params.id]);
+
+  useEffect(() => {
+    const handleChangeRequest = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          projectID: string;
+          taskID: string;
+          changeRequest: ProjectChangeRequest;
+        }>
+      ).detail;
+      if (detail.projectID === params.id && detail.taskID === params.conversationId) {
+        setMerged(detail.changeRequest.status === "merged");
+      }
+    };
+    window.addEventListener(PROJECT_CHANGE_REQUEST_EVENT, handleChangeRequest);
+    return () => window.removeEventListener(PROJECT_CHANGE_REQUEST_EVENT, handleChangeRequest);
+  }, [params.conversationId, params.id]);
+
+  const fallbackBranch = `cocola/task-${params.conversationId.replaceAll("-", "").slice(0, 12)}`;
   const branchName = workspace?.branch_name || fallbackBranch;
 
   return (
@@ -81,13 +118,20 @@ export default function ProjectTaskPage() {
         </Button>
         <span className="text-muted">/</span>
         <span className="max-w-64 truncate text-foreground">{conversation?.title || "Task"}</span>
-        <Chip className="ml-auto" color="accent" size="sm" variant="soft">
+        {merged ? (
+          <Chip className="ml-auto" color="success" size="sm" variant="soft">
+            <GitMerge className="size-3.5" />
+            Merged · read-only
+          </Chip>
+        ) : null}
+        <Chip className={merged ? "" : "ml-auto"} color="accent" size="sm" variant="soft">
           <GitBranch className="size-3.5" />
           {branchName}
         </Chip>
       </div>
       <div className="min-h-0 flex-1">
         <ProjectComposerBranchProvider
+          readOnly={merged}
           control={
             <ProjectBranchBadge
               branch={branchName}

@@ -1,34 +1,43 @@
-# Projects 与 GitHub Connector
+# Projects 与统一 Change Request
 
-Cocola 的 Project 支持两类工作区：
+Cocola 的 Project 使用两类仓库 Provider，但对用户提供同一套任务与交付流程：
 
-- Empty Project：不依赖 GitHub 或内部 Git 服务，在一个持久化 Conversation Workspace 中直接使用本地 Git `main` 分支。每个 Project 只允许一个 Workspace。
-- GitHub Project：由用户从自己的 GitHub 个人账号创建或导入仓库；每个 Task 使用独立的 `cocola/task-*` 分支。
+- Local Project：由隐藏的内部 Forgejo 托管私有仓库，创建时以 allow-empty commit 初始化 `main`。
+- GitHub Project：仓库继续位于用户绑定的 GitHub 个人账号中。
 
-两类 Project 的 Git 工作树都固定在 `/workspace/project`，Agent、Code Server、
-Git Inspect 和默认 Preview cwd 使用该目录。项目名称和 GitHub 仓库名称属于元数据，
-不参与本地目录命名。`/workspace/outputs`、`/workspace/uploads` 和
-`/workspace/downloads` 是平台目录，不进入 Git 工作树。
+每个 Task 都在独立 Session Volume 的 `/workspace/project` 中 Clone 权威仓库，并从锁定的
+`base_sha` 创建 `cocola/task-<id>` 分支。Session Volume 是可重建的工作副本，不再承担
+Project 级权威数据职责。同一个 Project 可以并行创建多个 Task，不使用共享主仓库或 Git
+Worktree。
 
-Sandbox Shell 以 root 运行，而仓库由 `cocola` 用户持有，因此 Runtime 的 system Git
-config 只将 `/session/workspace/project` 声明为 `safe.directory`，不使用 `*` 通配信任。
-单项目脚手架和目录布局由版本化的内置 `cocola-project-workspace` Skill 指导；该规则
-通过 Claude Code 与 Codex 共用的 Skill discovery 按需加载，不注入每轮全局 system
-prompt。Project 或仓库名称仍是元数据，不改变固定的本地 Git 工作树路径。
+`/workspace/outputs`、`/workspace/uploads` 和 `/workspace/downloads` 是平台目录，不进入 Git
+工作树。Sandbox Shell 以 root 运行，而仓库由 `cocola` 用户持有，因此 Runtime 的 system Git
+config 只声明精确的 `safe.directory`，不使用 `*` 通配信任。
 
-Empty Project 可在 Workspace 中完成本地 commit。用户连接 GitHub 后，可从 Project 页面明确执行 `Publish to GitHub`，把干净且已提交的 `main` 推到新建的个人仓库。发布后的 Project 仍保持单 Workspace/`main` 模型，Agent 后续通过短期 Token Broker 使用 `gh` 或推送；默认分支写入需要逐次确认。
+## Change Request 生命周期
+
+Local 与 GitHub Project 均使用以下流程：
+
+`Working → Change request open → Checks pending / Conflict → Squash merge → Merged`
+
+用户先在 Task 的 Changes 页面检查并提交文件，再创建 Change Request。平台验证 workspace
+marker、远端、任务分支和预期 head SHA，只推送当前 Task 的精确分支；存在未提交文件时拒绝
+发布，不把未知生成物自动提交。重复创建、刷新或合并会对已有 Provider PR 做幂等协调。
+
+合并固定为 squash merge 到默认分支。成功后远端任务分支被删除，Task 与对话转为只读；继续
+开发需要从最新 `main` 创建新 Task。Local 用户不会看到 Forgejo 名称或链接，GitHub 用户可跳转
+原始 PR。
 
 ## 每用户 GitHub App
 
-管理员不再注册或共享一个平台 GitHub App。每位用户在侧边栏 `Connectors` 中完成以下流程：
+管理员不注册或共享平台级 GitHub App。每位用户在 `Connectors` 中完成：
 
-1. Cocola 使用 GitHub App Manifest Flow 创建仅属于该用户的 Private App。
-2. 用户把 App 安装到自己的个人账号，并选择允许访问的仓库。
-3. 用户授权 App；Cocola 校验 App owner、授权用户和 installation owner 是同一个个人账号。
+1. Cocola 通过 GitHub App Manifest Flow 创建该用户的 Private App。
+2. 用户把 App 安装到同一个个人账号，并选择允许访问的仓库。
+3. Cocola 校验 App owner、授权用户和 installation owner 一致。
 
-不支持组织账号、GitHub Enterprise Server、GitLab，也不启用 webhook。
-
-Manifest Flow 的回调 Origin 必须在 `COCOLA_PUBLIC_ORIGINS` 中。Manifest/OAuth state 绑定 Cocola 用户、回跳路径和过期时间，并在 PostgreSQL 中一次性消费。
+不支持组织账号、GitHub Enterprise Server、GitLab，也不启用 webhook。页面打开、手动刷新和
+操作前按需查询 GitHub 或 Forgejo 状态。
 
 ## 配置
 
@@ -42,40 +51,28 @@ COCOLA_FEATURE_LOCAL_PROJECTS=true
 COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR=true
 COCOLA_FEATURE_GITHUB_AGENT_WRITE=true
 
-# Agent Runtime 到 Gateway 内部 Broker 的地址。
+# 内部 SCM。正式 Compose 会生成独立密码并使用同一 PostgreSQL 实例中的独立 database/user。
+COCOLA_FORGEJO_API_URL=http://forgejo:3000
+COCOLA_FORGEJO_CLONE_URL=http://host.docker.internal:3001
+COCOLA_FORGEJO_USERNAME=cocola
+COCOLA_FORGEJO_PASSWORD=<deployment-secret>
+COCOLA_FORGEJO_DB_PASSWORD=<deployment-secret>
+
 COCOLA_SANDBOX_PROJECT_BROKER_URL=http://gateway:8080
 ```
 
-生成 SCM 密钥：
-
-```bash
-openssl rand -base64 32
-```
-
-密钥用于 AES-256-GCM 加密每用户 App 的 client secret、private key 和 OAuth token。密钥丢失或更换后，用户需要在 Connectors 中重新创建并授权 App。App 凭证、长期 token 和私钥不会进入 Agent Runtime 或 sandbox。
-
-`make dev` 使用 `.env.example` 的本地默认值，并把 Broker 地址改为 sandbox 可达的宿主桥接地址。修改 `.env` 后重启服务即可生效；不需要重新构建 Runtime 镜像。只有 `gh`、GitHub Skill 或 Runtime manifest 变化才需要发布新的 Runtime 镜像。
+`COCOLA_SCM_SECRET_KEY` 加密每用户 GitHub App 凭据、Local Project 的仓库限定 Token 和短期
+lease。Token 不写入 Git URL、Prompt、Workspace marker、Git config、日志或 Session Volume，
+只通过一次性 AskPass 环境注入 Git 子进程。
 
 ## Runtime 与 Token Broker
 
-Runtime 固定版本预装 `gh` 和 Cocola GitHub Skill，但禁止 `gh auth login` 和本地凭证持久化。只有已绑定 GitHub 仓库的 Project Run 才会收到 run-scoped Broker Credential。
+平台负责 Task 分支发布、PR 创建和合并等确定性操作。GitHub Project 中模型主动使用 `gh` 或
+Git 写操作时，仍通过 Token Broker 获取绑定 user、Run、Project、Repository 和命令的短期
+installation token；默认分支、force push、删除与设置类操作继续要求 `Approve once`。
 
-Broker 在每条命令执行时签发限定到当前仓库和所需权限的短期 installation token：
+Local Project 的 Clone/发布使用每仓库限定的 Forgejo Token，不向模型环境开放 Forgejo 管理
+能力。内部 SCM 不可用时只禁用 Local Project 创建、启动与交付，GitHub Project 保持可用。
 
-- 仓库、PR、Issue、Actions 等读取自动执行。
-- Task 分支 push、PR/Issue 普通写入使用最小权限。
-- `main`/默认分支或 force push、merge、删除、设置、Secrets、通用写入型 `gh api` 必须由用户 `Approve once`。
-- 命令结束后 best-effort revoke token；审批五分钟过期，Run 结束、Project 归档或 Connector 断开会撤销现存 lease。
-
-Token 不写入 Git URL、Prompt、Workspace marker、Git credential helper 或 `gh` 配置。审计只保存用户、Project、Repository、命令类别、权限、结果和耗时，不保存 token、secret 或完整请求正文。
-
-部署、故障恢复、密钥轮换、审批审计和 Runtime 发布步骤见
+部署、备份恢复、密钥轮换和排障步骤见
 [`docs/runbooks/project-connectors.md`](./runbooks/project-connectors.md)。
-
-## Empty Project 的边界
-
-- 只允许一个 Conversation Workspace，直接工作在 `main`，没有 Task 分支或 Promote/Apply 流程。
-- Session Volume 正常回收后仍保留文件；若底层持久卷丢失且尚未发布到 GitHub，本地内容无法从远端恢复。
-- 发布前必须先创建 Workspace，并把所有改动 commit；Cocola 不会隐式提交文件。
-- 第一次发布由用户在 Project 页面触发。仓库创建或推送中断时 Project 记录为 `pending`，修复 GitHub App 仓库访问后可安全重试同一仓库。
-- 发布后 Agent 可以使用 `gh`；直接写 `main` 始终属于高风险操作并要求单次确认。

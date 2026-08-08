@@ -1579,16 +1579,16 @@ async def test_query_propagates_required_session_resume():
 async def test_project_plan_rejects_workspace_changes_during_planning():
     project = SimpleNamespace(
         project_id="project-1",
-        repository_id=0,
-        clone_url="",
+        repository_id=456,
+        clone_url="http://forgejo.local/cocola/p-project.git",
         default_branch="main",
-        base_sha="",
-        task_branch="main",
+        base_sha="a" * 40,
+        task_branch="cocola/task-project-1",
         git_author_name="Project User",
         git_author_email="project@example.com",
         repository_provider="local",
-        repository_full_name="",
-        credential_mode="none",
+        repository_full_name="cocola/p-project",
+        credential_mode="ephemeral",
     )
     revisions = iter(["revision-before", "revision-after"])
 
@@ -1603,7 +1603,7 @@ async def test_project_plan_rejects_workspace_changes_during_planning():
                 {
                     "ok": True,
                     "snapshot": {
-                        "branch": "main",
+                        "branch": "cocola/task-project-1",
                         "base_sha": "a" * 40,
                         "head_sha": "a" * 40,
                         "changes": [],
@@ -1623,7 +1623,9 @@ async def test_project_plan_rejects_workspace_changes_during_planning():
             AgentEvent(kind="done", data={}),
         ]
     )
-    context = FakeContext()
+    context = FakeContext(
+        metadata=(SimpleNamespace(key="x-cocola-scm-token", value="project-token"),)
+    )
 
     await AgentRuntimeServicer(
         provider,
@@ -1781,16 +1783,16 @@ async def test_query_maps_request_fields_to_options():
 async def test_project_query_uses_isolated_project_worktree():
     project = SimpleNamespace(
         project_id="project-1",
-        repository_id=0,
-        clone_url="",
+        repository_id=456,
+        clone_url="http://forgejo.local/cocola/p-project.git",
         default_branch="main",
-        base_sha="",
-        task_branch="main",
+        base_sha="a" * 40,
+        task_branch="cocola/task-project-1",
         git_author_name="Project User",
         git_author_email="project@example.com",
         repository_provider="local",
-        repository_full_name="",
-        credential_mode="none",
+        repository_full_name="cocola/p-project",
+        credential_mode="ephemeral",
     )
 
     def exec_handler(_sandbox_id, cmd, stdin):
@@ -1804,7 +1806,7 @@ async def test_project_query_uses_isolated_project_worktree():
                 {
                     "ok": True,
                     "snapshot": {
-                        "branch": "main",
+                        "branch": "cocola/task-project-1",
                         "base_sha": "a" * 40,
                         "head_sha": "a" * 40,
                         "changes": [],
@@ -1819,7 +1821,10 @@ async def test_project_query_uses_isolated_project_worktree():
         provider,
         binder=StaticSandboxBinder(),
         executor=StaticSandboxExecutor(exec_handler=exec_handler),
-    ).Query(FakeRequest(project_context=project), FakeContext())
+    ).Query(
+        FakeRequest(project_context=project),
+        FakeContext(metadata=(SimpleNamespace(key="x-cocola-scm-token", value="project-token"),)),
+    )
 
     assert provider.seen_options is not None
     assert provider.seen_options.working_directory == "/workspace/project"

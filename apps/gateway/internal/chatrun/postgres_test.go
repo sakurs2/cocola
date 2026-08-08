@@ -204,3 +204,16 @@ func TestPostgresStartRejectsArchivedAgent(t *testing.T) {
 		t.Fatal("archived Agent conversation was persisted")
 	}
 }
+
+func TestTaskBranchIsStableAndRefSafe(t *testing.T) {
+	if got := taskBranch("9ad7d767-2f20-4d67-b8ff-b604d10dd03e"); got != "cocola/task-9ad7d7672f20" {
+		t.Fatalf("UUID branch = %q", got)
+	}
+	unsafe := taskBranch("safe:refs/heads/main")
+	if unsafe == "cocola/task-safe:refs/he" || len(unsafe) != len("cocola/task-")+12 {
+		t.Fatalf("unsafe branch = %q", unsafe)
+	}
+	if got := taskBranch(""); got != "cocola/task-workspace" {
+		t.Fatalf("empty branch = %q", got)
+	}
+}

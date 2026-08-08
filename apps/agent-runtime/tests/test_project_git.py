@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 
@@ -35,7 +36,60 @@ def valid_spec() -> ProjectSpec:
         task_branch="cocola/task-9ad7d7672f20",
         git_author_name="Octo Cat",
         git_author_email="octo@example.com",
+        repository_full_name="octocat/example",
     )
+
+
+def local_clone_fixture(tmp_path):
+    source = tmp_path / "source"
+    subprocess.run(
+        ["git", "init", "-b", "main", str(source)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Cocola",
+            "-c",
+            "user.email=cocola@localhost",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Initialize empty Cocola project",
+        ],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return source, base_sha
+
+
+def local_embedded_spec(source, base_sha):
+    return {
+        "project_id": "project-local",
+        "repository_id": 456,
+        "clone_url": str(source),
+        "default_branch": "main",
+        "base_ref": "main",
+        "base_sha": base_sha,
+        "task_branch": "cocola/task-local",
+        "git_author_name": "Local User",
+        "git_author_email": "local@example.com",
+        "repository_provider": "local",
+        "repository_full_name": "cocola/p-project-local",
+        "credential_mode": "ephemeral",
+    }
 
 
 class RecordingExecutor:
@@ -51,6 +105,13 @@ class RecordingExecutor:
 def test_project_spec_rejects_credential_in_clone_url():
     spec = valid_spec()
     invalid = ProjectSpec(**{**spec.__dict__, "clone_url": "https://token@github.com/a/b.git"})
+    with pytest.raises(ProjectWorkspaceError, match="context is invalid"):
+        validate_spec(invalid)
+
+
+def test_project_spec_rejects_task_branch_refspec_injection():
+    spec = valid_spec()
+    invalid = ProjectSpec(**{**spec.__dict__, "task_branch": "cocola/task-safe:refs/heads/main"})
     with pytest.raises(ProjectWorkspaceError, match="context is invalid"):
         validate_spec(invalid)
 
@@ -80,32 +141,14 @@ def test_project_egress_hosts_include_run_broker_only_for_github():
     local = ProjectSpec(
         **{
             **valid_spec().__dict__,
-            "repository_id": 0,
-            "repository_provider": "local",
-            "clone_url": "",
-            "base_sha": "",
-            "default_branch": "main",
-            "task_branch": "main",
-            "credential_mode": "none",
-        }
-    )
-    assert project_egress_hosts(local, "http://host.docker.internal:8080") == []
-    published = ProjectSpec(
-        **{
-            **local.__dict__,
             "repository_id": 456,
-            "repository_full_name": "octocat/published",
-            "credential_mode": "broker",
+            "repository_provider": "local",
+            "clone_url": "http://forgejo.local/cocola/p-project.git",
+            "default_branch": "main",
+            "repository_full_name": "cocola/p-project",
         }
     )
-    assert project_egress_hosts(published, "http://host.docker.internal:8080") == [
-        "github.com",
-        "api.github.com",
-        "uploads.github.com",
-        "objects.githubusercontent.com",
-        "github-releases.githubusercontent.com",
-        "host.docker.internal",
-    ]
+    assert project_egress_hosts(local, "http://host.docker.internal:8080") == ["forgejo.local"]
 
 
 def test_project_egress_hosts_reject_invalid_broker_url():
@@ -167,25 +210,14 @@ def test_embedded_project_git_script_compiles():
     compile(_PROJECT_GIT_SCRIPT, "<project-git>", "exec")
 
 
-def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
+def test_fresh_local_project_clones_authoritative_repository_and_reuses_workspace(tmp_path):
+    source, base_sha = local_clone_fixture(tmp_path)
     workspace = tmp_path / "workspace"
     (workspace / "outputs" / "browser").mkdir(parents=True)
     (workspace / "outputs" / "browser" / "preview.png").write_bytes(b"png")
     (workspace / "downloads").mkdir()
     worktree = workspace / "project"
-    spec = {
-        "project_id": "project-local",
-        "repository_id": 0,
-        "clone_url": "",
-        "default_branch": "main",
-        "base_sha": "",
-        "task_branch": "main",
-        "git_author_name": "Local User",
-        "git_author_email": "local@example.com",
-        "repository_provider": "local",
-        "repository_full_name": "",
-        "credential_mode": "none",
-    }
+    spec = local_embedded_spec(source, base_sha)
     script = project_script(workspace)
 
     first = subprocess.run(
@@ -197,10 +229,9 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
     )
     first_payload = json.loads(first.stdout)
     assert first_payload["ok"] is True
-    assert first_payload["snapshot"]["branch"] == "main"
+    assert first_payload["snapshot"]["branch"] == "cocola/task-local"
     assert first_payload["snapshot"]["dirty"] is False
-    base_sha = first_payload["snapshot"]["base_sha"]
-    assert len(base_sha) == 40
+    assert first_payload["snapshot"]["base_sha"] == base_sha
     branch = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=worktree,
@@ -208,13 +239,12 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert branch == "main"
+    assert branch == "cocola/task-local"
     assert (workspace / "outputs" / "browser").is_dir()
     assert (workspace / "outputs" / "browser" / "preview.png").is_file()
     assert (workspace / "downloads").is_dir()
     assert (worktree / ".git").is_dir()
 
-    spec["base_sha"] = base_sha
     (worktree / "kept.txt").write_text("persisted\n", encoding="utf-8")
     second = subprocess.run(
         [sys.executable, "-c", script],
@@ -228,21 +258,10 @@ def test_fresh_local_project_initializes_main_and_reuses_workspace(tmp_path):
 
 
 def test_workspace_revision_covers_tracked_and_untracked_content(tmp_path):
+    source, base_sha = local_clone_fixture(tmp_path)
     workspace = tmp_path / "workspace"
     worktree = workspace / "project"
-    spec = {
-        "project_id": "project-local",
-        "repository_id": 0,
-        "clone_url": "",
-        "default_branch": "main",
-        "base_sha": "",
-        "task_branch": "main",
-        "git_author_name": "Local User",
-        "git_author_email": "local@example.com",
-        "repository_provider": "local",
-        "repository_full_name": "",
-        "credential_mode": "none",
-    }
+    spec = local_embedded_spec(source, base_sha)
     script = project_script(workspace)
     bootstrap = subprocess.run(
         [sys.executable, "-c", script],
@@ -253,7 +272,6 @@ def test_workspace_revision_covers_tracked_and_untracked_content(tmp_path):
     )
     initial = json.loads(bootstrap.stdout)["snapshot"]["workspace_revision"]
     assert len(initial) == 64
-    spec["base_sha"] = json.loads(bootstrap.stdout)["snapshot"]["base_sha"]
 
     (worktree / "untracked.txt").write_text("first\n", encoding="utf-8")
     first = subprocess.run(
@@ -278,31 +296,19 @@ def test_workspace_revision_covers_tracked_and_untracked_content(tmp_path):
 
 
 def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
+    source, base_sha = local_clone_fixture(tmp_path)
     workspace = tmp_path / "workspace"
     worktree = workspace / "project"
-    spec = {
-        "project_id": "project-local",
-        "repository_id": 0,
-        "clone_url": "",
-        "default_branch": "main",
-        "base_sha": "",
-        "task_branch": "main",
-        "git_author_name": "Local User",
-        "git_author_email": "local@example.com",
-        "repository_provider": "local",
-        "repository_full_name": "",
-        "credential_mode": "none",
-    }
+    spec = local_embedded_spec(source, base_sha)
     script = project_script(workspace)
 
-    bootstrap = subprocess.run(
+    subprocess.run(
         [sys.executable, "-c", script],
         input=json.dumps({"operation": "bootstrap", "spec": spec}),
         check=True,
         capture_output=True,
         text=True,
     )
-    spec["base_sha"] = json.loads(bootstrap.stdout)["snapshot"]["base_sha"]
     (worktree / "src").mkdir()
     (worktree / "src" / "app.py").write_text('print("hello")\n', encoding="utf-8")
     subprocess.run(["git", "add", "src/app.py"], cwd=worktree, check=True)
@@ -335,7 +341,7 @@ def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
         "subject": "Add application",
         "author_name": "Local User",
         "authored_at": snapshot["commits"][0]["authored_at"],
-        "refs": ["HEAD", "main"],
+        "refs": ["HEAD", "cocola/task-local"],
     }
     assert snapshot["history_truncated"] is False
 
@@ -378,7 +384,7 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
     workspace = tmp_path / "workspace"
     worktree = workspace / "project"
     subprocess.run(
-        ["git", "init", "-b", "main", str(worktree)],
+        ["git", "init", "-b", "cocola/task-local", str(worktree)],
         check=True,
         capture_output=True,
         text=True,
@@ -427,25 +433,25 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
         )
     spec = {
         "project_id": "project-local",
-        "repository_id": 0,
-        "clone_url": "",
+        "repository_id": 456,
+        "clone_url": "http://forgejo.local/cocola/p-project.git",
         "default_branch": "main",
         "base_sha": base_sha,
-        "task_branch": "main",
+        "task_branch": "cocola/task-local",
         "git_author_name": "Local User",
         "git_author_email": "local@example.com",
         "repository_provider": "local",
-        "repository_full_name": "",
-        "credential_mode": "none",
+        "repository_full_name": "cocola/p-project",
+        "credential_mode": "ephemeral",
     }
     (worktree / ".git" / "cocola-project.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "project_id": spec["project_id"],
-                "repository_id": 0,
+                "repository_id": 456,
                 "repository_provider": "local",
-                "task_branch": "main",
+                "task_branch": "cocola/task-local",
                 "base_sha": base_sha,
             }
         ),
@@ -466,35 +472,26 @@ def test_git_history_is_limited_to_latest_fifty_commits(tmp_path):
     assert snapshot["history_truncated"] is True
 
 
-def test_local_project_does_not_silently_reinitialize_a_lost_volume(tmp_path):
+def test_local_project_rebuilds_a_lost_workspace_from_authoritative_repository(tmp_path):
+    source, base_sha = local_clone_fixture(tmp_path)
     workspace = tmp_path / "workspace"
-    spec = {
-        "project_id": "project-local",
-        "repository_id": 0,
-        "clone_url": "",
-        "default_branch": "main",
-        "base_sha": "a" * 40,
-        "task_branch": "main",
-        "git_author_name": "Local User",
-        "git_author_email": "local@example.com",
-        "repository_provider": "local",
-        "repository_full_name": "",
-        "credential_mode": "none",
-    }
+    spec = local_embedded_spec(source, base_sha)
     script = project_script(workspace)
 
     result = subprocess.run(
         [sys.executable, "-c", script],
         input=json.dumps({"operation": "bootstrap", "spec": spec}),
+        env={**os.environ, "GIT_DIR": "/tmp/cocola-untrusted-git-dir"},
         check=True,
         capture_output=True,
         text=True,
     )
 
     payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert payload["code"] == "LOCAL_PROJECT_WORKSPACE_LOST"
-    assert not (workspace / "project" / ".git").exists()
+    assert payload["ok"] is True
+    assert payload["snapshot"]["base_sha"] == base_sha
+    assert payload["snapshot"]["branch"] == "cocola/task-local"
+    assert (workspace / "project" / ".git").is_dir()
 
 
 def test_bootstrap_configures_repository_local_git_author(tmp_path):
@@ -696,16 +693,17 @@ async def test_publish_passes_short_lived_token_only_in_environment():
     executor = RecordingExecutor({"head_sha": "b" * 40})
     local = ProjectSpec(
         project_id="project-local",
-        repository_id=0,
-        clone_url="",
+        repository_id=456,
+        clone_url="http://forgejo.local/cocola/p-project.git",
         default_branch="main",
         base_ref="main",
         base_sha="a" * 40,
-        task_branch="main",
+        task_branch="cocola/task-local",
         git_author_name="Local User",
         git_author_email="local@example.com",
         repository_provider="local",
-        credential_mode="none",
+        repository_full_name="cocola/p-project",
+        credential_mode="ephemeral",
     )
 
     result = await publish_project(
@@ -713,7 +711,7 @@ async def test_publish_passes_short_lived_token_only_in_environment():
         "sandbox-1",
         local,
         "publish-token",
-        "https://github.com/octocat/published.git",
+        local.clone_url,
         "b" * 40,
     )
 

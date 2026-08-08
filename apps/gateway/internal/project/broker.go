@@ -220,8 +220,7 @@ func brokerProjectReady(value Project) bool {
 	if value.Status != ProjectReady || value.RepositoryExternalID <= 0 || value.InstallationID <= 0 {
 		return false
 	}
-	return value.RepositoryProvider == ProviderGitHub ||
-		(value.RepositoryProvider == ProviderLocal && value.GitHubPublishStatus == "published")
+	return value.RepositoryProvider == ProviderGitHub
 }
 
 func (s *Service) RevokeTokenLease(

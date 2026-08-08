@@ -23,7 +23,6 @@ var (
 	ErrProjectNotFound          = errors.New("chatrun: project not found")
 	ErrProjectNotReady          = errors.New("chatrun: project not ready")
 	ErrProjectMismatch          = errors.New("chatrun: conversation project mismatch")
-	ErrProjectSingleTask        = errors.New("chatrun: local project already has a task")
 	ErrPlanNotCurrent           = errors.New("chatrun: plan is not current")
 	ErrPlanState                = errors.New("chatrun: plan state does not allow this operation")
 	ErrPlanModelUnavailable     = errors.New("chatrun: plan model is unavailable")

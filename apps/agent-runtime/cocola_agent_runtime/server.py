@@ -809,7 +809,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
         return _git_inspection_proto(result)
 
     async def PublishWorkspaceGit(self, request, context):  # noqa: N802
-        """Push a clean local Project workspace to a new GitHub repository."""
+        """Push a clean Project task to its exact provider branch."""
         if self._binder is None or self._executor is None:
             await context.abort(grpc.StatusCode.UNIMPLEMENTED, "sandbox Git publishing unavailable")
         try:
@@ -818,13 +818,13 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             box = await self._binder.acquire(
                 session_id=request.session_id,
                 user_id=request.user_id,
-                additional_egress_allowlist=["github.com"],
+                additional_egress_allowlist=project_egress_hosts(spec),
             )
             heartbeat = asyncio.create_task(
                 self._heartbeat_sandbox(box.id, context, asyncio.current_task())
             )
             try:
-                await bootstrap_project(self._executor, box.id, spec, "")
+                await bootstrap_project(self._executor, box.id, spec, scm_token)
                 result = await publish_project(
                     self._executor,
                     box.id,

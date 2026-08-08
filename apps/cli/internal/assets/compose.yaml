@@ -30,6 +30,76 @@ services:
       timeout: 3s
       retries: 20
 
+  forgejo-db-init:
+    image: postgres:16.14-alpine3.23
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: "${COCOLA_PG_PASSWORD}"
+      FORGEJO_DB_PASSWORD: "${COCOLA_FORGEJO_DB_PASSWORD}"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        psql -h postgres -U cocola -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='forgejo'" | grep -q 1 || psql -h postgres -U cocola -d postgres -c "CREATE USER forgejo"
+        printf '%s\n' "ALTER USER forgejo WITH PASSWORD :'forgejo_password';" | psql -h postgres -U cocola -d postgres -v forgejo_password="$$FORGEJO_DB_PASSWORD"
+        psql -h postgres -U cocola -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='forgejo'" | grep -q 1 || psql -h postgres -U cocola -d postgres -c "CREATE DATABASE forgejo OWNER forgejo"
+
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:16.0.1
+    restart: unless-stopped
+    depends_on:
+      forgejo-db-init:
+        condition: service_completed_successfully
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      DISABLE_SSH: "true"
+      FORGEJO__database__DB_TYPE: postgres
+      FORGEJO__database__HOST: postgres:5432
+      FORGEJO__database__NAME: forgejo
+      FORGEJO__database__USER: forgejo
+      FORGEJO__database__PASSWD: "${COCOLA_FORGEJO_DB_PASSWORD}"
+      FORGEJO__server__ROOT_URL: "http://host.docker.internal:${COCOLA_FORGEJO_HOST_PORT}/"
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__actions__ENABLED: "false"
+      FORGEJO__repository__DEFAULT_BRANCH: main
+      FORGEJO__repository__ENABLE_PUSH_CREATE_USER: "false"
+      FORGEJO__repository__ENABLE_PUSH_CREATE_ORG: "false"
+      FORGEJO__security__INSTALL_LOCK: "true"
+    ports:
+      - "127.0.0.1:${COCOLA_FORGEJO_HOST_PORT}:3000"
+    volumes:
+      - forgejodata:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  forgejo-init:
+    image: codeberg.org/forgejo/forgejo:16.0.1
+    user: "1000:1000"
+    depends_on:
+      forgejo:
+        condition: service_healthy
+    environment:
+      FORGEJO_WORK_DIR: /data/gitea
+      FORGEJO_CUSTOM: /data/gitea
+      COCOLA_FORGEJO_PASSWORD: "${COCOLA_FORGEJO_PASSWORD}"
+    volumes:
+      - forgejodata:/data
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        forgejo admin user list --config /data/gitea/conf/app.ini | grep -q ' cocola ' || forgejo admin user create --config /data/gitea/conf/app.ini --username cocola --password "$$COCOLA_FORGEJO_PASSWORD" --email cocola@localhost --admin --must-change-password=false
+        forgejo admin user change-password --config /data/gitea/conf/app.ini --username cocola --password "$$COCOLA_FORGEJO_PASSWORD" --must-change-password=false
+
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
@@ -195,6 +265,8 @@ services:
       COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL}"
       COCOLA_GATEWAY_URL: http://gateway:8080
       COCOLA_LLM_GATEWAY_URL: http://llm-gateway:8080
+      COCOLA_FORGEJO_API_URL: http://forgejo:3000
+      COCOLA_FORGEJO_VERSION: "16.0.1"
       COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY}"
       COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY}"
       COCOLA_MINIO_ENDPOINT: minio:9000
@@ -271,6 +343,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      forgejo-init:
+        condition: service_completed_successfully
     environment:
       COCOLA_GATEWAY_ADDR: ":8080"
       COCOLA_AGENT_ADDR: agent-runtime:50061
@@ -294,6 +368,10 @@ services:
       COCOLA_FEATURE_LOCAL_PROJECTS: "${COCOLA_FEATURE_LOCAL_PROJECTS:-true}"
       COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR: "${COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR:-true}"
       COCOLA_FEATURE_GITHUB_AGENT_WRITE: "${COCOLA_FEATURE_GITHUB_AGENT_WRITE:-true}"
+      COCOLA_FORGEJO_API_URL: http://forgejo:3000
+      COCOLA_FORGEJO_CLONE_URL: "${COCOLA_FORGEJO_CLONE_URL}"
+      COCOLA_FORGEJO_USERNAME: cocola
+      COCOLA_FORGEJO_PASSWORD: "${COCOLA_FORGEJO_PASSWORD}"
       COCOLA_SKILL_PUBLISH_ENABLED: "${COCOLA_SKILL_PUBLISH_ENABLED:-false}"
     volumes:
       - "${COCOLA_HOME}/secrets:/run/secrets:ro"
@@ -374,3 +452,4 @@ volumes:
   redisdata:
   pgdata:
   miniodata:
+  forgejodata:

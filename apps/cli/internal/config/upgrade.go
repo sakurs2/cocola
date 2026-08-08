@@ -189,6 +189,14 @@ func DatabaseBackupPath(backupDir string) string {
 	return filepath.Join(backupDir, "postgres.dump")
 }
 
+func ForgejoDatabaseBackupPath(backupDir string) string {
+	return filepath.Join(backupDir, "forgejo-postgres.dump")
+}
+
+func ForgejoDataBackupPath(backupDir string) string {
+	return filepath.Join(backupDir, "forgejo-data.tar.gz")
+}
+
 func writeUpgradeFiles(paths Paths, compose, environment []byte, state State) error {
 	if err := atomicWrite(paths.Compose, compose, 0o644); err != nil {
 		return err
@@ -395,6 +403,10 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 		{"COCOLA_CONFIG_SECRET_KEY", generated.config},
 		{"COCOLA_PG_PASSWORD", generated.postgres},
 		{"COCOLA_MINIO_ROOT_PASSWORD", generated.minio},
+		{"COCOLA_FORGEJO_DB_PASSWORD", generated.forgejoDB},
+		{"COCOLA_FORGEJO_PASSWORD", generated.forgejo},
+		{"COCOLA_FORGEJO_HOST_PORT", "3001"},
+		{"COCOLA_FORGEJO_CLONE_URL", "http://host.docker.internal:3001"},
 		{"COCOLA_SCM_SECRET_KEY", generated.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
 		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", gatewayPort)},

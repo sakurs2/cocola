@@ -468,6 +468,10 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusConflict, "PROJECT_BASE_MISMATCH", "a project task base branch cannot be changed")
 			return
 		}
+		if errors.Is(projectErr, project.ErrChangeRequestMerged) {
+			writeErr(w, http.StatusConflict, "PROJECT_TASK_MERGED", "this task is read-only because it has been merged")
+			return
+		}
 		if errors.Is(projectErr, project.ErrConflict) {
 			writeErr(w, http.StatusConflict, "PROJECT_MISMATCH", "conversation project cannot be changed")
 			return
@@ -614,10 +618,6 @@ func (a *API) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, chatrun.ErrProjectMismatch) {
 		writeErr(w, http.StatusConflict, "PROJECT_MISMATCH", "conversation project cannot be changed")
-		return
-	}
-	if errors.Is(err, chatrun.ErrProjectSingleTask) {
-		writeErr(w, http.StatusConflict, "LOCAL_PROJECT_SINGLE_TASK", "local projects use one persistent task")
 		return
 	}
 	if errors.Is(err, chatrun.ErrQuestionPending) {

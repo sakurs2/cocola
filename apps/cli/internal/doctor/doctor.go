@@ -141,7 +141,7 @@ func inspectVolumes(
 	add func(string, Status, string),
 ) map[string]bool {
 	result := make(map[string]bool)
-	for _, name := range []string{"pgdata", "redisdata", "miniodata"} {
+	for _, name := range []string{"pgdata", "redisdata", "miniodata", "forgejodata"} {
 		present, err := runner.VolumePresent(ctx, name)
 		if err != nil {
 			add("volume "+name, StatusFail, err.Error())

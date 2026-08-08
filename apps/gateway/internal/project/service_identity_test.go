@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -41,6 +42,14 @@ func (s *taskBaseStore) GetWorkspace(
 	return *s.workspace, s.project, nil
 }
 
+func (s *taskBaseStore) GetChangeRequest(
+	context.Context,
+	Identity,
+	string,
+) (ChangeRequest, error) {
+	return ChangeRequest{}, ErrNotFound
+}
+
 func (s *retryCreateStore) RefreshProjectProvisionAttempt(
 	_ context.Context,
 	_ Identity,
@@ -70,23 +79,47 @@ func TestGitAuthorIdentityFallsBackToCocolaUsername(t *testing.T) {
 	}
 }
 
-func TestPrepareTaskBaseKeepsLocalProjectOnMain(t *testing.T) {
+func TestPrepareTaskBaseResolvesLocalProjectMainFromInternalSCM(t *testing.T) {
 	projectID := "11111111-1111-1111-1111-111111111111"
+	identity := Identity{TenantID: "tenant-a", UserID: "user-a"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/cocola/p-project/branches/main" ||
+			r.Header.Get("Authorization") != "token project-token" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"commit": map[string]any{"id": strings.Repeat("a", 40)},
+		})
+	}))
+	defer server.Close()
+	box, err := newSecretBox(base64.StdEncoding.EncodeToString(
+		[]byte("0123456789abcdef0123456789abcdef"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := box.encrypt("project-token", projectTokenAAD(identity, projectID))
+	if err != nil {
+		t.Fatal(err)
+	}
 	service := &Service{
 		store: &taskBaseStore{project: Project{
 			ID: projectID, Status: ProjectReady, RepositoryProvider: ProviderLocal,
-			DefaultBranch: "main",
+			DefaultBranch: "main", RepositoryOwner: "cocola", RepositoryName: "p-project",
+			RepositoryTokenCipher: ciphertext,
 		}},
-		localProjectsEnabled: true,
+		box: box, localProjectsEnabled: true,
+		forgejo: &forgejoClient{http: server.Client(), apiBase: server.URL},
 	}
 	result, err := service.PrepareTaskBase(
-		context.Background(), Identity{UserID: "user-a"}, projectID, "new-task", "main",
+		context.Background(), identity, projectID, "new-task", "main",
 	)
-	if err != nil || result.Ref != "main" || result.SHA != "" {
+	if err != nil || result.Ref != "main" || result.SHA != strings.Repeat("a", 40) {
 		t.Fatalf("PrepareTaskBase() = %+v, %v", result, err)
 	}
 	if _, err := service.PrepareTaskBase(
-		context.Background(), Identity{UserID: "user-a"}, projectID, "new-task", "feature/login",
+		context.Background(), identity, projectID, "new-task", "feature/login",
 	); !errors.Is(err, ErrBaseRefNotFound) {
 		t.Fatalf("non-main local base error = %v", err)
 	}

@@ -87,6 +87,10 @@ export COCOLA_SANDBOX_HEARTBEAT_SECS="${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
 export COCOLA_LLM_TIMEOUT_SECS="${COCOLA_LLM_TIMEOUT_SECS:-600}"
 export COCOLA_PROJECT_MAX_REPOSITORY_MB="${COCOLA_PROJECT_MAX_REPOSITORY_MB:-512}"
 export COCOLA_SCM_SECRET_KEY="${COCOLA_SCM_SECRET_KEY:-Y29jb2xhLWxvY2FsLXNjbS1zZWNyZXQta2V5LTAwMDE=}"
+export COCOLA_FORGEJO_API_URL="${COCOLA_FORGEJO_API_URL:-http://127.0.0.1:3001}"
+export COCOLA_FORGEJO_CLONE_URL="${COCOLA_FORGEJO_CLONE_URL:-http://host.docker.internal:3001}"
+export COCOLA_FORGEJO_USERNAME="${COCOLA_FORGEJO_USERNAME:-cocola}"
+export COCOLA_FORGEJO_PASSWORD="${COCOLA_FORGEJO_PASSWORD:-cocola_forgejo_admin}"
 
 AGENT_HOST="${COCOLA_AGENT_HOST:-127.0.0.1}"
 AGENT_PORT="${COCOLA_AGENT_PORT:-50061}"
@@ -454,13 +458,14 @@ dev_up() {
     fi
   fi
 
-  # (2) Infra only: redis / postgres / minio.
+  # (2) Infra only: redis / postgres / minio / hidden internal SCM.
   docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
-      redis postgres minio minio-init \
+      redis postgres minio minio-init forgejo-db-init forgejo forgejo-init \
       >"$(log_redirect dev-infra)" 2>&1 \
     || { echo "!! [dev] infra bring-up failed; see .run-logs/dev-infra.log" >&2; exit 1; }
   wait_port 127.0.0.1 6379 "redis"    120
   wait_port 127.0.0.1 5432 "postgres" 120
+  wait_port 127.0.0.1 3001 "internal source control" 120
   wait_port 127.0.0.1 9000 "minio"    120
   # Shared infra wiring for every native process launched below.
   export COCOLA_REDIS_ADDR="${COCOLA_REDIS_ADDR:-127.0.0.1:6379}"

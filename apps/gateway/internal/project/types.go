@@ -24,6 +24,10 @@ var (
 	ErrProjectNotReady        = errors.New("project: project not ready")
 	ErrBaseRefNotFound        = errors.New("project: base branch not found")
 	ErrBaseRefMismatch        = errors.New("project: task base branch cannot be changed")
+	ErrWorkspaceDirty         = errors.New("project: workspace has uncommitted changes")
+	ErrChangeRequestMerged    = errors.New("project: task change request is already merged")
+	ErrChangeRequestNotReady  = errors.New("project: change request is not ready to merge")
+	ErrInternalSCMUnavailable = errors.New("project: internal scm unavailable")
 	ErrApprovalRequired       = errors.New("project: command approval required")
 	ErrApprovalDenied         = errors.New("project: command approval denied")
 	ErrRunInactive            = errors.New("project: run is no longer active")
@@ -152,8 +156,9 @@ type Project struct {
 	ArchivedAt             *time.Time `json:"archived_at,omitempty"`
 	RepositoryHasLFS       bool       `json:"repository_has_lfs,omitempty"`
 	RepositoryHasSubmodule bool       `json:"repository_has_submodules,omitempty"`
-	PrimaryConversationID  string     `json:"primary_conversation_id,omitempty"`
-	GitHubPublishStatus    string     `json:"github_publish_status"`
+	RepositoryCloneURL     string     `json:"-"`
+	RepositoryTokenID      int64      `json:"-"`
+	RepositoryTokenCipher  string     `json:"-"`
 }
 
 type Repository struct {
@@ -194,6 +199,15 @@ type TaskBase struct {
 	Project Project
 	Ref     string
 	SHA     string
+}
+
+type ChangeRequestPreparation struct {
+	Project   Project
+	Workspace Workspace
+	Context   ProjectContext
+	Token     string
+	CloneURL  string
+	Existing  *ChangeRequest
 }
 
 type Change struct {
@@ -255,12 +269,30 @@ type Workspace struct {
 }
 
 type Task struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	RuntimeID string    `json:"runtime_id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Workspace Workspace `json:"workspace"`
+	ID            string         `json:"id"`
+	Title         string         `json:"title"`
+	RuntimeID     string         `json:"runtime_id"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	Workspace     Workspace      `json:"workspace"`
+	ChangeRequest *ChangeRequest `json:"change_request,omitempty"`
+}
+
+type ChangeRequest struct {
+	ConversationID string     `json:"conversation_id"`
+	ProjectID      string     `json:"project_id"`
+	Provider       string     `json:"provider"`
+	ExternalNumber int64      `json:"external_number,omitempty"`
+	ExternalURL    string     `json:"external_url,omitempty"`
+	Status         string     `json:"status"`
+	BaseSHA        string     `json:"base_sha,omitempty"`
+	HeadSHA        string     `json:"head_sha,omitempty"`
+	MergeSHA       string     `json:"merge_sha,omitempty"`
+	ErrorCode      string     `json:"error_code,omitempty"`
+	Version        int64      `json:"version"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at,omitempty"`
 }
 
 type BrokerCredentialClaims struct {
@@ -397,10 +429,7 @@ type Store interface {
 	CreateProject(context.Context, Project) (Project, error)
 	RefreshProjectProvisionAttempt(context.Context, Identity, string, time.Time) (Project, error)
 	CompleteProject(context.Context, Identity, string, Repository, int64, time.Time) (Project, error)
-	BeginLocalProjectPublishIntent(context.Context, Identity, string, int64, string, string, time.Time) (Project, error)
-	BindLocalProjectPublishRepository(context.Context, Identity, string, int64, Repository, int64, time.Time) (Project, error)
-	CancelLocalProjectPublishIntent(context.Context, Identity, string, int64, time.Time) (Project, error)
-	CompleteLocalProjectPublish(context.Context, Identity, string, int64, time.Time) (Project, error)
+	CompleteLocalProject(context.Context, Identity, string, Repository, int64, string, string, time.Time) (Project, error)
 	RebindProjectInstallation(context.Context, Identity, string, int64, int64, time.Time) (Project, error)
 	FailProject(context.Context, Identity, string, string, time.Time) (Project, error)
 	UpdateProject(context.Context, Identity, string, int64, string, string, string, time.Time) (Project, error)
@@ -411,6 +440,8 @@ type Store interface {
 	LockBaseSHA(context.Context, Identity, string, string, time.Time) (Workspace, error)
 	SaveSnapshot(context.Context, Identity, string, GitSnapshot, string, string, time.Time) error
 	MarkBootstrapFailed(context.Context, Identity, string, string, time.Time) error
+	GetChangeRequest(context.Context, Identity, string) (ChangeRequest, error)
+	UpsertChangeRequest(context.Context, Identity, ChangeRequest) (ChangeRequest, error)
 
 	GetOrCreateApproval(context.Context, Approval) (Approval, error)
 	GetApproval(context.Context, string) (Approval, error)

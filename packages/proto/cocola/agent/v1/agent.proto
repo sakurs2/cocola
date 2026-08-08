@@ -16,8 +16,8 @@ service AgentRuntimeService {
   // InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
   // sandbox; merely opening the Git tab never invokes it.
   rpc InspectWorkspaceGit(InspectWorkspaceGitRequest) returns (InspectWorkspaceGitResponse);
-  // PublishWorkspaceGit pushes a verified local Project workspace to a newly
-  // created GitHub repository. The short-lived token travels in gRPC metadata.
+  // PublishWorkspaceGit pushes a verified, clean Project workspace to its
+  // exact task branch. The repository-scoped token travels in gRPC metadata.
   rpc PublishWorkspaceGit(PublishWorkspaceGitRequest) returns (PublishWorkspaceGitResponse);
 }
 

@@ -32,7 +32,7 @@ function sourceLabel(project: ProjectSummary) {
   if (project.repository_provider === "github") {
     return `${project.repository_owner}/${project.repository_name}`;
   }
-  return "Local workspace";
+  return "Cocola repository";
 }
 
 function relativeTime(iso: string) {

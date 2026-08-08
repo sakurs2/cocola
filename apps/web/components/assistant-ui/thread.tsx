@@ -47,6 +47,7 @@ import {
   ArrowUp as ArrowUpIcon,
   Hourglass,
   Map as PlanModeIcon,
+  GitMerge,
   Square,
   Sparkles,
 } from "lucide-react";
@@ -128,7 +129,10 @@ import {
 import { findLatestProgressItems, normalizeProgressItems } from "@/lib/progress-items.mjs";
 import { cn } from "@/lib/utils";
 import { SkillIcon } from "@/components/ui/skill-icon";
-import { useProjectComposerBranchControl } from "@/components/assistant-ui/project-branch-control";
+import {
+  useProjectComposerBranchControl,
+  useProjectComposerReadOnly,
+} from "@/components/assistant-ui/project-branch-control";
 
 // HeroUI Demo owns the presentation; assistant-ui and Cocola retain the live
 // message semantics, streaming lifecycle, attachments, Skills, Wiki, and Plan Mode.
@@ -389,6 +393,7 @@ const ConversationComposerInner: FC<{
     questionInputLocked,
   } = useCocola();
   const contextualBranchControl = useProjectComposerBranchControl();
+  const projectReadOnly = useProjectComposerReadOnly();
   const noModel = !modelsLoaded || !selectedModel;
   const effectiveBranchControl = branchControl ?? contextualBranchControl;
   const promptInputRef = useRef<ComposerWikiInputHandle>(null);
@@ -410,6 +415,22 @@ const ConversationComposerInner: FC<{
     if (!promptStarter) return;
     requestAnimationFrame(() => promptInputRef.current?.focus());
   }, [promptStarter]);
+
+  if (projectReadOnly) {
+    return (
+      <div className="flex w-full items-center gap-3 rounded-2xl border border-success/25 bg-success/5 px-4 py-3 text-left">
+        <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-success/10 text-success">
+          <GitMerge className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-foreground">This task has been merged</p>
+          <p className="text-[11.5px] leading-4 text-muted">
+            It is now read-only. Create a new task to continue from the latest main branch.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative w-full">

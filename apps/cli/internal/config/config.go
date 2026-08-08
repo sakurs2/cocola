@@ -93,7 +93,7 @@ type Credentials struct {
 
 type secrets struct {
 	auth, authJS, admin, model, config, postgres, minio string
-	scm                                                 string
+	forgejoDB, forgejo, scm                             string
 }
 
 func DefaultHome() string {
@@ -387,6 +387,9 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"AUTH_SECRET", s.authJS}, {"COCOLA_ADMIN_KEY", s.admin},
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
+		{"COCOLA_FORGEJO_DB_PASSWORD", s.forgejoDB}, {"COCOLA_FORGEJO_PASSWORD", s.forgejo},
+		{"COCOLA_FORGEJO_HOST_PORT", "3001"},
+		{"COCOLA_FORGEJO_CLONE_URL", "http://host.docker.internal:3001"},
 		{"COCOLA_SCM_SECRET_KEY", s.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
 		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)},
@@ -427,7 +430,7 @@ func quoteEnv(value string) string {
 }
 
 func newSecrets() (secrets, error) {
-	values := make([]string, 7)
+	values := make([]string, 9)
 	for index := range values {
 		value, err := randomSecret(32)
 		if err != nil {
@@ -442,6 +445,7 @@ func newSecrets() (secrets, error) {
 	return secrets{
 		auth: values[0], authJS: values[1], admin: values[2], model: values[3],
 		config: values[4], postgres: values[5], minio: values[6],
+		forgejoDB: values[7], forgejo: values[8],
 		scm: base64.StdEncoding.EncodeToString(scmBytes),
 	}, nil
 }

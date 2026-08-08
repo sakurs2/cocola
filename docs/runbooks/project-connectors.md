@@ -1,10 +1,9 @@
-# Project 与 GitHub Connector 运维手册
+# Project SCM 与 GitHub Connector 运维手册
 
-本文面向 Cocola 管理员，覆盖本地 Project、每用户 GitHub App、Token Broker 和 Runtime GitHub 能力。系统不部署 Forgejo或其他内部 Git 服务。
+本文面向 Cocola 管理员，覆盖隐藏的内部 Forgejo、每用户 GitHub App、统一 Change Request、
+Token Broker，以及权威仓库的备份恢复。
 
-## 发布开关
-
-三个功能可以独立关闭：
+## 服务与开关
 
 ```dotenv
 COCOLA_FEATURE_LOCAL_PROJECTS=true
@@ -12,61 +11,82 @@ COCOLA_FEATURE_GITHUB_MANIFEST_CONNECTOR=true
 COCOLA_FEATURE_GITHUB_AGENT_WRITE=true
 ```
 
-- 关闭 `LOCAL_PROJECTS`：停止创建和运行本地 Project，不删除 Project 或 Session Volume。
-- 关闭 `GITHUB_MANIFEST_CONNECTOR`：停止创建、刷新和使用 Connector；本地 Project 仍可工作。
-- 关闭 `GITHUB_AGENT_WRITE`：停止签发新的 Broker Credential 和 installation token；不删除 GitHub 仓库。
+- 关闭 `LOCAL_PROJECTS`：停止创建、启动和交付 Local Project，不删除 Forgejo 仓库。
+- 关闭 `GITHUB_MANIFEST_CONNECTOR`：停止创建、刷新和使用 GitHub Connector；Local Project 仍可工作。
+- 关闭 `GITHUB_AGENT_WRITE`：停止模型侧 GitHub 写凭据；平台 Change Request 仍按安装权限工作。
 
-修改后重启 Gateway。回滚只切换开关，不删除数据库记录或用户仓库。
+Admin 的 Architecture 页面只展示 `Internal SCM` 健康、固定版本、PostgreSQL 与持久卷状态，
+不提供 Forgejo 跳转入口。健康检查为 `GET /api/healthz`。Forgejo 只绑定宿主回环端口，关闭 SSH、
+开放注册、Actions、Packages、Wiki 与 Issues 等非必要能力；版本必须显式升级，不使用 `latest`。
 
 ## Connector 状态排查
 
-1. 在用户的 `Connectors` 页面点击 Refresh，状态会在该次请求中重新检查，不依赖后台轮询。
-2. `Installation required`：用户需要把自己的 Private GitHub App 安装到同一个个人账号，并为目标仓库授予访问权。
-3. `Reauthorization required`：用户授权已过期或被撤销。Disconnect 后重新执行 Manifest Flow。
-4. `Error`：通常表示保存的 App private key/client secret 无法解密或 GitHub App 已被删除。让用户重新创建 Connector。
-5. 组织 installation 会被忽略；一期只接受 App owner 对应的个人账号。
+1. 在用户 `Connectors` 页面点击 Refresh；状态按需查询，不依赖 webhook 或后台轮询。
+2. `Installation required`：用户需要把 Private GitHub App 安装到同一个个人账号并授权仓库。
+3. `Reauthorization required`：用户授权已过期或被撤销；Disconnect 后重建 Connector。
+4. `Error`：常见于保存的 App 凭据无法解密或 GitHub App 已删除。
+5. 组织 installation 会被忽略；当前只接受 App owner 对应的个人账号。
 
-Disconnect 会删除 Cocola 保存的用户 token 和 App 凭证，并尽力撤销活动 lease；不会删除 GitHub 上的 App、仓库或历史 Project。
+Disconnect 会删除 Cocola 保存的用户 Token 和 App 凭据，并尽力撤销活动 lease；不会删除 GitHub
+仓库、PR 或历史 Project。
 
-## SCM 密钥恢复
+## Internal SCM 排查
 
-`COCOLA_SCM_SECRET_KEY`（生产推荐 `_FILE`）必须是稳定的 32 字节密钥。它用于加密 App private key、client secret、用户 token 和短期 lease。
+- `INTERNAL_SCM_PROVISION_FAILED`：检查 Forgejo API 健康、Provisioner 账号和 PostgreSQL。
+- `INTERNAL_SCM_TOKEN_FAILED`：检查 Token scope 与 repository restriction；禁止改成共享全局 Token。
+- `INTERNAL_SCM_INIT_*_FAILED`：按阶段检查 Gateway 镜像中的 Git、AskPass 和内部 Clone URL。
+- `INTERNAL_SCM_PROTECTION_FAILED`：确认 `main` 存在，且保护规则禁止直接 push、允许平台 squash merge。
+- Sandbox Clone 失败而 Gateway API 正常：检查 `COCOLA_FORGEJO_CLONE_URL` 是否能从 Sandbox 网络访问。
 
-- 备份密钥文件时使用部署平台的 Secret 备份能力，不写入仓库或普通日志。
-- 密钥丢失或被替换后，旧密文不可恢复；保留 Project 数据，让每位用户在 Connectors 中 Disconnect 并重新创建 App。
-- 不要尝试直接修改密文字段或把 App private key 注入 Sandbox。
+仓库名固定为 `p-<projectUUID>`，Project 改名不会改变远端。普通用户响应、日志和 Workspace marker
+不得包含 Token 密文或内部管理 URL。
 
-## Token Broker 与审批
+## SCM 密钥与 Token
 
-- Broker Credential 绑定 user、Run、Project、Repository 和 installation；Run 不再是 `running` 后立即拒绝。
-- 每条命令使用独立 `request_id`。高风险审批只允许该次精确命令获取一个 token；重新执行需要新的 `Approve once`。
-- 审批五分钟过期。Gateway 使用事件唤醒和最多 25 秒的有界等待请求，不运行后台紧密轮询。
-- 命令结束后 Runtime 上报 `success`/`failed` 并尽力撤销 token；Run 结束、Project 归档或 Connector 断开会再次清理活动 lease。
+`COCOLA_SCM_SECRET_KEY` 必须是稳定的 32 字节密钥，用于加密 GitHub App 凭据、Local Project
+仓库 Token 和 lease。Forgejo Provisioner 密码与 Forgejo database 密码应使用部署 Secret，不写入
+仓库或普通日志。
 
-审计表 `scm_audit_events` 只包含用户、Project、Repository、Run、命令类别、权限、结果和耗时。排查时禁止输出以下字段：
+- SCM 密钥丢失后，GitHub 用户需重建 Connector；Local Project 仓库仍在，但平台无法解密其
+  repository token，应在恢复原密钥后再开放 Local Project。
+- Project 永久删除时必须撤销其仓库 Token；Archive 只停止新任务，不删除权威仓库。
+- Token 不进入 remote URL、Git config、环境快照、模型 Prompt 或 Session Volume。
 
-- `scm_app_registrations.client_secret_ciphertext`
-- `scm_app_registrations.private_key_ciphertext`
-- `scm_connections.*token_ciphertext`
-- `scm_token_leases.token_ciphertext`
+## Change Request 排查
 
-## Empty Project 恢复
+- `PROJECT_WORKSPACE_DIRTY`：让用户先显式 commit，平台不会自动提交。
+- `checks_pending`：GitHub required checks 或 mergeability 尚未就绪；刷新后重查 Provider。
+- `conflict`：不要 force push 或改写其他 Task；在当前 Task 解决冲突并提交，再点击 Refresh。
+- 重复点击创建或合并：应返回同一个 PR/合并结果，不应产生第二个 PR 或 squash commit。
+- 合并成功：远端 Task 分支删除，Change Request 为 `merged`，对话输入框只读。
 
-Empty Project 的唯一源码副本位于该 Conversation 的持久 Session Volume，固定工作在 `main`：
+## 备份与恢复
 
-- Sandbox 进程回收：重新 Acquire 后挂载原 Session Volume，Git marker 校验通过即可继续。
-- Session Volume 丢失：返回 `LOCAL_PROJECT_WORKSPACE_LOST`，禁止自动初始化，以免把数据丢失伪装成空项目。
-- 已发布到 GitHub：GitHub 是远端备份，但当前本地 Project 仍保持唯一 Workspace；需要人工确认后再决定是否从远端恢复。
-- 未发布：只能从底层存储备份恢复，不存在 Forgejo副本。
+Local Project 的权威数据由三部分组成，必须作为同一个恢复点保存：
 
-建议生产环境把 Session Volume 纳入存储平台备份，并在重要节点引导用户 commit 后发布到 GitHub。
+1. Cocola PostgreSQL：Project、Task、Change Request 与加密 Token 引用。
+2. Forgejo PostgreSQL database：仓库和 PR 元数据。
+3. `cocola_forgejodata`：Git repository object、ref 与 Forgejo 持久文件。
 
-## Runtime 发布验证
+CLI 在应用升级前生成 owner-only 的：
 
-修改下列任一内容都会触发 `sandbox-runtime-image` 工作流：
+- `postgres.dump`
+- `forgejo-postgres.dump`
+- `forgejo-data.tar.gz`
 
-- `deploy/sandbox-runtime/**`
-- `scripts/sandbox-runtime-verify.sh`
-- Runtime 镜像工作流自身
+为保证 Forgejo database 与仓库卷一致，CLI 会短暂停止 Gateway、Agent Runtime 和 Forgejo，完成
+备份后按依赖顺序恢复原服务。备份失败也会尝试恢复已停止服务。
 
-发布门禁检查固定版本 `gh`、认证 wrapper、`cocola-github` Skill 以及既有开发工具。生产部署使用工作流输出的不可变 digest；仅修改 Gateway 配置或用户 Connector 不需要重建 Runtime。
+恢复演练应在隔离环境执行：停止写入入口，恢复同一目录中的两个 PostgreSQL dump 和 Forgejo
+数据归档，再启动 Forgejo 与 Gateway。验证 `/api/healthz`、随机 Local 仓库的 `main` SHA、PR 状态
+以及 Cocola `project_change_requests` 引用一致后才能开放流量。不得把不同时间点的 database dump
+与数据归档混用；不一致时回退整套恢复点，而不是自动重建空仓库。
+
+## Token Broker 与审计
+
+Broker Credential 绑定 user、Run、Project、Repository 和 installation。每条命令使用独立
+`request_id`，高风险审批只允许该精确命令获取一次 Token，五分钟过期。Runtime 上报结果后尽力
+撤销；Run 结束、Project 归档或 Connector 断开再次清理活动 lease。
+
+审计表只包含用户、Project、Repository、Run、命令类别、权限、结果和耗时。排查时禁止输出
+App private key、client secret、OAuth token、repository token ciphertext 与 lease ciphertext。

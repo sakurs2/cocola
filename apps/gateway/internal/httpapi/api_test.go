@@ -60,6 +60,19 @@ func (f *fakeProjectStore) CreateProject(
 	return value, nil
 }
 
+func (f *fakeProjectStore) FailProject(
+	_ context.Context,
+	_ project.Identity,
+	_ string,
+	code string,
+	updatedAt time.Time,
+) (project.Project, error) {
+	f.created.Status = project.ProjectFailed
+	f.created.ProvisionErrorCode = code
+	f.created.UpdatedAt = updatedAt
+	return f.created, nil
+}
+
 func (f *fakeProjectStore) GetProject(
 	_ context.Context,
 	_ project.Identity,
@@ -287,10 +300,21 @@ func TestScheduledChatUsesConfiguredDefaultRuntime(t *testing.T) {
 
 func TestCreateProjectUsesConfiguredDefaultRuntime(t *testing.T) {
 	store := &fakeProjectStore{}
+	forgejo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer forgejo.Close()
 	service, err := project.New(store, project.Config{
 		MaxRepositoryMB:         512,
 		DisableGitHubConnector:  true,
 		DisableGitHubAgentWrite: true,
+		SecretKey: base64.StdEncoding.EncodeToString(
+			[]byte("0123456789abcdef0123456789abcdef"),
+		),
+		ForgejoAPIURL:   forgejo.URL,
+		ForgejoCloneURL: forgejo.URL,
+		ForgejoUsername: "cocola",
+		ForgejoPassword: "test-password",
 	})
 	if err != nil {
 		t.Fatal(err)
