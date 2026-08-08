@@ -11,7 +11,7 @@ import {
   MoreHorizontal,
   RefreshCw,
 } from "lucide-react";
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertDialog,
   Button,
@@ -227,11 +227,144 @@ export function AdminDataGrid<T extends object>({
   scrollContainerClassName,
   ...props
 }: DataGridProps<T>) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const floatingRef = useRef<HTMLDivElement>(null);
+  const [floatingScrollbar, setFloatingScrollbar] = useState({
+    visible: false,
+    left: 0,
+    width: 0,
+    contentWidth: 0,
+  });
+
+  useLayoutEffect(() => {
+    const wrapper = wrapperRef.current;
+    const floating = floatingRef.current;
+    const scroller = wrapper?.querySelector<HTMLElement>(".admin-data-grid-scroll");
+    if (!wrapper || !floating || !scroller) return;
+
+    const scrollParent = scroller.closest<HTMLElement>('[data-slot="app-layout-main"]');
+    let frame = 0;
+
+    const syncFromTable = () => {
+      if (Math.abs(floating.scrollLeft - scroller.scrollLeft) > 1) {
+        floating.scrollLeft = scroller.scrollLeft;
+      }
+    };
+    const syncFromFloating = () => {
+      if (Math.abs(scroller.scrollLeft - floating.scrollLeft) > 1) {
+        scroller.scrollLeft = floating.scrollLeft;
+      }
+    };
+    const update = () => {
+      frame = 0;
+      const rect = scroller.getBoundingClientRect();
+      const viewportBottom = window.innerHeight;
+      const contentWidth = scroller.scrollWidth;
+      const visible =
+        contentWidth > scroller.clientWidth + 1 &&
+        rect.top < viewportBottom &&
+        rect.bottom > viewportBottom + 1;
+      const next = {
+        visible,
+        left: Math.max(0, rect.left),
+        width: Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(0, rect.left)),
+        contentWidth,
+      };
+      setFloatingScrollbar((current) =>
+        current.visible === next.visible &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.contentWidth === next.contentWidth
+          ? current
+          : next,
+      );
+      syncFromTable();
+    };
+    const scheduleUpdate = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(update);
+    };
+
+    scroller.addEventListener("scroll", syncFromTable, { passive: true });
+    floating.addEventListener("scroll", syncFromFloating, { passive: true });
+    scrollParent?.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate, { passive: true });
+    const observer = new ResizeObserver(scheduleUpdate);
+    observer.observe(wrapper);
+    observer.observe(scroller);
+    if (scroller.firstElementChild instanceof HTMLElement) {
+      observer.observe(scroller.firstElementChild);
+    }
+    update();
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      scroller.removeEventListener("scroll", syncFromTable);
+      floating.removeEventListener("scroll", syncFromFloating);
+      scrollParent?.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+    };
+  }, []);
+
   return (
-    <DataGrid
-      {...props}
-      scrollContainerClassName={cn("admin-data-grid-scroll", scrollContainerClassName)}
-    />
+    <div ref={wrapperRef} className="min-w-0">
+      <DataGrid
+        {...props}
+        scrollContainerClassName={cn("admin-data-grid-scroll", scrollContainerClassName)}
+      />
+      <div
+        ref={floatingRef}
+        aria-hidden={!floatingScrollbar.visible}
+        aria-label="Horizontal table scrollbar"
+        className="admin-data-grid-floating-scrollbar fixed bottom-0 z-50"
+        data-visible={floatingScrollbar.visible || undefined}
+        tabIndex={floatingScrollbar.visible ? 0 : -1}
+        style={{
+          left: floatingScrollbar.left,
+          width: floatingScrollbar.width,
+        }}
+      >
+        <div className="h-px" style={{ width: floatingScrollbar.contentWidth }} />
+      </div>
+    </div>
+  );
+}
+
+export function AdminToast({
+  message,
+  tone,
+  onDismiss,
+}: {
+  message: string | null | undefined;
+  tone: "loading" | "success";
+  onDismiss: () => void;
+}) {
+  useEffect(() => {
+    if (!message || tone === "loading") return;
+    const timer = window.setTimeout(onDismiss, 2200);
+    return () => window.clearTimeout(timer);
+  }, [message, onDismiss, tone]);
+
+  return (
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      className="pointer-events-none fixed inset-0 z-[70] grid place-items-center px-6"
+    >
+      {message ? (
+        <Card className="pointer-events-auto max-w-[min(28rem,calc(100vw-3rem))] border-border/80 bg-surface/95 shadow-2xl backdrop-blur-xl">
+          <Card.Content className="flex flex-row items-center gap-2.5 px-4 py-3 text-sm font-medium">
+            {tone === "loading" ? (
+              <LoaderCircle className="size-[18px] shrink-0 animate-spin text-accent" />
+            ) : (
+              <CheckCircle2 className="size-[18px] shrink-0 text-success" />
+            )}
+            <span className="min-w-0 truncate">{message}</span>
+          </Card.Content>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 

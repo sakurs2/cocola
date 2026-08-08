@@ -611,6 +611,48 @@
     background-clip: padding-box;
   }
 
+  .cocola-admin-ui .admin-data-grid-floating-scrollbar {
+    height: 12px;
+    overflow-x: scroll;
+    overflow-y: hidden;
+    border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
+    border-bottom: 0;
+    border-radius: 0.625rem 0.625rem 0 0;
+    background: color-mix(in oklab, var(--surface) 96%, transparent);
+    box-shadow: 0 -6px 20px hsl(222 47% 11% / 0.08);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+    scrollbar-color: color-mix(in oklab, var(--muted) 60%, transparent)
+      color-mix(in oklab, var(--surface-secondary) 84%, transparent);
+  }
+
+  .cocola-admin-ui .admin-data-grid-floating-scrollbar[data-visible="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .cocola-admin-ui .admin-data-grid-floating-scrollbar::-webkit-scrollbar {
+    height: 10px;
+  }
+
+  .cocola-admin-ui .admin-data-grid-floating-scrollbar::-webkit-scrollbar-track {
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--surface-secondary) 84%, transparent);
+  }
+
+  .cocola-admin-ui .admin-data-grid-floating-scrollbar::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--muted) 60%, transparent);
+    background-clip: padding-box;
+  }
+
+  .cocola-admin-ui .admin-data-grid-floating-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted) 78%, transparent);
+    background-clip: padding-box;
+  }
+
   .cocola-admin-ui .admin-domain-panel {
     border-color: hsl(266 45% 96%);
     background: hsl(280 60% 99% / 0.7);

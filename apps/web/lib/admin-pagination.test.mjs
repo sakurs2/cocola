@@ -16,11 +16,6 @@ const sandboxesSource = readFileSync(
   new URL("../app/admin/sandboxes/page.tsx", import.meta.url),
   "utf8",
 );
-const orphanRouteSource = readFileSync(
-  new URL("../app/api/admin/session-storage/orphans/route.ts", import.meta.url),
-  "utf8",
-);
-
 test("admin collections use the shared visible pagination control", () => {
   assert.match(adminUISource, /export function AdminPagination/);
   assert.match(adminUISource, /Previous page of \$\{label\}/);
@@ -52,11 +47,9 @@ test("destructive admin actions use product dialogs instead of browser confirmat
   assert.match(sandboxesSource, /<AdminConfirmDialog/);
 });
 
-test("Session Storage can clean every stale item with one backend request", () => {
-  assert.match(storageSource, /Clean up all \(\{orphanCount\}\)/);
-  assert.match(storageSource, /fetch\(\"\/api\/admin\/session-storage\/orphans\"/);
-  assert.match(orphanRouteSource, /proxyAdmin\(req, "\/admin\/session-storage\/orphans"\)/);
-  assert.match(storageSource, /orphanCount === 0\s*\? "No cleanup needed"/);
+test("Session Storage cleanup remains scoped to an explicit row", () => {
   assert.match(storageSource, /volume\.delete_allowed && !missing/);
-  assert.match(storageSource, /isDisabled=\{orphanCount === 0 \|\|/);
+  assert.match(storageSource, /label: missing \? "Clean stale binding" : "Delete orphan volume"/);
+  assert.match(storageSource, /if \(action === "delete"\) setPendingDelete\(volume\)/);
+  assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed|session-storage\/orphans/);
 });

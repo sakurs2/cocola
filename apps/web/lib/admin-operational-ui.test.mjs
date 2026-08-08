@@ -22,11 +22,15 @@ const [
   read("../app/admin/storage/page.tsx"),
 ]);
 
-test("Admin operational tables expose a persistent horizontal scrollbar", () => {
+test("Admin operational tables expose a viewport-bottom synchronized scrollbar", () => {
   assert.match(adminUISource, /export function AdminDataGrid/);
   assert.match(adminUISource, /admin-data-grid-scroll/);
+  assert.match(adminUISource, /admin-data-grid-floating-scrollbar fixed bottom-0/);
+  assert.match(adminUISource, /floating\.scrollLeft = scroller\.scrollLeft/);
+  assert.match(adminUISource, /scroller\.scrollLeft = floating\.scrollLeft/);
+  assert.match(adminUISource, /rect\.bottom > viewportBottom \+ 1/);
   assert.match(globalStyles, /\.admin-data-grid-scroll[\s\S]*?overflow-x: scroll/);
-  assert.match(globalStyles, /\.admin-data-grid-scroll::-webkit-scrollbar/);
+  assert.match(globalStyles, /\.admin-data-grid-floating-scrollbar\[data-visible="true"\]/);
   assert.match(auditSource, /<AdminDataGrid/);
 });
 
@@ -58,6 +62,19 @@ test("Missing storage uses the stale cleanup flow without offering a rebuild act
   assert.match(storageSource, /Stale binding can be cleaned/);
   assert.match(storageSource, /A fresh volume is created on the next run/);
   assert.match(storageSource, /Clean stale binding/);
-  assert.match(storageSource, /Clean up all/);
+  assert.match(storageSource, /Delete orphan volume/);
+  assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed/);
   assert.doesNotMatch(storageSource, /Rebuild empty Volume|Recreate Volume/);
+});
+
+test("Storage measurement reports progress and results in a centered HeroUI card", () => {
+  assert.match(adminUISource, /export function AdminToast[\s\S]*?<Card/);
+  assert.match(
+    storageSource,
+    /setToast\(\{ message: "Measuring volume usage…", tone: "loading" \}\)/,
+  );
+  assert.match(storageSource, /method: "POST"/);
+  assert.match(storageSource, /Measured \$\{formatBytes\(result\.allocated_bytes\)\}/);
+  assert.match(storageSource, /<AdminToast/);
+  assert.doesNotMatch(storageSource, /Session requests|No cleanup needed/);
 });

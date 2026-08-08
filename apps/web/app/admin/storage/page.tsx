@@ -2,7 +2,7 @@
 
 import { HardDrive as StoragePageIcon } from "lucide-react";
 import { Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
-import { Button, Card } from "@heroui/react";
+import { Card } from "@heroui/react";
 import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { signOut } from "next-auth/react";
@@ -18,6 +18,7 @@ import {
   AdminRefreshButton,
   AdminRowActions,
   AdminStatusBadge,
+  AdminToast,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { cn } from "@/lib/utils";
@@ -64,17 +65,16 @@ export default function StoragePage() {
   const [volumes, setVolumes] = useState<SessionVolume[]>([]);
   const [volumePage, setVolumePage] = useState(0);
   const [volumeTotal, setVolumeTotal] = useState(0);
-  const [orphanCount, setOrphanCount] = useState(0);
-  const [requestedBytes, setRequestedBytes] = useState(0);
   const [measurements, setMeasurements] = useState<Record<string, StorageMeasurement>>({});
   const [loading, setLoading] = useState(true);
   const [measuring, setMeasuring] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SessionVolume | null>(null);
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "loading" | "success";
+  } | null>(null);
   const [unsupported, setUnsupported] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -98,8 +98,6 @@ export default function StoragePage() {
         setNodes([]);
         setVolumes([]);
         setVolumeTotal(0);
-        setOrphanCount(0);
-        setRequestedBytes(0);
         return;
       }
       if (!nodesRes.ok) throw new Error(await responseError(nodesRes));
@@ -108,17 +106,11 @@ export default function StoragePage() {
       const volumeBody = (await volumesRes.json()) as {
         volumes?: SessionVolume[];
         total?: number;
-        requested_bytes?: number;
-        orphan_count?: number;
       };
       setUnsupported(false);
       setNodes(Array.isArray(nodeBody.nodes) ? nodeBody.nodes : []);
       setVolumes(Array.isArray(volumeBody.volumes) ? volumeBody.volumes : []);
       setVolumeTotal(typeof volumeBody.total === "number" ? volumeBody.total : 0);
-      setOrphanCount(typeof volumeBody.orphan_count === "number" ? volumeBody.orphan_count : 0);
-      setRequestedBytes(
-        typeof volumeBody.requested_bytes === "number" ? volumeBody.requested_bytes : 0,
-      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -142,15 +134,14 @@ export default function StoragePage() {
       measuredCount: measured.length,
       totalBytes: measured.reduce((sum, node) => sum + node.total_bytes, 0),
       availableBytes: measured.reduce((sum, node) => sum + node.available_bytes, 0),
-      requestedBytes,
     };
-  }, [nodes, requestedBytes]);
+  }, [nodes]);
 
   const measureVolume = async (volume: SessionVolume) => {
     const key = volumeKey(volume);
     setError("");
-    setNotice("");
     setMeasuring(key);
+    setToast({ message: "Measuring volume usage…", tone: "loading" });
     try {
       const query = new URLSearchParams({ pvc_name: volume.pvc_name });
       const res = await fetch(
@@ -158,14 +149,19 @@ export default function StoragePage() {
         { method: "POST" },
       );
       if (isAccountDisabledResponse(res)) {
+        setToast(null);
         await signOut({ callbackUrl: "/login?error=account_disabled" });
         return;
       }
       if (!res.ok) throw new Error(await responseError(res));
       const result = (await res.json()) as StorageMeasurement;
       setMeasurements((current) => ({ ...current, [key]: result }));
-      setNotice("Usage measured");
+      setToast({
+        message: `Measured ${formatBytes(result.allocated_bytes)} · ${result.file_count} files`,
+        tone: "success",
+      });
     } catch (err) {
+      setToast(null);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setMeasuring(null);
@@ -178,7 +174,7 @@ export default function StoragePage() {
     if (!volume.delete_allowed) return;
     const key = volumeKey(volume);
     setError("");
-    setNotice("");
+    setToast(null);
     setDeleting(key);
     try {
       const query = new URLSearchParams({ pvc_name: volume.pvc_name });
@@ -192,47 +188,17 @@ export default function StoragePage() {
       }
       if (!res.ok) throw new Error(await responseError(res));
       setPendingDelete(null);
-      setNotice(
-        isMissingVolume(volume)
-          ? "Stale storage binding cleaned"
-          : "Orphan Session Volume deletion submitted",
-      );
+      setToast({
+        message: isMissingVolume(volume)
+          ? "Stale storage binding removed"
+          : "Orphan volume deleted",
+        tone: "success",
+      });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setDeleting(null);
-    }
-  };
-
-  const deleteAllOrphanVolumes = async () => {
-    setError("");
-    setNotice("");
-    setBulkDeleting(true);
-    try {
-      const res = await fetch("/api/admin/session-storage/orphans", {
-        method: "DELETE",
-        cache: "no-store",
-      });
-      if (isAccountDisabledResponse(res)) {
-        await signOut({ callbackUrl: "/login?error=account_disabled" });
-        return;
-      }
-      if (!res.ok) throw new Error(await responseError(res));
-      const result = (await res.json()) as { matched?: number; deleted?: number; failed?: number };
-      const deleted = typeof result.deleted === "number" ? result.deleted : 0;
-      const failed = typeof result.failed === "number" ? result.failed : 0;
-      setBulkDeleteOpen(false);
-      setNotice(
-        failed > 0
-          ? `Cleaned ${deleted} stale storage items; ${failed} could not be cleaned.`
-          : `Cleaned ${deleted} stale storage items.`,
-      );
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBulkDeleting(false);
     }
   };
 
@@ -438,9 +404,14 @@ export default function StoragePage() {
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
+      <AdminToast
+        message={toast?.message}
+        tone={toast?.tone ?? "success"}
+        onDismiss={() => setToast(null)}
+      />
 
       {!unsupported && nodes.length > 0 ? (
-        <section className="grid gap-3 sm:grid-cols-3">
+        <section className="grid gap-3 sm:grid-cols-2">
           <AdminMetric
             label="Storage probes"
             value={`${totals.measuredCount}/${totals.nodeCount}`}
@@ -452,12 +423,6 @@ export default function StoragePage() {
             value={formatBytes(totals.availableBytes)}
             detail={`of ${formatBytes(totals.totalBytes)}`}
             tone="violet"
-          />
-          <AdminMetric
-            label="Session requests"
-            value={formatBytes(totals.requestedBytes)}
-            detail="soft capacity"
-            tone="sky"
           />
         </section>
       ) : null}
@@ -524,31 +489,11 @@ export default function StoragePage() {
           </section>
 
           <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold">Session Storage</h2>
-                <p className="mt-0.5 text-xs text-muted">
-                  Volume requests are soft limits. Actual disk usage is measured only when you
-                  request it.
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                {notice ? <AdminStatusBadge tone="green">{notice}</AdminStatusBadge> : null}
-                <AdminStatusBadge tone={orphanCount > 0 ? "amber" : "green"} dot>
-                  {orphanCount === 0
-                    ? "No cleanup needed"
-                    : `${orphanCount} cleanup ${orphanCount === 1 ? "item" : "items"}`}
-                </AdminStatusBadge>
-                <Button
-                  isDisabled={orphanCount === 0 || loading || bulkDeleting || Boolean(deleting)}
-                  size="sm"
-                  variant="danger-soft"
-                  onPress={() => setBulkDeleteOpen(true)}
-                >
-                  <Trash2 className="size-3.5" />
-                  Clean up all ({orphanCount})
-                </Button>
-              </div>
+            <div>
+              <h2 className="text-sm font-semibold">Session Storage</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Requested values are soft limits. Measure a volume to read its actual disk usage.
+              </p>
             </div>
 
             <div className="min-w-0">
@@ -613,16 +558,6 @@ export default function StoragePage() {
         busy={deleting !== null}
         destructive
         onConfirm={() => void deleteOrphanVolume()}
-      />
-      <AdminConfirmDialog
-        open={bulkDeleteOpen}
-        onOpenChange={setBulkDeleteOpen}
-        title={`Clean up all ${orphanCount} stale storage items?`}
-        description="This deletes orphan volumes and removes stale Missing bindings. Active Session Volumes are not affected."
-        confirmLabel="Clean up all"
-        busy={bulkDeleting}
-        destructive
-        onConfirm={() => void deleteAllOrphanVolumes()}
       />
     </AdminPage>
   );
