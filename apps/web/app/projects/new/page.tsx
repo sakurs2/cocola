@@ -52,20 +52,13 @@ type Repository = {
 
 export default function NewProjectPage() {
   const router = useRouter();
-  const {
-    runtimes,
-    refreshProjects,
-    defaultAgentRuntimeID,
-    runtimePickerEnabled,
-    runtimeConfigError,
-  } = useCocola();
+  const { refreshProjects } = useCocola();
   const [connection, setConnection] = useState<Connection | null>(null);
   const [mode, setMode] = useState<Mode>("empty");
   const [name, setName] = useState("");
   const [repositoryName, setRepositoryName] = useState("");
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState<"private" | "public">("private");
-  const [runtimeID, setRuntimeID] = useState("");
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [nextCursor, setNextCursor] = useState("");
   const [selectedRepositoryID, setSelectedRepositoryID] = useState<number | null>(null);
@@ -87,11 +80,6 @@ export default function NewProjectPage() {
   useEffect(() => {
     void loadConnection();
   }, [loadConnection]);
-
-  useEffect(() => {
-    if (runtimeID || !defaultAgentRuntimeID) return;
-    setRuntimeID(defaultAgentRuntimeID);
-  }, [defaultAgentRuntimeID, runtimeID]);
 
   const loadRepositories = useCallback(async (cursor = "") => {
     setBusy(true);
@@ -142,8 +130,8 @@ export default function NewProjectPage() {
 
   const submit = async () => {
     const projectName = name.trim() || selectedRepository?.name || "";
-    if (!projectName || !runtimeID) {
-      setError(runtimeConfigError || "Project name and Agent Runtime are required.");
+    if (!projectName) {
+      setError("Project name is required.");
       return;
     }
     if (mode === "github_create" && !repositoryName.trim()) {
@@ -175,7 +163,6 @@ export default function NewProjectPage() {
       const payload = {
         name: projectName,
         description: description.trim(),
-        runtime_id: runtimeID,
         source,
       };
       const intent = nextProjectCreateIntent(createIntent.current, payload, () =>
@@ -289,7 +276,7 @@ export default function NewProjectPage() {
         <Card className="p-5">
           <Card.Header className="p-0">
             <Card.Title>Project details</Card.Title>
-            <Card.Description>These settings are editable after provisioning.</Card.Description>
+            <Card.Description>Name and description can be changed later.</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
             <ProjectField
@@ -355,40 +342,24 @@ export default function NewProjectPage() {
       ) : null}
 
       {mode === "empty" || githubReady ? (
-        <Card className="p-5">
-          <Card.Header className="p-0">
-            <Card.Title>Provisioning</Card.Title>
-            <Card.Description>
-              Choose the runtime used when this Project starts work.
-            </Card.Description>
-          </Card.Header>
-          <Card.Content className="mt-5 grid gap-4 p-0">
-            {runtimePickerEnabled ? (
-              <ChoiceDropdown
-                label="Default Agent Runtime"
-                value={
-                  runtimes.find((runtime) => runtime.id === runtimeID)?.label || "Choose a runtime"
-                }
-                options={runtimes.map((runtime) => ({ id: runtime.id, label: runtime.label }))}
-                onChange={setRuntimeID}
-              />
-            ) : null}
+        <div className="border-separator flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 flex-1">
             {error ? (
               <p role="alert" className="rounded-xl bg-danger/10 px-3 py-2 text-sm text-danger">
                 {error}
               </p>
             ) : null}
-          </Card.Content>
-          <Card.Footer className="mt-5 justify-end gap-2 p-0">
+          </div>
+          <div className="flex shrink-0 justify-end gap-2">
             <Button variant="outline" onPress={() => router.back()}>
               Cancel
             </Button>
-            <Button isDisabled={busy || !runtimeID} isPending={busy} onPress={() => void submit()}>
+            <Button isDisabled={busy} isPending={busy} onPress={() => void submit()}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
               Create project
             </Button>
-          </Card.Footer>
-        </Card>
+          </div>
+        </div>
       ) : null}
     </WorkspacePageFrame>
   );

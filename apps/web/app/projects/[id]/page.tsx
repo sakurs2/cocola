@@ -1,13 +1,12 @@
 "use client";
 
-import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
+import { Button, Card, Chip, Input, Label, TextArea, TextField } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   AlertTriangle,
   Archive,
   ArrowLeft,
   ArrowRight,
-  ChevronDown,
   ExternalLink,
   FolderGit2,
   GitBranch,
@@ -72,8 +71,6 @@ export default function ProjectPage() {
     discardPendingProjectTask,
     activeSessionId,
     serverAcceptedSessionIds,
-    runtimes,
-    runtimePickerEnabled,
   } = useCocola();
   const [project, setProject] = useState<ProjectSummary | null>(
     projects.find((item) => item.id === projectID) ?? null,
@@ -87,7 +84,6 @@ export default function ProjectPage() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
-  const [draftRuntime, setDraftRuntime] = useState("");
   const [selectedBaseRef, setSelectedBaseRef] = useState("");
   const preparedProject = useRef<string | null>(null);
   const preparedSession = useRef<string | null>(null);
@@ -210,7 +206,6 @@ export default function ProjectPage() {
     if (!project) return;
     setDraftName(project.name);
     setDraftDescription(project.description);
-    setDraftRuntime(project.runtime_id);
     setEditing(true);
   };
 
@@ -226,7 +221,6 @@ export default function ProjectPage() {
           expected_version: project.version,
           name: draftName.trim(),
           description: draftDescription.trim(),
-          runtime_id: draftRuntime || project.runtime_id,
         }),
       });
       if (!response.ok) throw new Error("Could not save Project settings");
@@ -461,17 +455,10 @@ export default function ProjectPage() {
         </Card>
         <Card className="p-5">
           <Card.Header className="p-0">
-            <Card.Title>Workspace</Card.Title>
-            <Card.Description>Runtime and repository state for new Project tasks.</Card.Description>
+            <Card.Title>Project activity</Card.Title>
+            <Card.Description>Current Project state and task history.</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 grid gap-3 p-0">
-            <Info
-              label="Runtime"
-              value={
-                runtimes.find((runtime) => runtime.id === project.runtime_id)?.label ||
-                project.runtime_id
-              }
-            />
             <Info label="Status" value={STATUS_LABEL[project.status]} />
             <Info label="Tasks" value={String(tasks.length)} />
           </Card.Content>
@@ -605,48 +592,13 @@ export default function ProjectPage() {
               <Sheet.CloseTrigger aria-label="Close Project settings" />
               <Sheet.Header>
                 <Sheet.Heading>Project settings</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  Update this Project’s name, runtime, and description.
-                </p>
+                <p className="text-muted text-sm">Update this Project’s name and description.</p>
               </Sheet.Header>
               <Sheet.Body className="grid content-start gap-4">
                 <TextField value={draftName} variant="secondary" onChange={setDraftName}>
                   <Label>Name</Label>
                   <Input />
                 </TextField>
-                {runtimePickerEnabled ? (
-                  <div>
-                    <Label>Default runtime</Label>
-                    <Dropdown>
-                      <Dropdown.Trigger
-                        aria-label="Select runtime"
-                        className="border-separator bg-default hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm"
-                      >
-                        <span className="truncate">
-                          {runtimes.find((runtime) => runtime.id === draftRuntime)?.label ||
-                            draftRuntime}
-                        </span>
-                        <ChevronDown className="text-muted size-4" />
-                      </Dropdown.Trigger>
-                      <Dropdown.Popover placement="bottom start">
-                        <Dropdown.Menu
-                          aria-label="Project runtimes"
-                          onAction={(key) => setDraftRuntime(String(key))}
-                        >
-                          {runtimes.map((runtime) => (
-                            <Dropdown.Item
-                              key={runtime.id}
-                              id={runtime.id}
-                              textValue={runtime.label}
-                            >
-                              {runtime.label}
-                            </Dropdown.Item>
-                          ))}
-                        </Dropdown.Menu>
-                      </Dropdown.Popover>
-                    </Dropdown>
-                  </div>
-                ) : null}
                 <TextField
                   value={draftDescription}
                   variant="secondary"
