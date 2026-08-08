@@ -4,15 +4,23 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-const [projectSource, taskSource, runtimeSource, branchSource, sidebarSource, workspaceSource] =
-  await Promise.all([
-    read("../app/projects/[id]/page.tsx"),
-    read("../app/projects/[id]/tasks/[conversationId]/page.tsx"),
-    read("../app/runtime-provider.tsx"),
-    read("../components/assistant-ui/project-branch-control.tsx"),
-    read("../components/assistant-ui/heroui-workspace-sidebar.tsx"),
-    read("../app/page.tsx"),
-  ]);
+const [
+  projectSource,
+  taskSource,
+  runtimeSource,
+  branchSource,
+  sidebarSource,
+  workspaceSource,
+  workspaceShellSource,
+] = await Promise.all([
+  read("../app/projects/[id]/page.tsx"),
+  read("../app/projects/[id]/tasks/[conversationId]/page.tsx"),
+  read("../app/runtime-provider.tsx"),
+  read("../components/assistant-ui/project-branch-control.tsx"),
+  read("../components/assistant-ui/heroui-workspace-sidebar.tsx"),
+  read("../app/page.tsx"),
+  read("../components/assistant-ui/workspace-shell.tsx"),
+]);
 
 test("new Project tasks expose an editable safe branch before the first message", () => {
   assert.match(projectSource, /<ProjectTaskBranchField/);
@@ -30,6 +38,9 @@ test("Project task chrome is compact and workspace starts at its resize minimum"
   assert.doesNotMatch(taskSource, />\/<\/span>/);
   assert.match(workspaceSource, /useState\(480\)/);
   assert.match(workspaceSource, /beginDockResize\(event, workspaceWidth, 480/);
+  assert.match(workspaceShellSource, /PROJECT_TASK_PATH/);
+  assert.match(workspaceShellSource, /compact=\{compactTopbar\}/);
+  assert.match(workspaceShellSource, /compact \? "h-10" : "h-14"/);
 });
 
 test("Project conversations appear in Chats with Project routing and identity", () => {

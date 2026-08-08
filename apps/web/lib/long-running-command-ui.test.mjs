@@ -33,6 +33,11 @@ test("command execution uses a compact HeroUI activity card", () => {
   assert.match(railSource, />\s*Command\s*</);
   assert.match(railSource, />\s*Output\s*</);
   assert.match(railSource, /aria-label=\{copied \? "Command copied" : "Copy command"\}/);
+  assert.match(railSource, /aria-label=\{statusLabel\}/);
+  assert.match(railSource, /role="status"/);
+  assert.match(railSource, /title=\{statusTooltip\}/);
+  assert.match(railSource, /<CheckCircle2 className="size-4"/);
+  assert.doesNotMatch(railSource, /Live execution/);
   assert.doesNotMatch(railSource, /const detail = output \|\| command/);
   assert.doesNotMatch(railSource, /hideScrollBar/);
 });

@@ -15,6 +15,7 @@ import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-
 import { WorkspaceToastProvider } from "@/components/assistant-ui/workspace-toast";
 
 const IMMERSIVE_KEY = "cocola:immersive";
+const PROJECT_TASK_PATH = /^\/projects\/[^/]+\/tasks\/[^/]+\/?$/;
 
 const WORKSPACE_PATHS = [
   "/",
@@ -105,6 +106,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
   const [immersive, setImmersive] = useState(false);
   const [peeked, setPeeked] = useState(false);
   const isChat = pathname === "/";
+  const compactTopbar = PROJECT_TASK_PATH.test(pathname);
 
   useEffect(() => {
     try {
@@ -148,6 +150,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
         navbar={
           isChat ? undefined : (
             <WorkspaceTopbar
+              compact={compactTopbar}
               immersive={immersive}
               label={workspaceLabel(pathname)}
               pathname={pathname}
@@ -200,11 +203,13 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
 }
 
 function WorkspaceTopbar({
+  compact,
   immersive,
   label,
   pathname,
   onExitImmersive,
 }: {
+  compact: boolean;
   immersive: boolean;
   label: string;
   pathname: string;
@@ -212,7 +217,9 @@ function WorkspaceTopbar({
 }) {
   const isChat = pathname === "/";
   return (
-    <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+    <div
+      className={`mx-auto flex w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8 ${compact ? "h-10" : "h-14"}`}
+    >
       {immersive ? (
         <Tooltip delay={0}>
           <Button
@@ -234,10 +241,16 @@ function WorkspaceTopbar({
         <div className="min-w-0 flex-1" />
       ) : (
         <div className="min-w-0 flex-1">
-          <p className="text-accent truncate text-[11px] font-semibold tracking-[0.14em] uppercase">
-            Agent workspace
-          </p>
-          <p className="text-foreground truncate text-sm font-medium">{label}</p>
+          {compact ? (
+            <p className="text-foreground truncate text-sm font-medium">{label}</p>
+          ) : (
+            <>
+              <p className="text-accent truncate text-[11px] font-semibold tracking-[0.14em] uppercase">
+                Agent workspace
+              </p>
+              <p className="text-foreground truncate text-sm font-medium">{label}</p>
+            </>
+          )}
         </div>
       )}
       <WorkspaceThemeToggle />

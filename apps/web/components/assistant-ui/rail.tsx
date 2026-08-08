@@ -30,7 +30,16 @@ import {
   Wrench as PhWrench,
   type LucideIcon as PhosphorIcon,
 } from "lucide-react";
-import { Check, CheckCircle2, ChevronRight, Copy, Download, ExternalLink, Eye } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  CircleX,
+  Copy,
+  Download,
+  ExternalLink,
+  Eye,
+} from "lucide-react";
 import Image from "next/image";
 import { Button, Card, Tooltip } from "@heroui/react";
 import { useEffect, useState, type FC, type ReactNode } from "react";
@@ -523,7 +532,9 @@ const CommandExecutionCard: FC<{
 
   const status = running ? "Running" : isError ? "Failed" : "Finished";
   const duration = running ? formatAgentDuration(elapsedSeconds * 1000) : "";
+  const statusLabel = duration ? `${status} · ${duration}` : status;
   const latestOutput = output.trimEnd().split("\n").at(-1) ?? "";
+  const statusTooltip = running && latestOutput ? `${statusLabel}\n${latestOutput}` : statusLabel;
 
   const copyCommand = async () => {
     try {
@@ -553,36 +564,35 @@ const CommandExecutionCard: FC<{
           aria-hidden="true"
         />
         <span className="grid size-6 place-items-center rounded-md bg-surface-secondary text-muted">
+          <TerminalWindow className="size-3.5" />
+        </span>
+        <span className="block min-w-0 truncate rounded-md bg-zinc-950 px-2 py-1 text-zinc-100">
+          <HighlightedCode
+            compact
+            className="block truncate font-mono text-[11.5px] font-medium"
+            code={command}
+            language="shell"
+          />
+        </span>
+        <span
+          aria-label={statusLabel}
+          className={cn(
+            "grid size-7 place-items-center rounded-full",
+            running && "bg-sky-500/10 text-sky-600 dark:text-sky-300",
+            !running && !isError && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+            isError && "bg-danger/10 text-danger",
+          )}
+          role="status"
+          title={statusTooltip}
+        >
           {running ? (
-            <SpinnerGap className="size-3.5 animate-spin motion-reduce:animate-none" />
+            <SpinnerGap className="size-4 animate-spin motion-reduce:animate-none" />
+          ) : isError ? (
+            <CircleX className="size-4" />
           ) : (
-            <TerminalWindow className="size-3.5" />
+            <CheckCircle2 className="size-4" />
           )}
         </span>
-        <span className="min-w-0">
-          <span className="block truncate rounded-md bg-zinc-950 px-2 py-1 text-zinc-100">
-            <HighlightedCode
-              compact
-              className="block truncate font-mono text-[11.5px] font-medium"
-              code={command}
-              language="shell"
-            />
-          </span>
-          <span className="flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted">
-            <span className="shrink-0">
-              {status}
-              {duration ? ` · ${duration}` : ""}
-            </span>
-            {running && latestOutput ? (
-              <span className="truncate font-mono" title={latestOutput}>
-                · {latestOutput}
-              </span>
-            ) : null}
-          </span>
-        </span>
-        {running ? (
-          <span className="hidden text-[10px] text-muted sm:inline">Live execution</span>
-        ) : null}
         <Tooltip>
           <Button
             isIconOnly
