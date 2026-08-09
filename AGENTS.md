@@ -1,154 +1,154 @@
-# AGENTS.md — cocola 多 Agent 协作约定
+# AGENTS.md — Cocola Multi-Agent Collaboration Guidelines
 
-> 面向所有参与 cocola 开发的 AI Agent。**开始任何编码任务前，请先阅读本文件，并浏览 `docs/archive/` 了解项目近期历史。**
+> This file applies to every AI agent contributing to Cocola. **Before starting any coding task, read this file and review `docs/archive/` for recent project history.**
 
-## 1. 项目速览
+## 1. Project Overview
 
-cocola 是一个企业内部自部署的 Agent 平台（Go + Python 后端，Next.js 前端，基于 Claude Code Agent SDK）。整体定位、技术栈与仓库结构见 [`README.md`](./README.md)；架构决策见 [`docs/adr/`](./docs/adr/)。
+Cocola is a self-hosted enterprise Agent platform with Go and Python backends, a Next.js frontend, and the Claude Code Agent SDK. See [`README.md`](./README.md) for the product, technology stack, and repository structure, and [`docs/adr/`](./docs/adr/) for architecture decisions.
 
-工程约定：
+Engineering conventions:
 
-- Python 项目统一用 **uv** 管理。
-- 优先复用成熟开源方案，避免重复造轮子。
-- 提交代码时**不跳过 git hooks**（禁止 `--no-verify`），不要 amend 他人提交。
-- 本地开发栈统一通过 `make dev` 启动；停止时应走脚本的优雅退出流程，不应残留服务进程或端口占用。
+- Use **uv** for all Python projects.
+- Prefer mature open-source solutions over building equivalent infrastructure from scratch.
+- Never bypass Git hooks when committing (`--no-verify` is prohibited), and never amend commits created by others.
+- Start the local development stack with `make dev`. Stop it through the script's graceful shutdown path so that no service processes or occupied ports remain.
 
-## 2. 产品与方案设计原则（强制）
+## 2. Product and Solution Design Principles (Mandatory)
 
-### 2.1 从用户目标出发
+### 2.1 Start from the User's Goal
 
-- 新增功能前先明确目标用户、要解决的问题和用户完成目标的最短主路径；不能只从数据模型、接口或实现便利性出发设计产品。
-- 优先复用用户已经熟悉的入口、概念和交互。没有明确收益时，不新增页面、步骤、设置项或需要用户理解的内部概念。
-- 为常见场景提供清晰默认值，把专业选项或低频能力放到次级入口；不能要求普通用户先理解系统架构才能完成任务。
-- 功能名称、按钮和状态文案使用用户能理解的结果描述，同一动作在入口、确认、执行状态和结果提示中保持同一称谓。
-- 功能应当可以从界面结构和必要文案中自然理解。若必须用大段说明才能解释，先重新审视信息架构和交互流程。
+- Before adding a feature, identify its target user, the problem it solves, and the shortest primary path through which the user completes that goal. Do not design solely around data models, APIs, or implementation convenience.
+- Prefer entry points, concepts, and interactions that users already understand. Do not add pages, steps, settings, or implementation concepts without a clear user benefit.
+- Provide clear defaults for common cases and place expert or infrequent options behind secondary entry points. Ordinary users must not need to understand the system architecture before completing a task.
+- Name features, buttons, and states in terms of outcomes users understand. Use the same term for an action at its entry point, confirmation, execution state, and result message.
+- A feature should be understandable from its structure and essential copy. If it requires lengthy explanatory text, revisit the information architecture and interaction flow first.
 
-### 2.2 控制产品和系统复杂度
+### 2.2 Control Product and System Complexity
 
-- 遵循奥卡姆剃刀原则：在满足用户目标、可靠性和安全约束的前提下，选择概念更少、状态更少、依赖更少的方案。
-- 设计技术方案时必须同时评估收益与代价，至少覆盖：实现成本、系统复杂度、运行稳定性、运维负担、用户易用性、失败模式和长期维护成本。
-- 不因“未来可能需要”提前引入多套实现、通用抽象、常驻服务或同步机制；只有存在明确需求和当前收益时才增加复杂度。
-- 如果一个功能的边际价值不足以覆盖其对复杂度、稳定性、运维或易用性的严重影响，应明确提出反对意见，并给出更简单的替代方案，而不是机械实现。
+- Apply Occam's razor: among solutions that satisfy the user goal, reliability, and security constraints, choose the one with fewer concepts, states, and dependencies.
+- Evaluate both benefits and costs for every technical proposal. At minimum, cover implementation effort, system complexity, runtime reliability, operational burden, usability, failure modes, and long-term maintenance cost.
+- Do not introduce multiple implementations, generic abstractions, permanent services, or synchronization mechanisms for a hypothetical future need. Add complexity only when a concrete requirement provides value now.
+- When a feature's marginal value does not justify a serious impact on complexity, stability, operations, or usability, explicitly recommend against it and propose a simpler alternative instead of implementing it mechanically.
 
-## 3. 前端与交互规范（强制）
+## 3. Frontend and Interaction Guidelines (Mandatory)
 
-- 优先使用现有设计系统和 HeroUI 免费组件，并复用项目已有的封装、主题 Token、按钮层级和状态样式。只有 HeroUI 或现有组件无法满足需求时才新增自定义组件。
-- 确认操作必须使用浏览器窗口中央的 Modal/Dialog。Drawer 或侧边栏只用于导航、详情浏览和较长的编辑流程，禁止用于删除、合并、覆盖、刷新恢复等操作的最终确认。
-- 页面布局保持紧凑、有明确层级并充分利用可用空间；避免无意义的大面积留白、过高卡片、松散间距和为了装饰而增加的容器。
-- 界面文案保持简洁。页面只保留完成当前任务所需的标题、标签和提示；次要解释优先放入 Tooltip、Popover、帮助入口或文档，不在主界面堆叠说明文字。
-- 同类控件的尺寸、圆角、图标、对齐、颜色和交互状态必须一致。不要在同一操作组中混用明显不同的按钮样式或视觉密度。
-- 省略显示的分支名、路径、ID 等内容必须能通过悬浮或聚焦查看完整值；需要频繁使用的标识应提供复制能力。
-- UI 改动必须在真实页面和目标视口中检查，至少验证内容较长、空状态、加载状态、错误状态和窄屏布局，不能只依赖组件测试判断视觉正确性。
+- Prefer the existing design system and free HeroUI components. Reuse the project's component wrappers, theme tokens, button hierarchy, and status styles. Add a custom component only when HeroUI and existing components cannot meet the requirement.
+- Confirmation actions must use a Modal or Dialog centered in the browser window. Drawers and sidebars are for navigation, detail inspection, and longer editing flows; never use them as the final confirmation for deletion, merge, overwrite, refresh recovery, or similar actions.
+- Keep layouts compact, clearly structured, and efficient with available space. Avoid large areas of meaningless whitespace, unnecessarily tall cards, loose spacing, and decorative containers that do not communicate structure.
+- Keep interface copy concise. The primary surface should contain only the titles, labels, and guidance required to complete the current task. Put secondary explanations in a Tooltip, Popover, help entry, or documentation instead of stacking prose on the page.
+- Controls in the same family must use consistent sizing, corner radius, icons, alignment, colors, and interaction states. Do not mix visibly different button styles or densities within one action group.
+- Truncated branch names, paths, IDs, and similar values must reveal the complete value on hover or keyboard focus. Identifiers that users frequently reuse should also provide a copy action.
+- Inspect UI changes on the real page and at the target viewport. At minimum, verify long content, empty, loading, error, and narrow-screen states; component tests alone are not sufficient evidence of visual correctness.
 
-## 4. 后端与实现质量（强制）
+## 4. Backend and Implementation Quality (Mandatory)
 
-### 4.1 技术方案要求
+### 4.1 Technical Design Requirements
 
-- 技术方案应当简洁、边界清晰、可靠且稳定。优先扩展已有领域抽象和确定性能力，避免平行实现同一业务规则。
-- 方案评审必须说明关键取舍和失败处理，包括超时、取消、重试、幂等、并发、资源清理、降级及可观测性中与该功能相关的部分。
-- 权威数据源必须明确。临时工作区、缓存、前端状态或单个进程内存不能被隐式当作长期业务数据的权威来源。
-- 跨服务能力优先通过稳定、类型化的契约表达；修改 Proto、数据库 Schema 或公共接口时，同步评估兼容性、生成代码、迁移和调用方。
+- Technical designs must be simple, clearly bounded, reliable, and stable. Prefer extending existing domain abstractions and deterministic capabilities over implementing the same business rule in parallel.
+- Design reviews must explain key tradeoffs and relevant failure handling, including timeouts, cancellation, retries, idempotency, concurrency, resource cleanup, degradation, and observability where applicable.
+- Identify the authoritative data source. A temporary workspace, cache, frontend state, or single process's memory must not implicitly become the authoritative source for durable business data.
+- Express cross-service capabilities through stable, typed contracts. When changing Protobuf definitions, database schemas, or public interfaces, evaluate compatibility, generated code, migrations, and every caller together.
 
-### 4.2 禁止的实现方式
+### 4.2 Prohibited Implementation Patterns
 
-- **禁止 trick 逻辑**：不依赖隐藏副作用、偶然调用顺序、魔法延时、脆弱的字符串解析或只有作者知道的特殊分支来维持正确性。
-- **禁止明显低效逻辑**：避免无界循环、忙轮询、N+1 请求、重复扫描、重复远程调用和可直接聚合却在多层反复遍历的数据处理。性能敏感路径应说明复杂度或用测量结果验证。
-- **禁止无法长期支持的逻辑**：不以临时进程、单机路径、人工修复、不可追踪状态或绕过既有架构边界的方式实现正式能力；短期兼容方案必须写明退出条件和清理计划。
-- **禁止掩盖错误**：不得吞掉异常、把失败伪装成成功或用无条件 fallback 隐藏数据不一致。错误必须保留可定位的原因，并在合适边界转换为用户可理解的信息。
-- 实现必须覆盖正常、错误和关键边界路径；涉及并发或外部副作用时，还应覆盖超时、取消、重试、幂等与资源清理。Bug 修复应增加能够复现原问题的回归测试。
+- **No trick logic:** correctness must not depend on hidden side effects, accidental call order, magic delays, brittle string parsing, or special branches understood only by the author.
+- **No obviously inefficient logic:** avoid unbounded loops, busy polling, N+1 requests, repeated scans, duplicate remote calls, and data processing that repeatedly traverses multiple layers when it can be aggregated directly. Explain complexity or provide measurements for performance-sensitive paths.
+- **No logic that cannot be supported long term:** do not implement production capabilities through temporary processes, machine-local paths, manual repair, untraceable state, or bypasses around existing architecture boundaries. A temporary compatibility path must document its exit condition and cleanup plan.
+- **Do not conceal errors:** never swallow exceptions, present failure as success, or use unconditional fallbacks to hide inconsistent data. Preserve a diagnosable cause and translate it into user-understandable information at the appropriate boundary.
+- Cover success, failure, and critical boundary paths. Changes involving concurrency or external side effects must also cover timeout, cancellation, retry, idempotency, and resource cleanup. Every bug fix must add a regression test that would have caught the original issue.
 
-## 5. Agent 操作与 Git 授权边界（强制）
+## 5. Agent Operations and Git Authorization Boundaries (Mandatory)
 
-- Agent 可以在用户已授权的任务范围内查看、修改和验证代码；不得顺手修改、清理或提交与当前任务无关的用户变更。
-- 只有用户明确要求“提交”时才执行 `git commit`。提交授权不包含推送授权；只有用户明确要求“推送”时才执行 `git push`。
-- 创建或合并 Pull Request、发布版本、部署环境以及其他会改变远端状态的操作，都需要用户对该具体操作的明确授权。不得从“实现功能”或“提交代码”推断出这些权限。
-- 提交前必须检查 `git status`、工作区 diff 和暂存区 diff，只暂存当前逻辑变更所需文件，并确认不包含 Secret、凭据、私钥、`.env` 内容、调试产物或无关修改。
-- 每个提交保持单一逻辑目的，使用 Conventional Commit；提交说明应准确描述实际 diff。代码提交必须同时包含符合第 7 节要求的 `docs/archive/` 变更记录。
-- 提交前运行与改动匹配的最小充分测试和格式检查。不得用“文档改动”“改动很小”等理由跳过适用的验证。
-- 禁止使用 `--no-verify` 跳过 hooks，禁止 amend 他人提交，禁止 force push，禁止重写公共分支历史。提交失败时修复问题并创建新的提交尝试，不覆盖已有提交。
-- 删除分支、标签、远端资源或执行其他破坏性 Git 操作前，必须确认精确目标并获得用户明确授权。
+- An agent may inspect, modify, and verify code only within the task authorized by the user. Never opportunistically modify, clean up, or commit unrelated user changes.
+- Run `git commit` only when the user explicitly asks for a commit. Permission to commit does not include permission to push; run `git push` only when the user explicitly asks for a push.
+- Creating or merging a Pull Request, publishing a release, deploying an environment, and any other operation that changes remote state each require explicit user authorization for that specific action. Never infer these permissions from a request to implement or commit code.
+- Before committing, inspect `git status`, the working-tree diff, and the staged diff. Stage only files required for the current logical change, and confirm that the commit contains no secrets, credentials, private keys, `.env` contents, debug artifacts, or unrelated changes.
+- Keep every commit focused on one logical purpose and use Conventional Commits. The message must accurately describe the actual diff. Every code commit must include a `docs/archive/` change record that satisfies Section 7.
+- Before committing, run the smallest sufficient tests and formatting checks for the change. Do not skip applicable verification because a change is described as documentation-only or small.
+- Never bypass hooks with `--no-verify`, amend another contributor's commit, force-push, or rewrite the history of a shared branch. If a commit attempt fails, fix the issue and make a new commit attempt without overwriting an existing commit.
+- Before deleting a branch, tag, remote resource, or performing another destructive Git operation, resolve the exact target and obtain explicit user authorization.
 
-## 6. 代码格式化与风格检查（强制）
+## 6. Formatting and Style Checks (Mandatory)
 
-提交前所有代码必须经过统一格式化。机制基于 [pre-commit](https://pre-commit.com/) 框架，配置见 [`.pre-commit-config.yaml`](./.pre-commit-config.yaml)，全部为本地 hook（不依赖远程仓库，规避企业 TLS 代理）。
+All code must be formatted before commit. The repository uses [pre-commit](https://pre-commit.com/) with [`.pre-commit-config.yaml`](./.pre-commit-config.yaml). All hooks are local and do not rely on remote repositories, avoiding failures caused by corporate TLS proxies.
 
-### 6.1 各语言工具与配置
+### 6.1 Tools by Language and File Type
 
-| 语言 / 文件            | 格式化                | 风格检查 (lint)                        | 配置文件                                         |
-| ---------------------- | --------------------- | -------------------------------------- | ------------------------------------------------ |
-| Python                 | `ruff format`         | `ruff check --fix`                     | `ruff.toml`、`packages/py-common/pyproject.toml` |
-| Go                     | `gofmt -w -s`         | `golangci-lint`（CI/Make，非每次提交） | `.golangci.yml`                                  |
-| TS/JS/JSON/CSS/MD/YAML | `prettier`            | `next lint`（web，CI/Make）            | `.prettierrc.json`、`.prettierignore`            |
-| Proto                  | `buf format`          | `buf lint`（Make）                     | `packages/proto/buf.yaml`                        |
-| 通用                   | 去行尾空白 + 末尾换行 | —                                      | `.editorconfig`                                  |
+| Language / files        | Formatter                                      | Linter                                      | Configuration                                    |
+| ----------------------- | ---------------------------------------------- | ------------------------------------------- | ------------------------------------------------ |
+| Python                  | `ruff format`                                  | `ruff check --fix`                          | `ruff.toml`, `packages/py-common/pyproject.toml` |
+| Go                      | `gofmt -w -s`                                  | `golangci-lint` (CI/Make, not every commit) | `.golangci.yml`                                  |
+| TS/JS/JSON/CSS/MD/YAML  | `prettier`                                     | `next lint` (web, CI/Make)                  | `.prettierrc.json`, `.prettierignore`            |
+| Protobuf                | `buf format`                                   | `buf lint` (Make)                           | `packages/proto/buf.yaml`                        |
+| General text formatting | Trim trailing whitespace and add final newline | —                                           | `.editorconfig`                                  |
 
-提交时 pre-commit 仅做**快速、可自动修复**的格式化 + 轻量 lint；较慢的 `golangci-lint`、`next lint`、`buf lint` 放在 `make lint` 与 CI 中权威执行。`buf` / `prettier` 缺失时对应 hook 会优雅跳过（exit 0），不阻塞提交，安装后自动生效。
+The pre-commit hooks perform only **fast, automatically fixable** formatting and lightweight linting. Authoritative slower checks such as `golangci-lint`, `next lint`, and `buf lint` run through `make lint` and CI. If `buf` or `prettier` is unavailable, its hook exits successfully instead of blocking the commit; once installed, it runs automatically.
 
-### 6.2 首次安装（每位贡献者 / 每个新环境）
+### 6.2 Initial Setup for Every Contributor or Environment
 
 ```bash
-pip install pre-commit          # 或 uv tool install pre-commit
-make precommit-install          # 安装 .git/hooks/pre-commit
-pnpm install                    # 让 prettier 可用（web 工具链）
-pre-commit run --all-files      # 一次性把存量代码格式化干净
+pip install pre-commit          # or: uv tool install pre-commit
+make precommit-install          # install .git/hooks/pre-commit
+pnpm install                    # make prettier available
+pre-commit run --all-files      # format the existing repository once
 ```
 
-### 6.3 常用命令
+### 6.3 Common Commands
 
-- `make format`：一键格式化全部语言（Go / Python / web）。
-- `make format-check`：只检查不改写，供 CI 用。
-- `make lint`：运行全部权威 linter（golangci-lint / ruff / next lint / buf lint）。
-- 提交被 hook 拦下时，hook 通常已自动改好文件，`git add` 后重新 `git commit` 即可。
+- `make format`: format all supported languages (Go, Python, and web).
+- `make format-check`: check formatting without writing; used by CI.
+- `make lint`: run all authoritative linters (`golangci-lint`, Ruff, Next.js lint, and Buf lint).
+- When a commit is blocked, hooks usually have already fixed the files. Stage those fixes and run `git commit` again.
 
-> 不要用 `--no-verify` 跳过 hook（见下文工程约定）。如需临时跳过个别 hook，用 `SKIP=<hook-id> git commit`。
+> Never use `--no-verify` to bypass hooks. To skip an individual hook when explicitly justified, use `SKIP=<hook-id> git commit`.
 
-## 7. 变更记录机制（强制）
+## 7. Change Records (Mandatory)
 
-为支持多 Agent 协作，**每次提交代码（`git commit`）前，必须在 `docs/archive/` 目录下生成一个 Markdown 变更记录文件**。该目录是普通的版本控制目录，会随仓库一起提交。
+To support multi-agent collaboration, **create a Markdown change record under `docs/archive/` before every code commit**. This is a normal version-controlled directory and must be included in the same commit.
 
-### 7.1 文件命名（两段式）
+### 7.1 File Naming
 
-格式：`<变更类型>-<简短描述>.md`
+Use `<change-type>-<short-description>.md`.
 
-- **变更类型**取自约定式提交：`feat` / `fix` / `chore` / `refactor` / `docs` / `test` / `perf` / `build` / `ci`。
-- **简短描述**用短横线连接，能唯一标识本次变更。
-- 示例：`feat-graceful-teardown.md`、`fix-claude-config-isolation-503.md`。
-- 若同名文件已存在，加日期前缀避免覆盖：`20260610-fix-xxx.md`。
+- **Change type** follows Conventional Commits: `feat`, `fix`, `chore`, `refactor`, `docs`, `test`, `perf`, `build`, or `ci`.
+- **Short description** uses hyphens and must uniquely identify the change.
+- Examples: `feat-graceful-teardown.md`, `fix-claude-config-isolation-503.md`.
+- If the name already exists, add a date prefix, for example `20260610-fix-xxx.md`.
 
-### 7.2 内容要求
+### 7.2 Required Content
 
-每个文件至少包含以下三部分：
+Every record must contain at least:
 
-1. **变更时间** —— 精确到分钟，带时区。
-2. **变更理由**
-   - 修 bug：描述 bug 现象、触发条件、根因。
-   - 加功能：描述用户诉求 / 业务背景。
-3. **变更内容** —— 改了哪些文件、具体做了什么、关键设计取舍。
+1. **Change time** — accurate to the minute and including the time zone.
+2. **Reason for the change**
+   - For a bug fix, describe the symptom, trigger, and root cause.
+   - For a feature, describe the user need or business context.
+3. **What changed** — identify the files, behavior, and important design tradeoffs.
 
-### 7.3 模板
+### 7.3 Template
 
 ```markdown
-# <类型>: <一句话标题>
+# <type>: <one-sentence title>
 
-- 变更时间：2026-06-10 14:50 (+08:00)
-- 关联提交：<commit hash 或 PR 链接，可选>
+- Change time: 2026-06-10 14:50 (+08:00)
+- Related commit or PR: <commit hash or PR URL, optional>
 
-## 变更理由
+## Reason
 
-（修 bug 写现象+触发条件+根因；加功能写用户诉求/背景）
+(For a bug fix, document the symptom, trigger, and root cause. For a feature, document the user need or business context.)
 
-## 变更内容
+## Changes
 
-- path/to/file_a：做了什么
-- path/to/file_b：做了什么
-- 关键取舍 / 注意事项
+- path/to/file_a: what changed
+- path/to/file_b: what changed
+- Key tradeoffs or notes
 ```
 
-## 8. 如何查看项目历史
+## 8. Reading Project History
 
-`docs/archive/` 是项目的"人类可读变更日志"，随仓库提交。任何 Agent 在 clone 仓库后都能直接阅读。**开始新任务前建议先浏览该目录**，了解：
+`docs/archive/` is the project's human-readable change log and is committed with the repository. **Before starting a new task, review the relevant recent records** to understand:
 
-- 近期改了什么、为什么改；
-- 已有的设计决策与踩过的坑，避免重复踩坑或推翻他人已验证的结论。
+- what changed recently and why;
+- established design decisions and previously discovered pitfalls, so they are not repeated or accidentally reversed.
 
-配合 `git log` 与 `docs/adr/` 一起阅读，可获得完整的演进脉络。
+Read it together with `git log` and `docs/adr/` for a complete view of the project's evolution.
