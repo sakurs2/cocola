@@ -5,7 +5,6 @@ import { Button, Card, Chip, ScrollShadow, Tooltip } from "@heroui/react";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { ListView } from "@cocola/ui-compat/list-view";
 import { Segment } from "@cocola/ui-compat/segment";
-import { Sheet } from "@cocola/ui-compat/sheet";
 import type { ArtifactPreview } from "@/app/runtime-provider";
 import {
   ReadonlyFilePreview,
@@ -15,6 +14,7 @@ import {
 } from "@/components/assistant-ui/file-preview";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { ShellPage } from "@/components/assistant-ui/shell-page";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import {
   type GitChange,
   type GitCommit,
@@ -662,44 +662,29 @@ function GitPage({
         )}
       </div>
 
-      <Sheet
-        isOpen={refreshConfirmOpen}
-        placement="right"
+      <ActionConfirmDialog
+        open={refreshConfirmOpen}
+        title="Refresh Git status?"
+        description="Refreshing may restore the project sandbox if its workspace has been reclaimed."
+        confirmLabel="Refresh"
+        busy={loading}
+        icon={RefreshCw}
+        showHint={false}
+        tone="primary"
         onOpenChange={(open) => {
           if (!loading) setRefreshConfirmOpen(open);
         }}
-      >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close Git refresh confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Refresh Git status?</Sheet.Heading>
-                <p className="text-sm text-muted">
-                  Refreshing may restore the project sandbox if its workspace has been reclaimed.
-                </p>
-              </Sheet.Header>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setRefreshConfirmOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  isPending={loading}
-                  onPress={() => {
-                    setRefreshConfirmOpen(false);
-                    void inspect("status");
-                  }}
-                >
-                  Refresh
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+        onConfirm={() => {
+          setRefreshConfirmOpen(false);
+          void inspect("status");
+        }}
+      />
     </>
   );
 }
+
+const GIT_ACTION_BUTTON_CLASS =
+  "h-8 min-w-0 rounded-lg px-3 text-[11.5px] font-semibold shadow-none";
 
 function ChangeRequestCard({
   changeRequest,
@@ -756,16 +741,17 @@ function ChangeRequestCard({
           : { label: "Refresh status", kind: "refresh" as const };
 
   return (
-    <Card className="m-3 mb-0 border border-border/70 bg-surface-secondary/35 shadow-none">
-      <Card.Content className="gap-3 p-3">
+    <Card className="mx-2.5 mt-2.5 border border-border/70 bg-surface-secondary/25 shadow-none">
+      <Card.Content className="gap-2.5 p-3">
         <div className="flex min-w-0 items-start gap-2.5">
-          <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent/10 text-accent">
+          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
             {merged ? <GitMerge className="size-4" /> : <GitPullRequest className="size-4" />}
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-[13px] font-semibold">Change request</span>
+              <span className="text-xs font-semibold">Change request</span>
               <Chip
+                className="h-5 px-1.5 text-[9.5px]"
                 color={merged ? "success" : blocked ? "danger" : pending ? "warning" : "accent"}
                 size="sm"
                 variant="soft"
@@ -783,7 +769,7 @@ function ChangeRequestCard({
                           : "Working"}
               </Chip>
             </div>
-            <p className="mt-1 text-[11.5px] leading-4 text-muted">{copy}</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-muted">{copy}</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5" aria-label="Change request progress">
@@ -809,11 +795,12 @@ function ChangeRequestCard({
         </div>
         {error ? <p className="text-[11px] text-danger">{error}</p> : null}
         {action ? (
-          <div className="flex justify-end gap-2">
+          <div className="flex w-full items-center justify-end gap-1.5 pt-0.5">
             {changeRequest?.provider === "github" && changeRequest.external_url ? (
               <Button
+                className={GIT_ACTION_BUTTON_CLASS}
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 onPress={() =>
                   window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
                 }
@@ -822,12 +809,19 @@ function ChangeRequestCard({
               </Button>
             ) : null}
             {changeRequest && action.kind !== "refresh" ? (
-              <Button size="sm" variant="ghost" onPress={() => void request("refresh")}>
+              <Button
+                className={GIT_ACTION_BUTTON_CLASS}
+                size="sm"
+                variant="outline"
+                onPress={() => void request("refresh")}
+              >
                 Refresh
               </Button>
             ) : null}
             <Button
+              className={GIT_ACTION_BUTTON_CLASS}
               size="sm"
+              variant="primary"
               isPending={loading}
               isDisabled={
                 action.kind === "create"
@@ -851,8 +845,9 @@ function ChangeRequestCard({
         ) : changeRequest?.provider === "github" && changeRequest.external_url ? (
           <div className="flex justify-end">
             <Button
+              className={GIT_ACTION_BUTTON_CLASS}
               size="sm"
-              variant="ghost"
+              variant="outline"
               onPress={() =>
                 window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
               }
@@ -876,11 +871,11 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
       : "";
 
   return (
-    <div className="flex min-w-0 items-center gap-2 border-b border-border bg-surface-secondary/20 px-3 py-2">
-      <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent/10 text-accent">
-        <GitBranch className="size-3.5" />
+    <div className="flex min-h-10 min-w-0 items-center gap-2 border-b border-border bg-surface-secondary/20 px-3 py-1.5">
+      <span className="grid size-5.5 shrink-0 place-items-center rounded-md bg-accent/10 text-accent">
+        <GitBranch className="size-3" />
       </span>
-      <span className="shrink-0 truncate text-[13px] font-semibold">
+      <span className="max-w-[45%] shrink-0 truncate text-xs font-semibold">
         {snapshot?.branch || "Project branch"}
       </span>
       <span
@@ -898,7 +893,7 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
         ) : null}
       </span>
       {snapshot?.ahead ? (
-        <Chip color="success" size="sm" variant="soft">
+        <Chip className="h-5 px-1.5 text-[9.5px]" color="success" size="sm" variant="soft">
           ↑ {snapshot.ahead} ahead
         </Chip>
       ) : null}
@@ -908,10 +903,10 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
 
 function GitSectionHeader({ title, count }: { title: string; count?: number }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-semibold text-foreground backdrop-blur">
+    <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-b border-border/60 bg-background/95 px-3 py-1.5 text-[11.5px] font-semibold text-foreground backdrop-blur">
       <span>{title}</span>
       {count != null ? (
-        <Chip className="ml-auto" size="sm" variant="soft">
+        <Chip className="ml-auto h-5 min-w-5 px-1.5 text-[9.5px]" size="sm" variant="soft">
           {count}
         </Chip>
       ) : null}
@@ -1067,12 +1062,12 @@ function GitRefBadges({ commit, snapshot }: { commit: GitCommit; snapshot: GitSn
   const badges = gitCommitBadges(commit, snapshot);
   if (!badges.length) return null;
   return (
-    <span className="flex shrink-0 items-center gap-1">
+    <span className="flex min-w-0 shrink-0 items-center gap-1">
       {badges.map((badge) => (
         <span
           key={`${badge.tone}:${badge.label}`}
           className={cn(
-            "max-w-28 truncate rounded px-1.5 py-px text-[9px] font-bold",
+            "max-w-24 truncate rounded px-1.5 py-px text-[8.5px] font-bold leading-4",
             badge.tone === "head" && "bg-accent/10 text-accent",
             badge.tone === "base" && "bg-foreground/10 text-foreground",
             badge.tone === "tag" && "bg-warning/10 text-warning",
@@ -1101,38 +1096,36 @@ function GitCommitLogRow({
     <ListView.Item
       id={commit.sha}
       textValue={`${commit.subject} ${commit.author_name} ${commit.sha}`}
-      className="group relative rounded-none py-2 pl-3.5 pr-3"
+      className="group relative grid min-h-[52px] grid-cols-[12px_18px_minmax(0,1fr)_14px] items-center gap-x-2 rounded-none px-3 py-2"
     >
-      {!last ? (
+      <span className="relative flex h-full items-center justify-center" aria-hidden="true">
+        {!last ? (
+          <span className="absolute bottom-[-9px] left-1/2 top-1/2 w-px -translate-x-1/2 bg-border" />
+        ) : null}
         <span
-          aria-hidden="true"
-          className="pointer-events-none absolute bottom-0 left-[23px] top-0 w-0.5 bg-border"
+          className={cn(
+            "relative z-[1] size-2 rounded-full border-2 border-background",
+            isBase || merge ? "bg-foreground" : "bg-accent",
+          )}
         />
-      ) : null}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "relative z-[1] ml-[5px] size-[9px] shrink-0 rounded-full border-2 border-background",
-          isBase || merge ? "bg-foreground" : "bg-accent",
-        )}
-      />
-      <ListView.ItemContent className="gap-2">
-        <GitAuthorAvatar name={commit.author_name} merge={merge} />
-        <span className="flex min-w-0 flex-col">
-          <ListView.Title>{commit.subject || "Untitled commit"}</ListView.Title>
-          <ListView.Description>{commit.author_name || "Unknown author"}</ListView.Description>
+      </span>
+      <GitAuthorAvatar name={commit.author_name} merge={merge} />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium leading-4 text-foreground">
+            {commit.subject || "Untitled commit"}
+          </span>
+          <GitRefBadges commit={commit} snapshot={snapshot} />
         </span>
-      </ListView.ItemContent>
-      <ListView.ItemAction className="gap-2">
-        <GitRefBadges commit={commit} snapshot={snapshot} />
-        <span className="hidden shrink-0 text-[10px] text-muted sm:inline">
-          {formatGitRelativeTime(commit.authored_at)}
+        <span className="flex min-w-0 items-center gap-1 text-[9.5px] leading-4 text-muted">
+          <span className="min-w-0 truncate">{commit.author_name || "Unknown author"}</span>
+          <span aria-hidden="true">·</span>
+          <span className="shrink-0">{formatGitRelativeTime(commit.authored_at)}</span>
+          <span aria-hidden="true">·</span>
+          <span className="shrink-0 font-mono text-muted/80">{commit.sha.slice(0, 7)}</span>
         </span>
-        <span className="shrink-0 font-mono text-[9.5px] text-muted/80">
-          {commit.sha.slice(0, 7)}
-        </span>
-        <ChevronRight className="size-3.5 text-muted/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
-      </ListView.ItemAction>
+      </span>
+      <ChevronRight className="size-3.5 text-muted/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
     </ListView.Item>
   );
 }

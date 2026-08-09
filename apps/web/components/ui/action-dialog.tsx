@@ -29,6 +29,7 @@ export function ActionConfirmDialog({
   tone = "warning",
   icon: Icon = AlertTriangle,
   className,
+  showHint = true,
   onOpenChange,
   onConfirm,
 }: {
@@ -42,6 +43,7 @@ export function ActionConfirmDialog({
   tone?: DialogTone;
   icon?: LucideIcon;
   className?: string;
+  showHint?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
@@ -74,19 +76,21 @@ export function ActionConfirmDialog({
                 <p className="mt-1 text-sm leading-6 text-muted">{description}</p>
               </div>
             </AlertDialog.Header>
-            <AlertDialog.Body>
-              {error ? (
-                <div className="rounded-xl bg-danger/10 px-3 py-2.5 text-sm text-danger">
-                  {error}
-                </div>
-              ) : (
-                <div className={`${toneClass[tone]} rounded-xl px-3 py-2.5 text-sm`}>
-                  {tone === "danger"
-                    ? "This action cannot be undone."
-                    : "Confirm this operation to continue."}
-                </div>
-              )}
-            </AlertDialog.Body>
+            {error || showHint ? (
+              <AlertDialog.Body>
+                {error ? (
+                  <div className="rounded-xl bg-danger/10 px-3 py-2.5 text-sm text-danger">
+                    {error}
+                  </div>
+                ) : (
+                  <div className={`${toneClass[tone]} rounded-xl px-3 py-2.5 text-sm`}>
+                    {tone === "danger"
+                      ? "This action cannot be undone."
+                      : "Confirm this operation to continue."}
+                  </div>
+                )}
+              </AlertDialog.Body>
+            ) : null}
             <AlertDialog.Footer>
               <Button
                 aria-disabled={busy}
