@@ -61,6 +61,7 @@ FORWARD_PID_FILE="$LOG_DIR/opensandbox-dev-forward.pid"
 STACK_PID_FILE="$LOG_DIR/dev-stack.pid"
 SETUP_LOG="$LOG_DIR/dev-setup.log"
 OWNED_FORWARD_PID=""
+FORWARD_RESTART_DELAY_SECONDS="${COCOLA_OPENSANDBOX_FORWARD_RESTART_DELAY_SECONDS:-1}"
 
 log() { printf '\033[1;36m[dev]\033[0m %s\n' "$*"; }
 err() { printf '\033[1;31m[dev:err]\033[0m %s\n' "$*" >&2; }
@@ -359,11 +360,42 @@ graceful_stop() {
   exit 0
 }
 
+forward_supervisor() {
+  local child_pid=""
+  local status=0
+
+  stop_forward_child() {
+    if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+      kill -TERM -- "-$child_pid" 2>/dev/null || kill -TERM "$child_pid" 2>/dev/null || true
+      wait "$child_pid" 2>/dev/null || true
+    fi
+    exit 0
+  }
+
+  trap stop_forward_child INT TERM
+  set +e
+  while true; do
+    (
+      exec_in_session kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
+    ) &
+    child_pid="$!"
+    wait "$child_pid"
+    status="$?"
+    child_pid=""
+    printf '[dev] OpenSandbox port-forward exited (status=%s); restarting in %ss\n' \
+      "$status" "$FORWARD_RESTART_DELAY_SECONDS"
+    sleep "$FORWARD_RESTART_DELAY_SECONDS" &
+    child_pid="$!"
+    wait "$child_pid"
+    child_pid=""
+  done
+}
+
 start_forward() {
   mkdir -p "$LOG_DIR"
   stop_forward
   (
-    exec_in_session kubectl -n "$SYSTEM_NAMESPACE" port-forward "svc/$SERVER_SERVICE" "$SERVER_PORT:80"
+    forward_supervisor
   ) >"$LOG_DIR/opensandbox-dev-forward.log" 2>&1 &
   OWNED_FORWARD_PID="$!"
   echo "$OWNED_FORWARD_PID" >"$FORWARD_PID_FILE"
@@ -373,9 +405,14 @@ start_forward() {
     if curl -fsS -m 2 "http://127.0.0.1:$SERVER_PORT/health" >/dev/null 2>&1; then
       return 0
     fi
+    if ! kill -0 "$OWNED_FORWARD_PID" 2>/dev/null; then
+      break
+    fi
     sleep 1
   done
   err "OpenSandbox port-forward did not become healthy; see .run-logs/opensandbox-dev-forward.log"
+  stop_forward "$OWNED_FORWARD_PID"
+  OWNED_FORWARD_PID=""
   return 1
 }
 

@@ -96,4 +96,11 @@ if [[ -e "$FORWARD_PID_FILE" ]]; then
   exit 1
 fi
 
+RUN_STACK_DEV_SOURCE="$(cat "$ROOT/scripts/run-stack-dev.sh")"
+if [[ "$RUN_STACK_DEV_SOURCE" != *"forward_supervisor"* ]] || \
+  [[ "$RUN_STACK_DEV_SOURCE" != *"port-forward exited (status=%s); restarting"* ]]; then
+  printf 'FAIL: OpenSandbox port-forward is not supervised for automatic restart\n' >&2
+  exit 1
+fi
+
 printf 'run-stack-dev tests passed\n'
