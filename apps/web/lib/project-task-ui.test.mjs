@@ -53,9 +53,11 @@ test("Project task chrome is compact and workspace starts at its resize minimum"
   assert.doesNotMatch(taskSource, />\/<\/span>/);
   assert.match(workspaceSource, /useState\(480\)/);
   assert.match(workspaceSource, /beginDockResize\(event, workspaceWidth, 480/);
-  assert.match(workspaceShellSource, /PROJECT_TASK_PATH/);
+  assert.match(workspaceShellSource, /isProjectTaskPath\(pathname\)/);
   assert.match(workspaceShellSource, /compact=\{compactTopbar\}/);
   assert.match(workspaceShellSource, /compact \? "h-10" : "h-14"/);
+  assert.match(workspaceSource, /const showHeaderActions = !isProjectTaskPath\(pathname\)/);
+  assert.match(workspaceSource, /showHeaderActions \? <WorkspaceHeaderActions \/> : null/);
 });
 
 test("Project conversations appear in Chats with Project routing and identity", () => {

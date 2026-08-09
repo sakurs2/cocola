@@ -9,13 +9,13 @@ import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } 
 import { CocolaRuntimeProvider } from "@/app/runtime-provider";
 import { CommandPalette } from "@/components/assistant-ui/command-palette";
 import { HeroUIWorkspaceSidebar } from "@/components/assistant-ui/heroui-workspace-sidebar";
-import { WorkspaceThemeToggle } from "@/components/assistant-ui/workspace-theme-toggle";
+import { WorkspaceHeaderActions } from "@/components/assistant-ui/workspace-header-actions";
 import { WorkspaceUnsavedChangesProvider } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { WorkspaceToastProvider } from "@/components/assistant-ui/workspace-toast";
+import { isProjectTaskPath } from "@/lib/workspace-routes";
 
 const IMMERSIVE_KEY = "cocola:immersive";
-const PROJECT_TASK_PATH = /^\/projects\/[^/]+\/tasks\/[^/]+\/?$/;
 
 const WORKSPACE_PATHS = [
   "/",
@@ -106,7 +106,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
   const [immersive, setImmersive] = useState(false);
   const [peeked, setPeeked] = useState(false);
   const isChat = pathname === "/";
-  const compactTopbar = PROJECT_TASK_PATH.test(pathname);
+  const compactTopbar = isProjectTaskPath(pathname);
 
   useEffect(() => {
     try {
@@ -253,7 +253,7 @@ function WorkspaceTopbar({
           )}
         </div>
       )}
-      <WorkspaceThemeToggle />
+      <WorkspaceHeaderActions />
     </div>
   );
 }

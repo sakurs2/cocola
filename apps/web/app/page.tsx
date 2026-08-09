@@ -13,12 +13,13 @@ import {
 import { Thread } from "@/components/assistant-ui/thread";
 import { ConversationMinimap } from "@/components/assistant-ui/conversation-minimap";
 import { WorkspaceDock } from "@/components/assistant-ui/workspace-panel";
-import { WorkspaceThemeToggle } from "@/components/assistant-ui/workspace-theme-toggle";
+import { WorkspaceHeaderActions } from "@/components/assistant-ui/workspace-header-actions";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { cn } from "@/lib/utils";
+import { isProjectTaskPath } from "@/lib/workspace-routes";
 import { AnimatePresence, motion } from "framer-motion";
 import { PanelRight } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   type Dispatch,
   type PointerEvent,
@@ -46,6 +47,8 @@ function Workspace() {
   } = useCocola();
   const { showError } = useWorkspaceToast();
   const router = useRouter();
+  const pathname = usePathname();
+  const showHeaderActions = !isProjectTaskPath(pathname);
   const hasMessages = useThread((thread) => thread.messages.length > 0);
   const [workspaceWidth, setWorkspaceWidth] = useState(480);
   const [dockView, setDockView] = useState<"status" | "workspace">("status");
@@ -99,6 +102,7 @@ function Workspace() {
         <div className="relative min-w-0 flex-1">
           <TopBar
             environmentStatus={environmentStatus}
+            showHeaderActions={showHeaderActions}
             workspaceOpen={workspaceOpen && dockView === "workspace"}
             onOpenStatus={() => {
               setDockView("status");
@@ -217,11 +221,13 @@ function beginDockResize(
 // conversation controls.
 function TopBar({
   environmentStatus,
+  showHeaderActions,
   onOpenStatus,
   onOpenWorkspace,
   workspaceOpen,
 }: {
   environmentStatus: EnvironmentStatus | null;
+  showHeaderActions: boolean;
   onOpenStatus: () => void;
   onOpenWorkspace: () => void;
   workspaceOpen: boolean;
@@ -266,7 +272,7 @@ function TopBar({
               </Tooltip.Content>
             </Tooltip>
           ) : null}
-          <WorkspaceThemeToggle />
+          {showHeaderActions ? <WorkspaceHeaderActions /> : null}
         </div>
       </div>
     </div>

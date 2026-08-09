@@ -8,7 +8,7 @@ import {
   getAdminSectionForPathname,
   getAdminThemeStyle,
 } from "@/components/admin/admin-navigation";
-import { WorkspaceThemeToggle } from "@/components/assistant-ui/workspace-theme-toggle";
+import { WorkspaceHeaderActions } from "@/components/assistant-ui/workspace-header-actions";
 
 export function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -41,7 +41,7 @@ function AdminTopbar() {
           Control plane
         </p>
       </div>
-      <WorkspaceThemeToggle />
+      <WorkspaceHeaderActions />
     </div>
   );
 }

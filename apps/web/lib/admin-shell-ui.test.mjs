@@ -87,7 +87,7 @@ test("Admin utility pages keep stable HeroUI controls and visible architecture c
   assert.doesNotMatch(shellSource, /function AdminTopbar\(\{ label/);
   assert.doesNotMatch(shellSource, /Self-hosted|userLabel|useSession|<Chip/);
   assert.match(shellSource, /navbar=\{<AdminTopbar \/>\}/);
-  assert.match(shellSource, /<WorkspaceThemeToggle \/>/);
+  assert.match(shellSource, /<WorkspaceHeaderActions \/>/);
   assert.match(selectControlSource, /style=\{\{ transform: "none" \}\}/);
   assert.match(componentLogsSource, /className="h-10 w-full rounded-xl"/);
   assert.match(componentLogsSource, /<Input className="h-10"/);
