@@ -106,9 +106,6 @@ jobs:
             latest=false
           tags: |
             type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
       - name: Detect an unchanged sandbox runtime
         id: sandbox_runtime
         if: matrix.name == 'sandbox-runtime'
@@ -190,9 +187,63 @@ jobs:
               raise SystemExit("sandbox runtime selfcheck failed: Cocola GitHub Skill is missing")
           PY
 
+  promote-images:
+    name: promote image / ${{ matrix.name }}
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name:
+          - gateway
+          - admin-api
+          - storage-probe
+          - agent-runtime
+          - llm-gateway
+          - sandbox-manager
+          - web
+          - sandbox-runtime
+    steps:
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: aliases
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cocola-${{ matrix.name }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - name: Promote verified release image
+        env:
+          SOURCE_IMAGE: ghcr.io/${{ github.repository_owner }}/cocola-${{ matrix.name }}:${{ github.ref_name }}
+          TARGET_TAGS: ${{ steps.aliases.outputs.tags }}
+        run: |
+          mapfile -t tags <<< "$TARGET_TAGS"
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            if [[ -n "$tag" ]]; then
+              tag_args+=(--tag "$tag")
+            fi
+          done
+          if [[ ${#tag_args[@]} -eq 0 ]]; then
+            echo "::error::No release aliases were generated for ${SOURCE_IMAGE}"
+            exit 1
+          fi
+          docker buildx imagetools create "${tag_args[@]}" "$SOURCE_IMAGE"
+
   cli:
     name: cli binaries
-    needs: images
+    needs: promote-images
     runs-on: ubuntu-latest
     permissions:
       contents: write

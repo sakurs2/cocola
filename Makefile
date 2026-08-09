@@ -46,13 +46,13 @@ proto-gen-py: ## Generate Python stubs (containerized; corporate-TLS safe)
 # -------------------------------------------------------------------- go
 .PHONY: go-tidy go-build go-test go-lint
 go-tidy: ## go mod tidy for all Go modules
-	@for a in $(GO_APPS); do (cd apps/$$a && go mod tidy); done
+	@for a in $(GO_APPS); do (cd apps/$$a && GOWORK=off go mod tidy); done
 	@cd apps/$(SANDBOX_APP) && GOWORK=off go mod tidy
 	@cd apps/$(CLI_APP) && go mod tidy
 	@cd packages/go-common && go mod tidy
 
 go-build: ## Build all Go services
-	@for a in $(GO_APPS); do (cd apps/$$a && go build -o ../../bin/$$a ./cmd/$$a); done
+	@for a in $(GO_APPS); do (cd apps/$$a && GOWORK=off go build -o ../../bin/$$a ./cmd/$$a); done
 	@cd apps/$(SANDBOX_APP) && GOWORK=off go build -o ../../bin/$(SANDBOX_APP) ./cmd/$(SANDBOX_APP)
 	@cd apps/$(CLI_APP) && go build -o ../../bin/cocola ./cmd/cocola
 

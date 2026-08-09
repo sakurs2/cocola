@@ -8,24 +8,25 @@
 
 # ---- deps + build stage --------------------------------------------------
 FROM node:22-slim AS build
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+RUN corepack enable
 WORKDIR /repo
 
 # Workspace manifests first for better layer caching.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json .npmrc ./
 COPY patches ./patches
 COPY apps/web/package.json          ./apps/web/package.json
 COPY packages/ts-common/package.json ./packages/ts-common/package.json
+COPY packages/ui-compat/package.json ./packages/ui-compat/package.json
 RUN pnpm install --frozen-lockfile
 
 # Then the sources and build.
 COPY apps/web        ./apps/web
 COPY packages/ts-common ./packages/ts-common
+COPY packages/ui-compat ./packages/ui-compat
 RUN pnpm --filter @cocola/web build
 
 # ---- runtime stage -------------------------------------------------------
 FROM node:22-slim AS runtime
-RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 WORKDIR /repo
 ENV NODE_ENV=production
 # Bring over the fully built workspace (node_modules + .next + sources).
