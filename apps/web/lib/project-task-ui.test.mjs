@@ -30,6 +30,17 @@ test("new Project tasks expose an editable safe branch before the first message"
   assert.match(branchSource, /Editable until the first message/);
   assert.match(runtimeSource, /project_task_branch: projectTaskBranch/);
   assert.match(runtimeSource, /taskBranch: branchName/);
+  assert.match(runtimeSource, /pickerEnabled: false/);
+  assert.match(runtimeSource, /setSelectedRuntimeIdState\(selected\?\.id \?\? ""\)/);
+});
+
+test("Project branch context is borderless and reveals the full truncated name on hover", () => {
+  assert.match(branchSource, /title=\{`\$\{branch \|\| "Loading branch"\}\\n\$\{title\}`\}/);
+  assert.doesNotMatch(
+    branchSource.slice(branchSource.indexOf("export function ProjectBranchBadge")),
+    /border border-border/,
+  );
+  assert.match(taskSource, /title=\{branchName\}/);
 });
 
 test("Project task chrome is compact and workspace starts at its resize minimum", () => {

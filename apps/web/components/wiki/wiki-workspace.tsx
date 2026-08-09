@@ -36,6 +36,7 @@ import { ReadonlyFilePreview } from "@/components/assistant-ui/file-preview";
 import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { cn } from "@/lib/utils";
 import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { WikiMarkdownEditor } from "@/components/wiki/wiki-markdown-editor";
 
 type WikiNode = {
@@ -769,45 +770,24 @@ export function WikiWorkspace() {
         onConfirm={() => void confirmDelete()}
       />
 
-      <Sheet
-        isOpen={discardDialogOpen}
-        placement="right"
+      <ActionConfirmDialog
+        open={discardDialogOpen}
+        title="Discard unsaved changes?"
+        description="This page has changes that have not been saved. Continue only if you do not need them."
+        confirmLabel="Discard and continue"
+        cancelLabel="Keep editing"
+        tone="danger"
         onOpenChange={(open) => {
           setDiscardDialogOpen(open);
           if (!open) pendingDiscardAction.current = null;
         }}
-      >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[420px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close unsaved changes confirmation" />
-              <Sheet.Header>
-                <Sheet.Heading>Discard unsaved changes?</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  This page has changes that have not been saved. Continue only if you do not need
-                  them.
-                </p>
-              </Sheet.Header>
-              <Sheet.Footer className="gap-2">
-                <Button variant="outline" onPress={() => setDiscardDialogOpen(false)}>
-                  Keep editing
-                </Button>
-                <Button
-                  variant="danger-soft"
-                  onPress={() => {
-                    const action = pendingDiscardAction.current;
-                    pendingDiscardAction.current = null;
-                    setDiscardDialogOpen(false);
-                    action?.();
-                  }}
-                >
-                  Discard and continue
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+        onConfirm={() => {
+          const action = pendingDiscardAction.current;
+          pendingDiscardAction.current = null;
+          setDiscardDialogOpen(false);
+          action?.();
+        }}
+      />
     </div>
   );
 }

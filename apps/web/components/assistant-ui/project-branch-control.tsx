@@ -309,8 +309,8 @@ export function ProjectBranchBadge({
         : "Current project task branch";
   return (
     <span
-      title={title}
-      className="flex max-w-[12rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground"
+      title={`${branch || "Loading branch"}\n${title}`}
+      className="flex max-w-[12rem] min-w-0 items-center gap-1.5 px-1 py-1 text-[12.5px] font-medium text-foreground"
     >
       <GitBranch className="size-4 shrink-0 text-indigo-600" />
       <span className="truncate">{branch || "Loading branch"}</span>

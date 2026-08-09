@@ -16,6 +16,7 @@ import {
   AdminStatusBadge,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -486,64 +487,37 @@ function OfflineDialog({
   onConfirm: () => void;
 }) {
   return (
-    <Sheet isOpen placement="right" onOpenChange={(open) => !open && onCancel()}>
-      <Sheet.Backdrop>
-        <Sheet.Content className="w-full md:w-[460px]">
-          <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close offline confirmation" />
-            <Sheet.Header>
-              <span className="flex items-start gap-3">
-                <span className="bg-danger/10 text-danger grid size-10 shrink-0 place-items-center rounded-2xl">
-                  <AlertTriangle className="size-5" />
-                </span>
-                <span>
-                  <Sheet.Heading>Offline {target.node.name}</Sheet.Heading>
-                  <span className="text-muted mt-1 block text-sm">
-                    This node holds {target.affectedSessions} local Workspace
-                    {target.affectedSessions === 1 ? "" : "s"} and runs {target.pendingPods.length}{" "}
-                    sandbox pod{target.pendingPods.length === 1 ? "" : "s"}.
-                  </span>
-                </span>
-              </span>
-            </Sheet.Header>
-            <Sheet.Body className="grid content-start gap-3">
-              {target.affectedSessions > 0 && (
-                <div className="bg-warning/10 text-warning rounded-2xl px-4 py-3 text-sm">
-                  Existing conversations cannot resume while this node is offline. No Workspace will
-                  be cleared automatically.
-                </div>
-              )}
-              {target.pendingPods.length > 0 && (
-                <div className="bg-surface-secondary rounded-2xl p-4">
-                  <p className="text-muted mb-2 text-xs">
-                    Offlining cordons the node. Running sandboxes are not evicted and remain until
-                    they stop or are reclaimed.
-                  </p>
-                  <div className="max-h-24 overflow-y-auto">
-                    {target.pendingPods.map((pod) => (
-                      <AdminTruncatedValue
-                        key={pod}
-                        className="text-muted font-mono text-xs"
-                        copyLabel="pod name"
-                        value={pod}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </Sheet.Body>
-            <Sheet.Footer className="gap-2">
-              <Button variant="outline" isDisabled={acting} onPress={onCancel}>
-                Cancel
-              </Button>
-              <Button variant="danger" isDisabled={acting} isPending={acting} onPress={onConfirm}>
-                {acting ? "Offlining..." : "Cordon node"}
-              </Button>
-            </Sheet.Footer>
-          </Sheet.Dialog>
-        </Sheet.Content>
-      </Sheet.Backdrop>
-    </Sheet>
+    <ActionConfirmDialog
+      open
+      busy={acting}
+      title={`Offline ${target.node.name}?`}
+      description={
+        <span className="grid gap-2">
+          <span>
+            This node holds {target.affectedSessions} local Workspace
+            {target.affectedSessions === 1 ? "" : "s"} and runs {target.pendingPods.length} sandbox
+            pod{target.pendingPods.length === 1 ? "" : "s"}.
+          </span>
+          {target.affectedSessions > 0 ? (
+            <span className="text-warning">
+              Existing conversations cannot resume while this node is offline. No Workspace will be
+              cleared automatically.
+            </span>
+          ) : null}
+          {target.pendingPods.length > 0 ? (
+            <span>
+              Running sandboxes are not evicted and remain until they stop or are reclaimed.
+            </span>
+          ) : null}
+        </span>
+      }
+      confirmLabel="Cordon node"
+      icon={AlertTriangle}
+      showHint={false}
+      tone="danger"
+      onOpenChange={(open) => !open && onCancel()}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -616,102 +590,84 @@ function CapacityDialog({
   };
 
   return (
-    <Sheet isOpen placement="right" onOpenChange={(open) => !open && onCancel()}>
-      <Sheet.Backdrop>
-        <Sheet.Content className="w-full md:w-[500px]">
-          <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close capacity editor" />
-            <Sheet.Header>
-              <span className="flex items-center gap-3">
-                <span className="bg-accent-soft text-accent grid size-10 place-items-center rounded-2xl">
-                  {phase === "confirm" ? (
-                    <AlertTriangle className="size-5" />
-                  ) : (
+    <>
+      <Sheet
+        isOpen={phase === "edit"}
+        placement="right"
+        onOpenChange={(open) => {
+          if (!open && phase === "edit") onCancel();
+        }}
+      >
+        <Sheet.Backdrop>
+          <Sheet.Content className="w-full md:w-[500px]">
+            <Sheet.Dialog>
+              <Sheet.CloseTrigger aria-label="Close capacity editor" />
+              <Sheet.Header>
+                <span className="flex items-center gap-3">
+                  <span className="bg-accent-soft text-accent grid size-10 place-items-center rounded-2xl">
                     <SlidersHorizontal className="size-5" />
-                  )}
-                </span>
-                <span>
-                  <Sheet.Heading>
-                    {phase === "confirm" ? "Confirm sandbox capacity" : "Edit sandbox capacity"}
-                  </Sheet.Heading>
-                  <span className="text-muted mt-1 block text-sm">
-                    {phase === "confirm"
-                      ? `Review the expected effect before applying this change to ${node.name}.`
-                      : `Configure the maximum number of running sandbox pods allowed on ${node.name}.`}
+                  </span>
+                  <span>
+                    <Sheet.Heading>Edit sandbox capacity</Sheet.Heading>
+                    <span className="text-muted mt-1 block text-sm">
+                      Configure the maximum number of running sandbox pods allowed on {node.name}.
+                    </span>
                   </span>
                 </span>
-              </span>
-            </Sheet.Header>
-            <Sheet.Body className="grid content-start gap-4">
-              {phase === "confirm" ? (
-                <>
-                  <div className="bg-surface-secondary rounded-2xl p-4">
-                    <span className="text-muted block text-xs font-medium uppercase">
-                      New limit
-                    </span>
-                    <span className="mt-1 block font-mono text-sm">
-                      {trimmedValue === "" ? "Unlimited" : trimmedValue}
-                    </span>
-                  </div>
-                  <div className="border-separator rounded-2xl border p-4 text-sm">
-                    <div className="font-medium">{effect.title}</div>
-                    <p className="text-muted mt-1 leading-6">{effect.description}</p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="bg-surface-secondary text-muted space-y-2 rounded-2xl p-4 text-sm">
-                    <p>Leave the value empty to allow unlimited sandbox pods.</p>
-                    <p>Set 0 to contribute no new sandbox capacity.</p>
-                    <p>Set a positive integer to cap concurrent running sandbox pods.</p>
-                  </div>
-                  <TextField
-                    isDisabled={saving}
-                    value={value}
-                    variant="secondary"
-                    onChange={(next) => {
-                      setInputError("");
-                      onChange(next);
-                    }}
-                  >
-                    <Label>Max sandbox pods</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      step={1}
-                      inputMode="numeric"
-                      placeholder="Unlimited"
-                    />
-                  </TextField>
-                  {inputError ? <p className="text-danger text-sm">{inputError}</p> : null}
-                </>
-              )}
-            </Sheet.Body>
-            <Sheet.Footer className="gap-2">
-              {phase === "confirm" ? (
-                <>
-                  <Button isDisabled={saving} variant="outline" onPress={() => setPhase("edit")}>
-                    Back
-                  </Button>
-                  <Button isDisabled={saving} isPending={saving} onPress={onSave}>
-                    Confirm
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button isDisabled={saving} variant="outline" onPress={onCancel}>
-                    Cancel
-                  </Button>
-                  <Button isDisabled={saving} onPress={reviewChange}>
-                    Continue
-                  </Button>
-                </>
-              )}
-            </Sheet.Footer>
-          </Sheet.Dialog>
-        </Sheet.Content>
-      </Sheet.Backdrop>
-    </Sheet>
+              </Sheet.Header>
+              <Sheet.Body className="grid content-start gap-4">
+                <div className="bg-surface-secondary text-muted space-y-2 rounded-2xl p-4 text-sm">
+                  <p>Leave the value empty to allow unlimited sandbox pods.</p>
+                  <p>Set 0 to contribute no new sandbox capacity.</p>
+                  <p>Set a positive integer to cap concurrent running sandbox pods.</p>
+                </div>
+                <TextField
+                  isDisabled={saving}
+                  value={value}
+                  variant="secondary"
+                  onChange={(next) => {
+                    setInputError("");
+                    onChange(next);
+                  }}
+                >
+                  <Label>Max sandbox pods</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    placeholder="Unlimited"
+                  />
+                </TextField>
+                {inputError ? <p className="text-danger text-sm">{inputError}</p> : null}
+              </Sheet.Body>
+              <Sheet.Footer className="gap-2">
+                <Button isDisabled={saving} variant="outline" onPress={onCancel}>
+                  Cancel
+                </Button>
+                <Button isDisabled={saving} onPress={reviewChange}>
+                  Continue
+                </Button>
+              </Sheet.Footer>
+            </Sheet.Dialog>
+          </Sheet.Content>
+        </Sheet.Backdrop>
+      </Sheet>
+      <ActionConfirmDialog
+        open={phase === "confirm"}
+        busy={saving}
+        title="Confirm sandbox capacity"
+        description={`${trimmedValue === "" ? "Unlimited" : trimmedValue} · ${effect.title} ${effect.description}`}
+        confirmLabel="Apply capacity"
+        icon={AlertTriangle}
+        showHint={false}
+        tone="warning"
+        onOpenChange={(open) => {
+          if (!open && !saving) setPhase("edit");
+        }}
+        onConfirm={onSave}
+      />
+    </>
   );
 }
 

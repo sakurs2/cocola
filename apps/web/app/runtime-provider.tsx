@@ -18,8 +18,6 @@ import {
   useExternalStoreRuntime,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
-import { Button } from "@heroui/react";
-import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   createContext,
   useCallback,
@@ -56,6 +54,7 @@ import {
   shouldAwaitPlanStop,
 } from "@/lib/plan-mode.mjs";
 import { canDiscardPendingProjectTask } from "@/lib/project-task-intent.mjs";
+import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import {
   mergeWikiComposerReferences,
   wikiPromptText,
@@ -466,7 +465,7 @@ type CocolaContextValue = {
   // resume entry in the backend session_map, so Route A's claude CLI starts
   // from zero — this is the boundary that severs prior-turn history.
   newConversation: (folderId?: string) => string;
-  newProjectTask: (projectId: string, runtimeId: string, baseRef: string) => NewProjectTaskResult;
+  newProjectTask: (projectId: string, baseRef: string) => NewProjectTaskResult;
   updatePendingProjectTaskBaseRef: (sessionId: string, baseRef: string) => boolean;
   updatePendingProjectTaskBranch: (sessionId: string, taskBranch: string) => boolean;
   discardPendingProjectTask: (sessionId: string) => boolean;
@@ -3706,33 +3705,43 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     [defaultAgentRuntimeID, runtimePickerEnabled, runtimes],
   );
 
-  const newProjectTask = useCallback((projectId: string, runtimeId: string, baseRef: string) => {
-    const fresh = genId();
-    const branchName = `cocola/task-${fresh.replaceAll("-", "").slice(0, 12)}`;
-    const previousSessionID = sessionIdRef.current;
-    sessionFolderHintsRef.current.delete(sessionIdRef.current);
-    sessionProjectHintsRef.current.delete(sessionIdRef.current);
-    setSelectedAgentIds((previous) => {
-      if (!(previousSessionID in previous)) return previous;
-      const next = { ...previous };
-      delete next[previousSessionID];
-      return next;
-    });
-    sessionIdRef.current = fresh;
-    sessionProjectHintsRef.current.set(fresh, {
-      projectId,
-      baseRef: baseRef.trim(),
-      taskBranch: branchName,
-    });
-    setSessionId(fresh);
-    setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
-    setSelectedRuntimeIdState(runtimeId);
-    if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
-    setSelectedArtifact(null);
-    setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
-    setSandboxes((prev) => ({ ...prev, [fresh]: null }));
-    return { sessionId: fresh, branchName };
-  }, []);
+  const newProjectTask = useCallback(
+    (projectId: string, baseRef: string) => {
+      const fresh = genId();
+      const branchName = `cocola/task-${fresh.replaceAll("-", "").slice(0, 12)}`;
+      const previousSessionID = sessionIdRef.current;
+      // Projects follow the platform default runtime; runtime choice is not Project state.
+      const selected = selectAgentRuntime({
+        runtimes,
+        defaultRuntimeId: defaultAgentRuntimeID,
+        pickerEnabled: false,
+        preferredRuntimeId: "",
+      });
+      sessionFolderHintsRef.current.delete(sessionIdRef.current);
+      sessionProjectHintsRef.current.delete(sessionIdRef.current);
+      setSelectedAgentIds((previous) => {
+        if (!(previousSessionID in previous)) return previous;
+        const next = { ...previous };
+        delete next[previousSessionID];
+        return next;
+      });
+      sessionIdRef.current = fresh;
+      sessionProjectHintsRef.current.set(fresh, {
+        projectId,
+        baseRef: baseRef.trim(),
+        taskBranch: branchName,
+      });
+      setSessionId(fresh);
+      setInteractionModes((previous) => ({ ...previous, [fresh]: "execute" }));
+      setSelectedRuntimeIdState(selected?.id ?? "");
+      if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
+      setSelectedArtifact(null);
+      setConvMessages((prev) => ({ ...prev, [fresh]: [] }));
+      setSandboxes((prev) => ({ ...prev, [fresh]: null }));
+      return { sessionId: fresh, branchName };
+    },
+    [defaultAgentRuntimeID, runtimes],
+  );
 
   const updatePendingProjectTaskBaseRef = useCallback(
     (pendingSessionId: string, baseRef: string) => {
@@ -4094,70 +4103,30 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   return (
     <CocolaContext.Provider value={ctx}>
       <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>
-      <Sheet
-        isOpen={workspaceResetRequest !== null}
-        placement="right"
+      <ActionConfirmDialog
+        open={workspaceResetRequest !== null}
+        title="Use an empty Workspace?"
+        description="The node holding this Workspace is unavailable. A new empty Workspace lets the next retry continue on another node, but files from the previous node cannot be recovered."
+        confirmLabel="Use empty Workspace"
+        cancelLabel="Keep current Workspace"
+        tone="warning"
         onOpenChange={(open) => {
           if (open || !workspaceResetRequest) return;
           workspaceResetPromptedRef.current.delete(workspaceResetRequest.conversationId);
           setWorkspaceResetRequest(null);
         }}
-      >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[440px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close workspace recovery" />
-              <Sheet.Header>
-                <Sheet.Heading>Use an empty Workspace?</Sheet.Heading>
-                <p className="text-muted text-sm leading-6">
-                  The node holding this Workspace is unavailable. A new empty Workspace lets the
-                  next retry continue on another node, but cannot recover files from the previous
-                  node.
-                </p>
-              </Sheet.Header>
-              <Sheet.Body>
-                <div className="bg-warning/10 text-warning rounded-2xl px-4 py-3 text-sm">
-                  Existing workspace files will not be copied to the replacement node.
-                </div>
-              </Sheet.Body>
-              <Sheet.Footer className="gap-2">
-                <Button
-                  variant="outline"
-                  onPress={() => {
-                    if (workspaceResetRequest) {
-                      workspaceResetPromptedRef.current.delete(
-                        workspaceResetRequest.conversationId,
-                      );
-                    }
-                    setWorkspaceResetRequest(null);
-                  }}
-                >
-                  Keep current Workspace
-                </Button>
-                <Button
-                  onPress={() => {
-                    if (!workspaceResetRequest) return;
-                    workspaceResetAllowedRef.current.add(workspaceResetRequest.conversationId);
-                    applyEvent(
-                      workspaceResetRequest.conversationId,
-                      workspaceResetRequest.assistantId,
-                      {
-                        kind: "error",
-                        data: {
-                          error: "Empty Workspace confirmed. Send the message again to continue.",
-                        },
-                      },
-                    );
-                    setWorkspaceResetRequest(null);
-                  }}
-                >
-                  Use empty Workspace
-                </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+        onConfirm={() => {
+          if (!workspaceResetRequest) return;
+          workspaceResetAllowedRef.current.add(workspaceResetRequest.conversationId);
+          applyEvent(workspaceResetRequest.conversationId, workspaceResetRequest.assistantId, {
+            kind: "error",
+            data: {
+              error: "Empty Workspace confirmed. Send the message again to continue.",
+            },
+          });
+          setWorkspaceResetRequest(null);
+        }}
+      />
     </CocolaContext.Provider>
   );
 }

@@ -22,9 +22,8 @@ test("Project creation keeps Agent Runtime selection internal", () => {
 test("Project details do not expose runtime configuration", () => {
   assert.doesNotMatch(projectSource, /runtimePickerEnabled|draftRuntime|Default runtime/);
   assert.doesNotMatch(projectSource, /label="Runtime"|Project runtimes|name, runtime/);
-  assert.match(
-    projectSource,
-    /newProjectTask\(project\.id, project\.runtime_id, selectedBaseRef\)/,
-  );
+  assert.match(projectSource, /newProjectTask\(project\.id, selectedBaseRef\)/);
+  assert.doesNotMatch(projectSource, /project\.runtime_id/);
+  assert.match(projectSource, /!modelsLoaded \|\|[\s\S]*?!selectedRuntime/);
   assert.match(projectSource, /Update this Project’s name and description\./);
 });

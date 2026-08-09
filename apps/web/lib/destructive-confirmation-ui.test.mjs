@@ -14,6 +14,8 @@ const [
   wikiSource,
   skillsSource,
   adminSkillsSource,
+  runtimeSource,
+  sandboxNodesSource,
 ] = await Promise.all([
   read("../components/ui/action-dialog.tsx"),
   read("../components/assistant-ui/delete-confirm-dialog.tsx"),
@@ -24,6 +26,8 @@ const [
   read("../components/wiki/wiki-workspace.tsx"),
   read("../app/skills/page.tsx"),
   read("../app/admin/skills/page.tsx"),
+  read("../app/runtime-provider.tsx"),
+  read("../app/admin/sandbox-nodes/page.tsx"),
 ]);
 
 test("destructive confirmations use a centered HeroUI alert dialog", () => {
@@ -60,6 +64,30 @@ test("delete entry points open the shared centered confirmation", () => {
   assert.match(adminSkillsSource, /<AdminConfirmDialog/);
   assert.doesNotMatch(foldersSource, /Close delete confirmation/);
   assert.doesNotMatch(wikiSource, /Close delete confirmation/);
+});
+
+test("all confirmation-only flows use the centered confirmation primitive", () => {
+  const wikiDiscardOpen = wikiSource.indexOf("open={discardDialogOpen}");
+  const wikiDiscard = wikiSource.slice(
+    wikiSource.lastIndexOf("<ActionConfirmDialog", wikiDiscardOpen),
+    wikiSource.indexOf("function WikiNavigationRow"),
+  );
+  const workspaceRecoveryOpen = runtimeSource.indexOf("open={workspaceResetRequest !== null}");
+  const workspaceRecovery = runtimeSource.slice(
+    runtimeSource.lastIndexOf("<ActionConfirmDialog", workspaceRecoveryOpen),
+  );
+  const nodeConfirmations = sandboxNodesSource.slice(
+    sandboxNodesSource.indexOf("function OfflineDialog"),
+  );
+
+  assert.match(wikiDiscard, /<ActionConfirmDialog/);
+  assert.doesNotMatch(wikiDiscard, /<Sheet|placement="right"/);
+  assert.match(workspaceRecovery, /<ActionConfirmDialog/);
+  assert.doesNotMatch(workspaceRecovery, /<Sheet|placement="right"/);
+  assert.match(nodeConfirmations, /title=\{`Offline \$\{target\.node\.name\}\?`\}/);
+  assert.match(nodeConfirmations, /open=\{phase === "confirm"\}/);
+  assert.match(nodeConfirmations, /title="Confirm sandbox capacity"/);
+  assert.doesNotMatch(nodeConfirmations, /Sheet\.Heading>Confirm sandbox capacity/);
 });
 
 test("folder chat actions remain identifiable and stable while editing or deleting", () => {

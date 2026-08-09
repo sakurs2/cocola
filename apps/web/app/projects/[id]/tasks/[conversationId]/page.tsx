@@ -126,6 +126,7 @@ export default function ProjectTaskPage() {
           className={`${merged ? "" : "ml-auto"} max-w-[min(24rem,48vw)]`}
           color="accent"
           size="sm"
+          title={branchName}
           variant="soft"
         >
           <GitBranch className="size-3.5" />

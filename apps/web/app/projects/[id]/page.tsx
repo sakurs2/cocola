@@ -74,6 +74,8 @@ export default function ProjectPage() {
     discardPendingProjectTask,
     activeSessionId,
     serverAcceptedSessionIds,
+    modelsLoaded,
+    selectedRuntime,
   } = useCocola();
   const [project, setProject] = useState<ProjectSummary | null>(
     projects.find((item) => item.id === projectID) ?? null,
@@ -143,17 +145,27 @@ export default function ProjectPage() {
     if (
       !project ||
       !tasksLoaded ||
+      !modelsLoaded ||
+      !selectedRuntime ||
       project.status !== "ready" ||
       !selectedBaseRef ||
       preparedProject.current === project.id
     )
       return;
     preparedProject.current = project.id;
-    const pendingTask = newProjectTask(project.id, project.runtime_id, selectedBaseRef);
+    const pendingTask = newProjectTask(project.id, selectedBaseRef);
     preparedSession.current = pendingTask.sessionId;
     setTaskBranchName(pendingTask.branchName);
     setComposerReady(true);
-  }, [newProjectTask, project, selectedBaseRef, tasks.length, tasksLoaded]);
+  }, [
+    modelsLoaded,
+    newProjectTask,
+    project,
+    selectedBaseRef,
+    selectedRuntime,
+    tasks.length,
+    tasksLoaded,
+  ]);
 
   useEffect(
     () => () => {
