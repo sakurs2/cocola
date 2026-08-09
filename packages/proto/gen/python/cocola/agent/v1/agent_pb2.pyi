@@ -327,16 +327,20 @@ class GitCommit(_message.Message):
     def __init__(self, sha: _Optional[str] = ..., parents: _Optional[_Iterable[str]] = ..., subject: _Optional[str] = ..., author_name: _Optional[str] = ..., authored_at: _Optional[str] = ..., refs: _Optional[_Iterable[str]] = ..., files_changed: _Optional[int] = ..., additions: _Optional[int] = ..., deletions: _Optional[int] = ..., body: _Optional[str] = ...) -> None: ...
 
 class GitCommitFile(_message.Message):
-    __slots__ = ("path", "old_path", "status", "binary")
+    __slots__ = ("path", "old_path", "status", "binary", "additions", "deletions")
     PATH_FIELD_NUMBER: _ClassVar[int]
     OLD_PATH_FIELD_NUMBER: _ClassVar[int]
     STATUS_FIELD_NUMBER: _ClassVar[int]
     BINARY_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONS_FIELD_NUMBER: _ClassVar[int]
+    DELETIONS_FIELD_NUMBER: _ClassVar[int]
     path: str
     old_path: str
     status: str
     binary: bool
-    def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., binary: bool = ...) -> None: ...
+    additions: int
+    deletions: int
+    def __init__(self, path: _Optional[str] = ..., old_path: _Optional[str] = ..., status: _Optional[str] = ..., binary: bool = ..., additions: _Optional[int] = ..., deletions: _Optional[int] = ...) -> None: ...
 
 class InspectWorkspaceGitResponse(_message.Message):
     __slots__ = ("snapshot", "diff", "binary", "truncated", "commit", "commit_files")

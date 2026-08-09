@@ -738,7 +738,7 @@ def commit_numstat(commit_sha, parent):
         fail("GIT_COMMIT_FAILED", "Could not read commit statistics")
     additions = 0
     deletions = 0
-    binary_paths = set()
+    path_stats = {}
     for raw in result.stdout.split(b"\0"):
         if not raw:
             continue
@@ -746,23 +746,40 @@ def commit_numstat(commit_sha, parent):
         if len(fields) != 3:
             continue
         if fields[0] == "-" or fields[1] == "-":
-            binary_paths.add(fields[2])
+            path_stats[fields[2]] = {"additions": 0, "deletions": 0, "binary": True}
             continue
         try:
-            additions += int(fields[0])
-            deletions += int(fields[1])
+            path_additions = int(fields[0])
+            path_deletions = int(fields[1])
         except ValueError:
             continue
-    return additions, deletions, binary_paths
+        additions += path_additions
+        deletions += path_deletions
+        path_stats[fields[2]] = {
+            "additions": path_additions,
+            "deletions": path_deletions,
+            "binary": False,
+        }
+    return additions, deletions, path_stats
 
 def commit_details(commit_sha):
     validate_commit(commit_sha)
     parent = commit_parent(commit_sha)
     commit = commit_metadata(commit_sha)
     files = commit_name_status(commit_sha, parent)
-    additions, deletions, binary_paths = commit_numstat(commit_sha, parent)
+    additions, deletions, path_stats = commit_numstat(commit_sha, parent)
     for value in files:
-        value["binary"] = value["path"] in binary_paths
+        stats = path_stats.get(value["path"], {})
+        if value["old_path"]:
+            old_stats = path_stats.get(value["old_path"], {})
+            stats = {
+                "additions": int(stats.get("additions", 0)) + int(old_stats.get("additions", 0)),
+                "deletions": int(stats.get("deletions", 0)) + int(old_stats.get("deletions", 0)),
+                "binary": bool(stats.get("binary")) or bool(old_stats.get("binary")),
+            }
+        value["binary"] = bool(stats.get("binary"))
+        value["additions"] = int(stats.get("additions", 0))
+        value["deletions"] = int(stats.get("deletions", 0))
     commit.update({
         "files_changed": len(files),
         "additions": additions,

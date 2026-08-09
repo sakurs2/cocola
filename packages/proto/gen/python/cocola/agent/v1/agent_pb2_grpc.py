@@ -101,8 +101,8 @@ class AgentRuntimeServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def PublishWorkspaceGit(self, request, context):
-        """PublishWorkspaceGit pushes a verified local Project workspace to a newly
-        created GitHub repository. The short-lived token travels in gRPC metadata.
+        """PublishWorkspaceGit pushes a verified, clean Project workspace to its
+        exact task branch. The repository-scoped token travels in gRPC metadata.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

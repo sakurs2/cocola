@@ -27,6 +27,8 @@ export type GitCommitFile = {
   old_path?: string;
   status: string;
   binary?: boolean;
+  additions: number;
+  deletions: number;
 };
 
 export type GitSnapshot = {

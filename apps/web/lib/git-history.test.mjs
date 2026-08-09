@@ -7,6 +7,7 @@ import {
   gitCommitBadges,
   gitCommitDescription,
   gitDiffGutterWidth,
+  groupGitCommitFiles,
 } from "./git-history.mjs";
 
 test("formats recent and historical commit times", () => {
@@ -51,4 +52,16 @@ test("removes a repeated subject from the commit body", () => {
     "More details.",
   );
   assert.equal(gitCommitDescription({ subject: "Add feature", body: "Add feature" }), "");
+});
+
+test("groups commit files by directory with root files first", () => {
+  const root = { path: "README.md" };
+  const scriptB = { path: "scripts/z.sh" };
+  const scriptA = { path: "scripts/a.sh" };
+  const archived = { path: "docs/archive/fix.md" };
+  assert.deepEqual(groupGitCommitFiles([scriptB, archived, root, scriptA]), [
+    { directory: "", files: [root] },
+    { directory: "docs/archive", files: [archived] },
+    { directory: "scripts", files: [scriptA, scriptB] },
+  ]);
 });

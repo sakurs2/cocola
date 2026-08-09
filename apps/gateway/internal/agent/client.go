@@ -160,6 +160,7 @@ type GitCommit struct {
 type GitCommitFile struct {
 	Path, OldPath, Status string
 	Binary                bool
+	Additions, Deletions  int
 }
 
 type GitSnapshot struct {
@@ -533,6 +534,7 @@ func (c *Client) InspectWorkspaceGit(ctx context.Context, request InspectRequest
 	for _, value := range response.GetCommitFiles() {
 		result.CommitFiles = append(result.CommitFiles, GitCommitFile{
 			Path: value.GetPath(), OldPath: value.GetOldPath(), Status: value.GetStatus(), Binary: value.GetBinary(),
+			Additions: int(value.GetAdditions()), Deletions: int(value.GetDeletions()),
 		})
 	}
 	return result, nil

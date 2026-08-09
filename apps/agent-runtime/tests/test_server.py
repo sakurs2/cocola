@@ -107,7 +107,15 @@ def test_git_inspection_proto_includes_history_and_commit_details():
                 "files_changed": 1,
                 "additions": 2,
             },
-            "commit_files": [{"path": "src/app.py", "status": "A", "binary": False}],
+            "commit_files": [
+                {
+                    "path": "src/app.py",
+                    "status": "A",
+                    "binary": False,
+                    "additions": 2,
+                    "deletions": 1,
+                }
+            ],
         }
     )
 
@@ -117,6 +125,8 @@ def test_git_inspection_proto_includes_history_and_commit_details():
     assert response.commit.body == "Add feature\n\nDetails"
     assert response.commit.files_changed == 1
     assert response.commit_files[0].path == "src/app.py"
+    assert response.commit_files[0].additions == 2
+    assert response.commit_files[0].deletions == 1
 
 
 class FakeContext:

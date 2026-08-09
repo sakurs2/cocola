@@ -241,10 +241,12 @@ type GitCommit struct {
 }
 
 type GitCommitFile struct {
-	Path    string `json:"path"`
-	OldPath string `json:"old_path,omitempty"`
-	Status  string `json:"status"`
-	Binary  bool   `json:"binary,omitempty"`
+	Path      string `json:"path"`
+	OldPath   string `json:"old_path,omitempty"`
+	Status    string `json:"status"`
+	Binary    bool   `json:"binary,omitempty"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
 }
 
 type GitSnapshot struct {

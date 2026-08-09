@@ -328,6 +328,8 @@ def _git_inspection_proto(result: dict[str, Any]) -> pb.InspectWorkspaceGitRespo
                 old_path=str(value.get("old_path") or ""),
                 status=str(value.get("status") or ""),
                 binary=bool(value.get("binary")),
+                additions=int(value.get("additions") or 0),
+                deletions=int(value.get("deletions") or 0),
             )
             for value in result.get("commit_files") or []
         ],

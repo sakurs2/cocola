@@ -12,6 +12,7 @@ const [
   sidebarSource,
   workspaceSource,
   workspaceShellSource,
+  gitPanelSource,
 ] = await Promise.all([
   read("../app/projects/[id]/page.tsx"),
   read("../app/projects/[id]/tasks/[conversationId]/page.tsx"),
@@ -20,6 +21,7 @@ const [
   read("../components/assistant-ui/heroui-workspace-sidebar.tsx"),
   read("../app/page.tsx"),
   read("../components/assistant-ui/workspace-shell.tsx"),
+  read("../components/assistant-ui/workspace-panel.tsx"),
 ]);
 
 test("new Project tasks expose an editable safe branch before the first message", () => {
@@ -35,7 +37,9 @@ test("new Project tasks expose an editable safe branch before the first message"
 });
 
 test("Project branch context is borderless and reveals the full truncated name on hover", () => {
-  assert.match(branchSource, /title=\{`\$\{branch \|\| "Loading branch"\}\\n\$\{title\}`\}/);
+  assert.match(branchSource, /<Tooltip delay=\{150\}>/);
+  assert.match(branchSource, /<Tooltip\.Content className="max-w-\[22rem\]">/);
+  assert.match(branchSource, /break-all font-mono text-xs/);
   assert.doesNotMatch(
     branchSource.slice(branchSource.indexOf("export function ProjectBranchBadge")),
     /border border-border/,
@@ -69,4 +73,17 @@ test("Project conversations appear in Chats with Project routing and identity", 
     sidebarSource,
     /conversation\.chat_type !== "scheduled_task" && !conversation\.project_id/,
   );
+});
+
+test("Project Git review uses a full-width progress rail and centered merge confirmation", () => {
+  assert.match(
+    gitPanelSource,
+    /grid-cols-\[auto_minmax\(1rem,1fr\)_auto_minmax\(1rem,1fr\)_auto\]/,
+  );
+  assert.match(gitPanelSource, /title="Squash merge this change request\?"/);
+  assert.match(gitPanelSource, /<ActionConfirmDialog[\s\S]*?confirmLabel="Squash merge"/);
+  assert.match(gitPanelSource, /groupGitCommitFiles\(files\)/);
+  assert.match(gitPanelSource, /group\.directory\.replaceAll\("\/", " \/ "\)/);
+  assert.match(gitPanelSource, /text-success">\+\{additions\}/);
+  assert.match(gitPanelSource, /text-danger">−\{deletions\}/);
 });

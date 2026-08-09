@@ -1,7 +1,7 @@
 "use client";
 
 import * as Popover from "@radix-ui/react-popover";
-import { Input, Label, TextField } from "@heroui/react";
+import { Button, Input, Label, TextField, Tooltip } from "@heroui/react";
 import { Command } from "cmdk";
 import { Check, ChevronDown, GitBranch, Loader2, Search } from "lucide-react";
 import {
@@ -307,13 +307,24 @@ export function ProjectBranchBadge({
       : baseRef
         ? `Based on ${baseRef}`
         : "Current project task branch";
+  const branchLabel = branch || "Loading branch";
   return (
-    <span
-      title={`${branch || "Loading branch"}\n${title}`}
-      className="flex max-w-[12rem] min-w-0 items-center gap-1.5 px-1 py-1 text-[12.5px] font-medium text-foreground"
-    >
-      <GitBranch className="size-4 shrink-0 text-indigo-600" />
-      <span className="truncate">{branch || "Loading branch"}</span>
-    </span>
+    <Tooltip delay={150}>
+      <Tooltip.Trigger>
+        <Button
+          aria-label={`${branchLabel}. ${title}`}
+          className="h-auto max-w-[12rem] min-w-0 gap-1.5 rounded-md px-1 py-1 text-[12.5px] font-medium text-foreground shadow-none"
+          size="sm"
+          variant="ghost"
+        >
+          <GitBranch className="size-4 shrink-0 text-indigo-600" />
+          <span className="truncate">{branchLabel}</span>
+        </Button>
+      </Tooltip.Trigger>
+      <Tooltip.Content className="max-w-[22rem]">
+        <span className="block break-all font-mono text-xs">{branchLabel}</span>
+        <span className="mt-0.5 block text-[11px] text-muted">{title}</span>
+      </Tooltip.Content>
+    </Tooltip>
   );
 }

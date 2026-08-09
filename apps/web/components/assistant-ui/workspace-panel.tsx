@@ -49,6 +49,7 @@ import {
   gitCommitBadges,
   gitCommitDescription,
   gitDiffGutterWidth,
+  groupGitCommitFiles,
 } from "@/lib/git-history.mjs";
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { dockPageInstanceID, dockPageInstanceLabel } from "@/lib/workspace-dock-tabs.mjs";
@@ -699,12 +700,16 @@ function ChangeRequestCard({
   hasCommits: boolean;
   workspaceHeadSHA: string;
 }) {
+  const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
   const status = changeRequest?.status || "working";
   const merged = status === "merged";
   const conflict = status === "conflict";
   const checksFailed = status === "failed" && changeRequest?.error_code === "CHECKS_FAILED";
   const blocked = conflict || status === "failed";
   const pending = status === "checks_pending";
+  useEffect(() => {
+    if (merged) setMergeConfirmOpen(false);
+  }, [merged]);
   const hasUnpublishedCommits = Boolean(
     changeRequest?.head_sha &&
     workspaceHeadSHA &&
@@ -741,62 +746,123 @@ function ChangeRequestCard({
           : { label: "Refresh status", kind: "refresh" as const };
 
   return (
-    <Card className="mx-2.5 mt-2.5 border border-border/70 bg-surface-secondary/25 shadow-none">
-      <Card.Content className="gap-2.5 p-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
-            {merged ? <GitMerge className="size-4" /> : <GitPullRequest className="size-4" />}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold">Change request</span>
-              <Chip
-                className="h-5 px-1.5 text-[9.5px]"
-                color={merged ? "success" : blocked ? "danger" : pending ? "warning" : "accent"}
-                size="sm"
-                variant="soft"
-              >
-                {merged
-                  ? "Merged"
-                  : checksFailed
-                    ? "Checks failed"
-                    : blocked
-                      ? "Conflict"
-                      : pending
-                        ? "Checks pending"
-                        : changeRequest
-                          ? "In review"
-                          : "Working"}
-              </Chip>
-            </div>
-            <p className="mt-0.5 text-[11px] leading-4 text-muted">{copy}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5" aria-label="Change request progress">
-          {["Changes", "Review", "Main"].map((label, index) => {
-            const complete = merged || (changeRequest ? index < 2 : index === 0 && hasCommits);
-            return (
-              <div key={label} className="flex min-w-0 flex-1 items-center gap-1.5">
-                <span
-                  className={cn(
-                    "size-1.5 shrink-0 rounded-full",
-                    complete
-                      ? "bg-success"
-                      : index === 1 && changeRequest
-                        ? "bg-accent"
-                        : "bg-border",
-                  )}
-                />
-                <span className="truncate text-[10px] font-medium text-muted">{label}</span>
-                {index < 2 ? <span className="h-px min-w-2 flex-1 bg-border" /> : null}
+    <>
+      <Card className="mx-2.5 mt-2.5 border border-border/70 bg-surface-secondary/25 shadow-none">
+        <Card.Content className="gap-2.5 p-3">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-accent/10 text-accent">
+              {merged ? <GitMerge className="size-4" /> : <GitPullRequest className="size-4" />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold">Change request</span>
+                <Chip
+                  className="h-5 px-1.5 text-[9.5px]"
+                  color={merged ? "success" : blocked ? "danger" : pending ? "warning" : "accent"}
+                  size="sm"
+                  variant="soft"
+                >
+                  {merged
+                    ? "Merged"
+                    : checksFailed
+                      ? "Checks failed"
+                      : blocked
+                        ? "Conflict"
+                        : pending
+                          ? "Checks pending"
+                          : changeRequest
+                            ? "In review"
+                            : "Working"}
+                </Chip>
               </div>
-            );
-          })}
-        </div>
-        {error ? <p className="text-[11px] text-danger">{error}</p> : null}
-        {action ? (
-          <div className="flex w-full items-center justify-end gap-1.5 pt-0.5">
-            {changeRequest?.provider === "github" && changeRequest.external_url ? (
+              <p className="mt-0.5 text-[11px] leading-4 text-muted">{copy}</p>
+            </div>
+          </div>
+          <div
+            className="grid w-full grid-cols-[auto_minmax(1rem,1fr)_auto_minmax(1rem,1fr)_auto] items-center gap-2"
+            aria-label="Change request progress"
+          >
+            {["Changes", "Review", "Main"].map((label, index) => {
+              const complete = merged || (changeRequest ? index < 2 : index === 0 && hasCommits);
+              const stage = (
+                <span key={label} className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      complete
+                        ? "bg-success"
+                        : index === 1 && changeRequest
+                          ? "bg-accent"
+                          : "bg-border",
+                    )}
+                  />
+                  <span className="text-[10px] font-medium text-muted">{label}</span>
+                </span>
+              );
+              return index < 2 ? (
+                <span key={label} className="contents">
+                  {stage}
+                  <span className="h-px w-full bg-border" />
+                </span>
+              ) : (
+                stage
+              );
+            })}
+          </div>
+          {error ? <p className="text-[11px] text-danger">{error}</p> : null}
+          {action ? (
+            <div className="flex w-full items-center justify-end gap-1.5 pt-0.5">
+              {changeRequest?.provider === "github" && changeRequest.external_url ? (
+                <Button
+                  className={GIT_ACTION_BUTTON_CLASS}
+                  size="sm"
+                  variant="outline"
+                  onPress={() =>
+                    window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
+                  }
+                >
+                  Open on GitHub
+                </Button>
+              ) : null}
+              {changeRequest && action.kind !== "refresh" ? (
+                <Button
+                  className={GIT_ACTION_BUTTON_CLASS}
+                  size="sm"
+                  variant="outline"
+                  onPress={() => void request("refresh")}
+                >
+                  Refresh
+                </Button>
+              ) : null}
+              <Button
+                className={GIT_ACTION_BUTTON_CLASS}
+                size="sm"
+                variant="primary"
+                isPending={loading}
+                isDisabled={
+                  action.kind === "create"
+                    ? workspaceDirty || !hasCommits
+                    : action.kind === "update"
+                      ? workspaceDirty
+                      : false
+                }
+                onPress={() => {
+                  if (action.kind === "merge") setMergeConfirmOpen(true);
+                  else void request(action.kind);
+                }}
+              >
+                {action.kind === "merge" ? (
+                  <GitMerge className="size-3.5" />
+                ) : action.kind === "update" ? (
+                  <UploadCloud className="size-3.5" />
+                ) : (
+                  <GitPullRequest className="size-3.5" />
+                )}
+                {action.label}
+              </Button>
+            </div>
+          ) : changeRequest?.provider === "github" && changeRequest.external_url ? (
+            <div className="flex justify-end">
               <Button
                 className={GIT_ACTION_BUTTON_CLASS}
                 size="sm"
@@ -807,57 +873,23 @@ function ChangeRequestCard({
               >
                 Open on GitHub
               </Button>
-            ) : null}
-            {changeRequest && action.kind !== "refresh" ? (
-              <Button
-                className={GIT_ACTION_BUTTON_CLASS}
-                size="sm"
-                variant="outline"
-                onPress={() => void request("refresh")}
-              >
-                Refresh
-              </Button>
-            ) : null}
-            <Button
-              className={GIT_ACTION_BUTTON_CLASS}
-              size="sm"
-              variant="primary"
-              isPending={loading}
-              isDisabled={
-                action.kind === "create"
-                  ? workspaceDirty || !hasCommits
-                  : action.kind === "update"
-                    ? workspaceDirty
-                    : false
-              }
-              onPress={() => void request(action.kind)}
-            >
-              {action.kind === "merge" ? (
-                <GitMerge className="size-3.5" />
-              ) : action.kind === "update" ? (
-                <UploadCloud className="size-3.5" />
-              ) : (
-                <GitPullRequest className="size-3.5" />
-              )}
-              {action.label}
-            </Button>
-          </div>
-        ) : changeRequest?.provider === "github" && changeRequest.external_url ? (
-          <div className="flex justify-end">
-            <Button
-              className={GIT_ACTION_BUTTON_CLASS}
-              size="sm"
-              variant="outline"
-              onPress={() =>
-                window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
-              }
-            >
-              Open on GitHub
-            </Button>
-          </div>
-        ) : null}
-      </Card.Content>
-    </Card>
+            </div>
+          ) : null}
+        </Card.Content>
+      </Card>
+      <ActionConfirmDialog
+        open={mergeConfirmOpen}
+        title="Squash merge this change request?"
+        description="All task commits will be combined into one commit on main. The task becomes read-only after the merge."
+        confirmLabel="Squash merge"
+        busy={loading}
+        error={error || null}
+        icon={GitMerge}
+        tone="primary"
+        onOpenChange={setMergeConfirmOpen}
+        onConfirm={() => void request("merge")}
+      />
+    </>
   );
 }
 
@@ -1161,6 +1193,10 @@ function GitCommitPanel({
   const { commit, files } = detail;
   const badges = gitCommitBadges(commit, snapshot);
   const description = gitCommitDescription(commit);
+  const fileGroups = useMemo(
+    () => groupGitCommitFiles(files) as Array<{ directory: string; files: GitCommitFile[] }>,
+    [files],
+  );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <GitPanelBackHeader title={commit.subject || "Commit details"} onBack={onBack} />
@@ -1204,22 +1240,26 @@ function GitCommitPanel({
           </div>
         </div>
         {files.length ? (
-          <ListView
-            aria-label="Files changed in commit"
-            className="rounded-none border-0 bg-transparent shadow-none"
-            selectionMode="none"
-            variant="secondary"
-            onAction={(key) => {
-              const file = files.find(
-                (candidate) => `${candidate.status}:${candidate.path}` === String(key),
-              );
-              if (file) onOpenDiff(file);
-            }}
-          >
-            {files.map((file) => (
-              <GitFileRow key={`${file.status}:${file.path}`} file={file} />
+          <div className="py-2" aria-label="Files changed in commit">
+            {fileGroups.map((group) => (
+              <div key={group.directory || "."}>
+                {group.directory ? (
+                  <div className="flex h-8 items-center gap-2 px-4 text-[11px] font-semibold text-foreground">
+                    <Folder className="size-3.5 shrink-0 text-muted" />
+                    <span className="truncate">{group.directory.replaceAll("/", " / ")}</span>
+                  </div>
+                ) : null}
+                {group.files.map((file) => (
+                  <GitFileRow
+                    key={`${file.status}:${file.path}`}
+                    file={file}
+                    indented={Boolean(group.directory)}
+                    onOpen={() => onOpenDiff(file)}
+                  />
+                ))}
+              </div>
             ))}
-          </ListView>
+          </div>
         ) : (
           <GitEmptyState
             icon={<File className="size-5 text-accent" />}
@@ -1237,35 +1277,46 @@ function GitCommitPanel({
   );
 }
 
-function GitFileRow({ file }: { file: GitCommitFile }) {
-  const { path, old_path: oldPath, status, binary } = file;
+function GitFileRow({
+  file,
+  indented,
+  onOpen,
+}: {
+  file: GitCommitFile;
+  indented: boolean;
+  onOpen: () => void;
+}) {
+  const { path, old_path: oldPath, binary, additions = 0, deletions = 0 } = file;
   const slash = path.lastIndexOf("/");
   const name = slash < 0 ? path : path.slice(slash + 1);
   return (
-    <ListView.Item
-      id={`${status}:${path}`}
-      textValue={`${path} ${oldPath ?? ""}`}
-      className="group rounded-none px-4 py-2.5"
+    <button
+      type="button"
+      title={oldPath ? `${oldPath} → ${path}` : path}
+      className={cn(
+        "group flex w-full min-w-0 items-center gap-2 py-1.5 pr-4 text-left transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40",
+        indented ? "pl-9" : "pl-4",
+      )}
+      onClick={onOpen}
     >
-      <ListView.ItemContent className="gap-2.5">
-        <MaterialFileIcon
-          name={resolveFileType(name).icon}
-          className="flex size-4 shrink-0 items-center justify-center"
-        />
-        <span className="flex min-w-0 flex-col">
-          <ListView.Title>{path}</ListView.Title>
-          {oldPath || binary ? (
-            <ListView.Description>
-              {oldPath ? `${oldPath} → ${path}` : "Binary file"}
-            </ListView.Description>
-          ) : null}
+      <MaterialFileIcon
+        name={resolveFileType(name).icon}
+        className="flex size-3.5 shrink-0 items-center justify-center"
+      />
+      <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-foreground">
+        {name}
+      </span>
+      {binary ? (
+        <span className="shrink-0 text-[10px] text-muted">Binary</span>
+      ) : (
+        <span className="shrink-0 font-mono text-[10.5px]">
+          (<span className="text-success">+{additions}</span>
+          <span className="px-1 text-muted">|</span>
+          <span className="text-danger">−{deletions}</span>)
         </span>
-      </ListView.ItemContent>
-      <ListView.ItemAction>
-        <GitStatusLetter status={status} />
-        <ChevronRight className="size-3.5 text-muted/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
-      </ListView.ItemAction>
-    </ListView.Item>
+      )}
+      <ChevronRight className="size-3.5 shrink-0 text-muted/40 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+    </button>
   );
 }
 

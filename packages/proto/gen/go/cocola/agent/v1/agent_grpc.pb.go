@@ -36,8 +36,8 @@ type AgentRuntimeServiceClient interface {
 	// InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
 	// sandbox; merely opening the Git tab never invokes it.
 	InspectWorkspaceGit(ctx context.Context, in *InspectWorkspaceGitRequest, opts ...grpc.CallOption) (*InspectWorkspaceGitResponse, error)
-	// PublishWorkspaceGit pushes a verified local Project workspace to a newly
-	// created GitHub repository. The short-lived token travels in gRPC metadata.
+	// PublishWorkspaceGit pushes a verified, clean Project workspace to its
+	// exact task branch. The repository-scoped token travels in gRPC metadata.
 	PublishWorkspaceGit(ctx context.Context, in *PublishWorkspaceGitRequest, opts ...grpc.CallOption) (*PublishWorkspaceGitResponse, error)
 }
 
@@ -127,8 +127,8 @@ type AgentRuntimeServiceServer interface {
 	// InspectWorkspaceGit is an explicit user-triggered read. It may acquire the
 	// sandbox; merely opening the Git tab never invokes it.
 	InspectWorkspaceGit(context.Context, *InspectWorkspaceGitRequest) (*InspectWorkspaceGitResponse, error)
-	// PublishWorkspaceGit pushes a verified local Project workspace to a newly
-	// created GitHub repository. The short-lived token travels in gRPC metadata.
+	// PublishWorkspaceGit pushes a verified, clean Project workspace to its
+	// exact task branch. The repository-scoped token travels in gRPC metadata.
 	PublishWorkspaceGit(context.Context, *PublishWorkspaceGitRequest) (*PublishWorkspaceGitResponse, error)
 	mustEmbedUnimplementedAgentRuntimeServiceServer()
 }

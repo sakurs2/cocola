@@ -358,7 +358,14 @@ def test_git_history_and_commit_details_are_bounded_and_readable(tmp_path):
     assert detail_payload["commit"]["additions"] == 1
     assert detail_payload["commit"]["deletions"] == 0
     assert detail_payload["commit_files"] == [
-        {"path": "src/app.py", "old_path": "", "status": "A", "binary": False}
+        {
+            "path": "src/app.py",
+            "old_path": "",
+            "status": "A",
+            "binary": False,
+            "additions": 1,
+            "deletions": 0,
+        }
     ]
 
     patch = subprocess.run(

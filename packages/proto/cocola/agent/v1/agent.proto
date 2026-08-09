@@ -245,6 +245,8 @@ message GitCommitFile {
   string old_path = 2;
   string status = 3;
   bool binary = 4;
+  int32 additions = 5;
+  int32 deletions = 6;
 }
 
 message InspectWorkspaceGitResponse {

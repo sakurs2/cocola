@@ -505,6 +505,7 @@ func (a *API) inspectGit(w http.ResponseWriter, r *http.Request) {
 	for _, value := range result.CommitFiles {
 		commitFiles = append(commitFiles, project.GitCommitFile{
 			Path: value.Path, OldPath: value.OldPath, Status: value.Status, Binary: value.Binary,
+			Additions: value.Additions, Deletions: value.Deletions,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

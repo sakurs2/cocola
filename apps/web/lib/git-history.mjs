@@ -60,3 +60,23 @@ export function gitCommitDescription(commit) {
   if (subject && body.startsWith(`${subject}\n`)) return body.slice(subject.length).trim();
   return body;
 }
+
+export function groupGitCommitFiles(files) {
+  const groups = new Map();
+  for (const file of files ?? []) {
+    const path = String(file?.path ?? "");
+    const slash = path.lastIndexOf("/");
+    const directory = slash < 0 ? "" : path.slice(0, slash);
+    groups.set(directory, [...(groups.get(directory) ?? []), file]);
+  }
+  return [...groups.entries()]
+    .sort(([left], [right]) => {
+      if (!left) return -1;
+      if (!right) return 1;
+      return left.localeCompare(right);
+    })
+    .map(([directory, groupedFiles]) => ({
+      directory,
+      files: groupedFiles.sort((left, right) => left.path.localeCompare(right.path)),
+    }));
+}
