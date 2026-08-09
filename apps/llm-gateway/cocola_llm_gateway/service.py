@@ -212,6 +212,21 @@ class GatewayService:
         finally:
             await self._registry_source.release_registry(registry)
 
+    async def memory_embedding_configured(self) -> bool:
+        """Report route availability without executing or billing a model call."""
+        registry = await self._registry_source.acquire_registry(force_refresh=True)
+        try:
+            route_id = registry.memory_embedding_route_id
+            if not route_id:
+                return False
+            try:
+                registry.resolve_embeddings(route_id)
+            except CocolaError:
+                return False
+            return True
+        finally:
+            await self._registry_source.release_registry(registry)
+
     async def memory_chat_completion(self, payload: dict) -> dict:
         """Serve OpenViking's narrow text-only extraction contract.
 

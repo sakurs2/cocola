@@ -11,16 +11,17 @@ import (
 )
 
 type captureJob struct {
-	RunID               string
-	Identity            Identity
-	ConversationID      string
-	Epoch               int64
-	Status              string
-	Attempts            int
-	OpenVikingSessionID string
-	OpenVikingTaskID    string
-	RecalledURIs        []string
-	CreatedAt           time.Time
+	RunID                 string
+	Identity              Identity
+	ConversationID        string
+	Epoch                 int64
+	Status                string
+	AttemptCount          int
+	ProviderSessionID     string
+	ProviderTaskID        string
+	CancellationRequested bool
+	RecalledURIs          []string
+	CreatedAt             time.Time
 }
 
 func (s *Service) worker() {
@@ -33,6 +34,11 @@ func (s *Service) worker() {
 			return
 		case <-s.wake:
 		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(s.workerCtx, 10*time.Second)
+			if err := s.cleanupCaptureJobs(ctx); err != nil && s.log != nil {
+				s.log.Warn("memory capture cleanup failed: " + err.Error())
+			}
+			cancel()
 		}
 		s.processAvailable(20)
 	}
@@ -59,13 +65,6 @@ func (s *Service) processAvailable(limit int) {
 }
 
 func (s *Service) processOne(ctx context.Context) (bool, error) {
-	enabled, err := s.enabled(ctx)
-	if errors.Is(err, ErrNotReady) {
-		return false, nil
-	}
-	if err != nil || !enabled {
-		return false, err
-	}
 	job, err := s.claimJob(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -73,7 +72,17 @@ func (s *Service) processOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if job.OpenVikingTaskID != "" {
+	if job.CancellationRequested || job.Status == "cancel_requested" {
+		return true, s.cancelCaptureJob(ctx, job)
+	}
+	enabled, err := s.enabled(ctx)
+	if errors.Is(err, ErrNotReady) {
+		return false, nil
+	}
+	if err != nil || !enabled {
+		return false, err
+	}
+	if job.ProviderTaskID != "" {
 		return true, s.pollJob(ctx, job)
 	}
 	return true, s.submitJob(ctx, job)
@@ -88,19 +97,24 @@ func (s *Service) claimJob(ctx context.Context) (captureJob, error) {
 	var job captureJob
 	var recalled []byte
 	err = tx.QueryRow(ctx, `SELECT j.run_id, j.tenant_id, j.user_id,
-		j.conversation_id, j.epoch, j.status, j.attempts, j.openviking_session_id,
-		j.openviking_task_id, j.recalled_uris, j.created_at
+		j.conversation_id, j.epoch, j.status, j.attempt_count, j.provider_session_id,
+		j.provider_task_id, j.cancellation_requested, j.recalled_uris, j.created_at
 		FROM memory_capture_jobs j
 		LEFT JOIN memory_user_settings s
 			ON s.tenant_id=j.tenant_id AND s.user_id=j.user_id
-		WHERE j.status IN ('pending','submitted','retry')
-			AND j.next_attempt_at<=now()
-			AND j.epoch=COALESCE(s.epoch, 0)
-		ORDER BY j.next_attempt_at, j.created_at
+		WHERE j.next_attempt_at<=now()
+			AND (
+				(j.status IN ('pending','processing','submitting')
+					AND j.epoch=COALESCE(s.epoch, 0))
+				OR j.status='cancel_requested'
+				OR j.cancellation_requested
+			)
+		ORDER BY j.cancellation_requested DESC, j.next_attempt_at, j.created_at
 		FOR UPDATE OF j SKIP LOCKED LIMIT 1`).Scan(
 		&job.RunID, &job.Identity.TenantID, &job.Identity.UserID,
-		&job.ConversationID, &job.Epoch, &job.Status, &job.Attempts,
-		&job.OpenVikingSessionID, &job.OpenVikingTaskID, &recalled, &job.CreatedAt,
+		&job.ConversationID, &job.Epoch, &job.Status, &job.AttemptCount,
+		&job.ProviderSessionID, &job.ProviderTaskID, &job.CancellationRequested,
+		&recalled, &job.CreatedAt,
 	)
 	if err != nil {
 		return captureJob{}, err
@@ -108,7 +122,8 @@ func (s *Service) claimJob(ctx context.Context) (captureJob, error) {
 	if err := json.Unmarshal(recalled, &job.RecalledURIs); err != nil {
 		return captureJob{}, err
 	}
-	_, err = tx.Exec(ctx, `UPDATE memory_capture_jobs SET status='submitted',
+	_, err = tx.Exec(ctx, `UPDATE memory_capture_jobs SET
+		status=CASE WHEN cancellation_requested THEN status ELSE 'processing' END,
 		next_attempt_at=now()+interval '2 minutes', updated_at=now() WHERE run_id=$1`, job.RunID)
 	if err != nil {
 		return captureJob{}, err
@@ -121,91 +136,99 @@ func (s *Service) claimJob(ctx context.Context) (captureJob, error) {
 
 func (s *Service) submitJob(ctx context.Context, job captureJob) error {
 	current, err := s.captureJobCurrent(ctx, job)
-	if err != nil {
+	if err != nil || !current {
 		return err
 	}
-	if !current {
-		return nil
-	}
-	userText, assistantText, includeAssistant, err := s.captureText(ctx, job.RunID)
-	if err != nil {
-		return s.failJob(ctx, job, "LOAD_CONVERSATION")
-	}
-	if userText == "" {
-		return s.failJob(ctx, job, "EMPTY_USER_MESSAGE")
-	}
-	sessionID := job.OpenVikingSessionID
+	sessionID := job.ProviderSessionID
 	if sessionID == "" {
 		sessionID = "cocola-" + job.RunID
 	}
-	if captureNeedsSessionReset(job.Status) {
-		handled, recoveryErr := s.recoverCommit(ctx, job, sessionID)
-		if recoveryErr != nil {
-			return recoveryErr
+	if task, found, taskErr := s.client.latestCommitTask(ctx, job.Identity, sessionID); taskErr != nil {
+		return s.retryJob(ctx, job, "TASK_LOOKUP")
+	} else if found {
+		return s.adoptTask(ctx, job, sessionID, task)
+	}
+
+	userText, assistantText, includeAssistant, err := s.captureText(ctx, job.RunID)
+	if err != nil {
+		if permanentCaptureLoadFailure(err) {
+			return s.deadJob(ctx, job.RunID, "LOAD_CONVERSATION")
 		}
-		if handled {
-			return nil
+		return s.retryJob(ctx, job, "LOAD_CONVERSATION")
+	}
+	if userText == "" || !includeAssistant || assistantText == "" {
+		return s.deadJob(ctx, job.RunID, "INCOMPLETE_TURN")
+	}
+	messageCount, err := s.client.ensureSession(ctx, job.Identity, sessionID)
+	if err != nil {
+		return s.retryJob(ctx, job, "SESSION_GET")
+	}
+	switch messageCount {
+	case 0:
+		if err := s.client.addTurn(
+			ctx, job.Identity, sessionID, userText, assistantText, job.RecalledURIs,
+		); err != nil {
+			return s.retryJob(ctx, job, "MESSAGE_APPEND")
 		}
-		if err := s.cleanupCaptureSession(ctx, job.Identity, sessionID); err != nil {
-			return s.failJob(ctx, job, "SESSION_RESET")
-		}
+	case 2:
+		// A prior attempt wrote the one user/assistant batch but did not persist
+		// the commit response. Reuse it; never append the turn a second time.
+	default:
+		return s.deadJob(ctx, job.RunID, "SESSION_MESSAGE_COUNT")
 	}
-	if err := s.client.createSession(ctx, job.Identity, sessionID); err != nil {
-		return s.failJob(ctx, job, "SESSION_CREATE")
+	current, err = s.markJobSubmitting(ctx, job)
+	if err != nil || !current {
+		return err
 	}
-	messages := []map[string]string{{"role": "user", "content": userText}}
-	if includeAssistant && assistantText != "" {
-		messages = append(messages, map[string]string{
-			"role": "assistant", "content": assistantText,
-		})
+	taskID, err := s.client.commit(ctx, job.Identity, sessionID)
+	if err != nil {
+		return s.retryJob(ctx, job, "COMMIT")
 	}
-	if err := s.client.addMessages(ctx, job.Identity, sessionID, messages); err != nil {
-		_ = s.cleanupCaptureSession(ctx, job.Identity, sessionID)
-		return s.failJob(ctx, job, "MESSAGE_APPEND")
+	if taskID == "" {
+		return s.deadJob(ctx, job.RunID, "COMMIT_NO_TASK")
 	}
-	if err := s.client.used(ctx, job.Identity, sessionID, job.RecalledURIs); err != nil {
-		_ = s.cleanupCaptureSession(ctx, job.Identity, sessionID)
-		return s.failJob(ctx, job, "CONTEXT_USAGE")
-	}
-	current, err = s.captureJobCurrent(ctx, job)
+	var cancellationRequested bool
+	err = s.pool.QueryRow(ctx, `UPDATE memory_capture_jobs SET
+		status=CASE WHEN cancellation_requested THEN status ELSE 'processing' END,
+		provider_session_id=$2, provider_task_id=$3,
+		next_attempt_at=now()+interval '30 seconds', last_error_code='', updated_at=now()
+		WHERE run_id=$1 AND status IN ('submitting','cancel_requested')
+		RETURNING cancellation_requested`, job.RunID, sessionID, taskID).
+		Scan(&cancellationRequested)
 	if err != nil {
 		return err
 	}
-	if !current {
-		_ = s.client.deleteSession(ctx, job.Identity, sessionID)
-		return nil
+	if cancellationRequested {
+		job.Status = "submitting"
+		job.CancellationRequested = true
+		job.ProviderSessionID = sessionID
+		job.ProviderTaskID = taskID
+		return s.cancelCaptureJob(ctx, job)
 	}
-	taskID, err := s.client.commit(ctx, job.Identity, sessionID)
-	if err != nil || taskID == "" {
-		// Commit archives synchronously before OpenViking returns its task ID. Keep
-		// the deterministic session so a retry can recover the task by resource_id
-		// (or its archive marker) instead of submitting the same turn twice.
-		return s.failJob(ctx, job, "COMMIT")
-	}
-	_, err = s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='submitted',
-		openviking_session_id=$2, openviking_task_id=$3,
-		next_attempt_at=now()+interval '30 seconds', last_error_code='', updated_at=now()
-		WHERE run_id=$1 AND status<>'cancelled'`, job.RunID, sessionID, taskID)
-	return err
+	return nil
 }
 
-func captureNeedsSessionReset(status string) bool {
-	return status == "submitted" || status == "retry"
-}
-
-func (s *Service) cleanupCaptureSession(
+func (s *Service) adoptTask(
 	ctx context.Context,
-	identity Identity,
+	job captureJob,
 	sessionID string,
+	task openVikingTask,
 ) error {
-	if sessionID == "" {
-		return nil
+	switch task.Status {
+	case "completed", "success", "succeeded":
+		return s.completeJob(ctx, job.RunID)
+	case "failed", "error":
+		return s.deadJob(ctx, job.RunID, "EXTRACTION_FAILED")
+	case "cancelled":
+		return s.cancelJob(ctx, job.RunID)
+	default:
+		_, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='processing',
+			provider_session_id=$2, provider_task_id=$3,
+			next_attempt_at=now()+interval '30 seconds', last_error_code='', updated_at=now()
+			WHERE run_id=$1 AND NOT cancellation_requested
+				AND status NOT IN ('cancelled','cancel_requested')`, job.RunID, sessionID, task.ID)
+		return err
 	}
-	err := s.client.deleteSession(ctx, identity, sessionID)
-	if errors.Is(err, ErrNotFound) {
-		return nil
-	}
-	return err
 }
 
 func (s *Service) captureJobCurrent(ctx context.Context, job captureJob) (bool, error) {
@@ -214,141 +237,91 @@ func (s *Service) captureJobCurrent(ctx context.Context, job captureJob) (bool, 
 		SELECT 1 FROM memory_capture_jobs j
 		LEFT JOIN memory_user_settings u
 			ON u.tenant_id=j.tenant_id AND u.user_id=j.user_id
-		WHERE j.run_id=$1 AND j.status<>'cancelled'
+		WHERE j.run_id=$1 AND NOT j.cancellation_requested
+			AND j.status IN ('pending','processing','submitting')
 			AND j.epoch=COALESCE(u.epoch, 0)
 	)`, job.RunID).Scan(&current)
 	return current, err
 }
 
+func (s *Service) markJobSubmitting(ctx context.Context, job captureJob) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs j
+		SET status='submitting', next_attempt_at=now()+interval '1 minute', updated_at=now()
+		FROM memory_user_settings u
+		WHERE j.run_id=$1 AND j.tenant_id=u.tenant_id AND j.user_id=u.user_id
+			AND j.epoch=u.epoch AND NOT j.cancellation_requested
+			AND j.status IN ('processing','submitting')`, job.RunID)
+	return tag.RowsAffected() > 0, err
+}
+
 func (s *Service) pollJob(ctx context.Context, job captureJob) error {
-	status, err := s.client.taskStatus(ctx, job.Identity, job.OpenVikingTaskID)
+	if capturePollExpired(job.CreatedAt, time.Now(), s.cfg.CaptureMaxRetryHorizon) {
+		return s.deadJob(ctx, job.RunID, "TASK_POLL_TIMEOUT")
+	}
+	status, err := s.client.taskStatus(ctx, job.Identity, job.ProviderTaskID)
 	if errors.Is(err, ErrNotFound) {
-		if _, clearErr := s.pool.Exec(ctx, `UPDATE memory_capture_jobs
-			SET openviking_task_id='', updated_at=now()
-			WHERE run_id=$1 AND status<>'cancelled'`, job.RunID); clearErr != nil {
-			return clearErr
-		}
-		job.OpenVikingTaskID = ""
-		handled, recoveryErr := s.recoverCommit(ctx, job, job.OpenVikingSessionID)
-		if recoveryErr != nil {
-			return recoveryErr
-		}
-		if handled {
-			return nil
-		}
-		if cleanupErr := s.cleanupCaptureSession(
-			ctx, job.Identity, job.OpenVikingSessionID,
-		); cleanupErr != nil {
-			return s.failJob(ctx, job, "SESSION_RESET")
-		}
-		return s.failJob(ctx, job, "TASK_NOT_FOUND")
+		return s.deadJob(ctx, job.RunID, "TASK_NOT_FOUND")
 	}
 	if err != nil {
-		return s.failJob(ctx, job, "TASK_POLL")
+		_, updateErr := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET
+			next_attempt_at=now()+interval '30 seconds', last_error_code='TASK_POLL', updated_at=now()
+			WHERE run_id=$1 AND status='processing'`, job.RunID)
+		return updateErr
 	}
 	switch status {
 	case "completed", "success", "succeeded":
 		return s.completeJob(ctx, job.RunID)
-	case "failed", "error", "cancelled":
-		_, _ = s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET openviking_task_id=''
-			WHERE run_id=$1 AND status<>'cancelled'`, job.RunID)
-		if job.OpenVikingSessionID != "" {
-			_ = s.client.deleteSession(ctx, job.Identity, job.OpenVikingSessionID)
-		}
-		return s.failJob(ctx, job, "EXTRACTION_FAILED")
+	case "failed", "error":
+		return s.deadJob(ctx, job.RunID, "EXTRACTION_FAILED")
+	case "cancelled":
+		return s.cancelJob(ctx, job.RunID)
 	default:
-		_, err = s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='submitted',
+		_, err = s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='processing',
 			next_attempt_at=now()+interval '30 seconds', updated_at=now()
-			WHERE run_id=$1 AND status<>'cancelled'`, job.RunID)
+			WHERE run_id=$1 AND NOT cancellation_requested
+				AND status NOT IN ('cancelled','cancel_requested')`, job.RunID)
 		return err
 	}
 }
 
-type commitRecoveryDecision int
-
-const (
-	commitRecoveryResubmit commitRecoveryDecision = iota
-	commitRecoveryAdopt
-	commitRecoveryWait
-	commitRecoveryComplete
-)
-
-func decideCommitRecovery(task *openVikingTask, archive commitArchiveState) commitRecoveryDecision {
-	if task != nil {
-		switch task.Status {
-		case "completed", "success", "succeeded":
-			return commitRecoveryComplete
-		case "failed", "error", "cancelled":
-			return commitRecoveryResubmit
-		default:
-			return commitRecoveryAdopt
-		}
-	}
-	switch archive {
-	case commitArchiveCompleted:
-		return commitRecoveryComplete
-	case commitArchivePending:
-		return commitRecoveryWait
-	default:
-		return commitRecoveryResubmit
-	}
+func permanentCaptureLoadFailure(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errCapturePayload)
 }
 
-func (s *Service) recoverCommit(
-	ctx context.Context,
-	job captureJob,
-	sessionID string,
-) (bool, error) {
-	task, found, err := s.client.latestCommitTask(ctx, job.Identity, sessionID)
-	if err != nil {
-		return true, s.failJob(ctx, job, "COMMIT_RECOVERY")
-	}
-	archive := commitArchiveAbsent
-	if !found {
-		archive, err = s.client.commitArchiveState(ctx, job.Identity, sessionID)
-		if err != nil {
-			return true, s.failJob(ctx, job, "COMMIT_RECOVERY")
-		}
-	}
-	var recovered *openVikingTask
-	if found {
-		recovered = &task
-	}
-	switch decideCommitRecovery(recovered, archive) {
-	case commitRecoveryComplete:
-		return true, s.completeJob(ctx, job.RunID)
-	case commitRecoveryAdopt:
-		_, err = s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='submitted',
-			openviking_session_id=$2, openviking_task_id=$3,
-			next_attempt_at=now(), last_error_code='', updated_at=now()
-			WHERE run_id=$1 AND status<>'cancelled'`, job.RunID, sessionID, task.ID)
-		return true, err
-	case commitRecoveryWait:
-		if time.Since(job.CreatedAt) >= s.cfg.CaptureMaxRetryHorizon {
-			return true, s.failJob(ctx, job, "COMMIT_RECOVERY_TIMEOUT")
-		}
-		_, err = s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='submitted',
-			openviking_session_id=$2, openviking_task_id='',
-			next_attempt_at=now()+interval '30 seconds', last_error_code='COMMIT_RECOVERY',
-			updated_at=now() WHERE run_id=$1 AND status<>'cancelled'`, job.RunID, sessionID)
-		return true, err
-	default:
-		return false, nil
-	}
+func capturePollExpired(createdAt, now time.Time, horizon time.Duration) bool {
+	return !createdAt.IsZero() && now.Sub(createdAt) >= horizon
 }
 
 func (s *Service) completeJob(ctx context.Context, runID string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='completed',
 		next_attempt_at=now(), last_error_code='', updated_at=now()
-		WHERE run_id=$1 AND status<>'cancelled'`, runID)
+		WHERE run_id=$1 AND NOT cancellation_requested
+			AND status NOT IN ('cancelled','cancel_requested')`, runID)
 	if err == nil && tag.RowsAffected() > 0 {
 		s.metrics.capture("completed")
 	}
 	return err
 }
 
-func (s *Service) failJob(ctx context.Context, job captureJob, code string) error {
-	attempts := job.Attempts + 1
+func (s *Service) cancelJob(ctx context.Context, runID string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='cancelled',
+		cancellation_requested=TRUE, next_attempt_at=now(), last_error_code='', updated_at=now()
+		WHERE run_id=$1`, runID)
+	return err
+}
+
+func (s *Service) deadJob(ctx context.Context, runID, code string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='dead',
+		last_error_code=$2, updated_at=now() WHERE run_id=$1
+			AND NOT cancellation_requested AND status NOT IN ('cancelled','cancel_requested')`, runID, code)
+	if err == nil && tag.RowsAffected() > 0 {
+		s.metrics.capture("dead")
+	}
+	return err
+}
+
+func (s *Service) retryJob(ctx context.Context, job captureJob, code string) error {
+	attempts := job.AttemptCount + 1
 	backoff, dead := captureRetryDelay(
 		attempts,
 		time.Since(job.CreatedAt),
@@ -356,18 +329,12 @@ func (s *Service) failJob(ctx context.Context, job captureJob, code string) erro
 		s.cfg.CaptureMaxRetryHorizon,
 	)
 	if dead {
-		tag, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='dead',
-			attempts=$2, last_error_code=$3, updated_at=now()
-			WHERE run_id=$1 AND status<>'cancelled'`,
-			job.RunID, attempts, code)
-		if err == nil && tag.RowsAffected() > 0 {
-			s.metrics.capture("dead")
-		}
-		return err
+		return s.deadJob(ctx, job.RunID, code)
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='retry',
-		attempts=$2, next_attempt_at=$3, last_error_code=$4, updated_at=now()
-		WHERE run_id=$1 AND status<>'cancelled'`,
+	tag, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET status='pending',
+		attempt_count=$2, next_attempt_at=$3, last_error_code=$4, updated_at=now()
+		WHERE run_id=$1 AND NOT cancellation_requested
+			AND status NOT IN ('cancelled','cancel_requested')`,
 		job.RunID, attempts, time.Now().Add(backoff), code)
 	if err == nil && tag.RowsAffected() > 0 {
 		s.metrics.capture("retry")
@@ -384,12 +351,12 @@ func captureRetryDelay(
 	if attempts >= attemptLimit || age >= horizon {
 		return 0, true
 	}
-	backoff := time.Minute
-	for step := 1; step < attempts && backoff < 6*time.Hour; step++ {
-		backoff *= 2
+	backoff := 15 * time.Second
+	for step := 1; step < attempts && backoff < 2*time.Hour; step++ {
+		backoff *= 4
 	}
-	if backoff > 6*time.Hour {
-		backoff = 6 * time.Hour
+	if backoff > 2*time.Hour {
+		backoff = 2 * time.Hour
 	}
 	remaining := horizon - age
 	if backoff > remaining {
@@ -416,14 +383,76 @@ func (s *Service) captureText(
 	}
 	userText, err := allTextParts(userParts)
 	if err != nil {
-		return "", "", false, err
+		return "", "", false, fmt.Errorf("%w: user message: %v", errCapturePayload, err)
 	}
 	includeAssistant := status == "success"
 	if !includeAssistant {
 		return userText, "", false, nil
 	}
 	assistantText, err := finalTextParts(assistantParts)
-	return userText, assistantText, true, err
+	if err != nil {
+		return "", "", false, fmt.Errorf("%w: assistant message: %v", errCapturePayload, err)
+	}
+	return userText, assistantText, true, nil
+}
+
+var errCapturePayload = errors.New("memory: invalid capture payload")
+
+func (s *Service) cancelCaptureJob(ctx context.Context, job captureJob) error {
+	sessionID := job.ProviderSessionID
+	if sessionID == "" {
+		sessionID = "cocola-" + job.RunID
+	}
+	taskID := job.ProviderTaskID
+	if taskID == "" {
+		task, found, err := s.client.latestCommitTask(ctx, job.Identity, sessionID)
+		if err != nil {
+			return s.retryCancellation(ctx, job, "CANCEL_TASK_LOOKUP")
+		}
+		if !found {
+			// A submitting lease means another worker may still be inside Commit.
+			// Recheck after the lease rather than declaring cancellation complete.
+			if job.Status == "submitting" {
+				return s.retryCancellation(ctx, job, "CANCEL_TASK_PENDING")
+			}
+			return s.cancelJob(ctx, job.RunID)
+		}
+		taskID = task.ID
+		if terminalTaskStatus(task.Status) {
+			return s.cancelJob(ctx, job.RunID)
+		}
+	}
+	if err := s.cancelAndWait(ctx, job.Identity, taskID); err != nil {
+		return s.retryCancellation(ctx, job, "CANCEL_TASK")
+	}
+	return s.cancelJob(ctx, job.RunID)
+}
+
+func (s *Service) retryCancellation(ctx context.Context, job captureJob, code string) error {
+	attempts := job.AttemptCount + 1
+	backoff := 15 * time.Second
+	if attempts > 1 {
+		backoff = time.Minute
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE memory_capture_jobs SET
+		cancellation_requested=TRUE,
+		status=CASE WHEN status='submitting' THEN status ELSE 'cancel_requested' END,
+		attempt_count=$2, next_attempt_at=$3, last_error_code=$4, updated_at=now()
+		WHERE run_id=$1 AND status NOT IN ('cancelled','completed','dead')`,
+		job.RunID, attempts, time.Now().Add(backoff), code)
+	return err
+}
+
+func (s *Service) cleanupCaptureJobs(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM memory_capture_jobs
+		WHERE run_id IN (
+			SELECT run_id FROM memory_capture_jobs
+			WHERE (status IN ('completed','cancelled')
+					AND updated_at < now()-interval '7 days')
+				OR (status='dead' AND updated_at < now()-interval '30 days')
+			ORDER BY updated_at LIMIT 500
+		)`)
+	return err
 }
 
 type storedPart struct {

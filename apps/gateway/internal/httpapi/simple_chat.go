@@ -1648,7 +1648,9 @@ func (a *API) executeLiveRun(live *liveRun) {
 			if err := a.memory.ScheduleCapture(captureCtx, memory.CaptureInput{
 				RunID: finalizedRun.ID, TenantID: live.identity.TenantID,
 				UserID: live.identity.UserID, ConversationID: finalizedRun.ConversationID,
-				Source: finalizedRun.Source, RecalledURIs: live.recalledMemoryURIs,
+				Source: finalizedRun.Source, InteractionMode: finalizedRun.InteractionMode,
+				ProjectID: live.request.ProjectID, PlanID: finalizedRun.PlanID,
+				RecalledURIs: live.recalledMemoryURIs,
 			}); err != nil {
 				a.log.Warn("memory capture scheduling failed: " + err.Error())
 			}

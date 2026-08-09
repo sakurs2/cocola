@@ -28,7 +28,10 @@ var ErrNotReady = errors.New("memory: configuration is not ready")
 
 const (
 	maxRecallItems = 6
-	maxRecallChars = 6000
+	// Tokenization differs across routed models. Limiting UTF-8 bytes is a
+	// conservative provider-independent upper bound for a 1600-token context
+	// and avoids adding a tokenizer tied to one model family.
+	maxRecallBytes = 1600
 )
 
 type Settings struct {
@@ -74,12 +77,15 @@ type RecallResult struct {
 }
 
 type CaptureInput struct {
-	RunID          string
-	TenantID       string
-	UserID         string
-	ConversationID string
-	Source         string
-	RecalledURIs   []string
+	RunID           string
+	TenantID        string
+	UserID          string
+	ConversationID  string
+	Source          string
+	InteractionMode string
+	ProjectID       string
+	PlanID          string
+	RecalledURIs    []string
 }
 
 type Config struct {
@@ -90,6 +96,7 @@ type Config struct {
 	RecoveryScanInterval   time.Duration
 	CaptureAttemptLimit    int
 	CaptureMaxRetryHorizon time.Duration
+	ClearTimeout           time.Duration
 	Metrics                prometheus.Registerer
 }
 
@@ -131,10 +138,13 @@ func New(ctx context.Context, dsn string, cfg Config, log logger.Logger) (*Servi
 		cfg.RecoveryScanInterval = time.Minute
 	}
 	if cfg.CaptureAttemptLimit <= 0 {
-		cfg.CaptureAttemptLimit = 8
+		cfg.CaptureAttemptLimit = 5
 	}
 	if cfg.CaptureMaxRetryHorizon <= 0 {
-		cfg.CaptureMaxRetryHorizon = 24 * time.Hour
+		cfg.CaptureMaxRetryHorizon = 6 * time.Hour
+	}
+	if cfg.ClearTimeout <= 0 {
+		cfg.ClearTimeout = 30 * time.Second
 	}
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	service := &Service{
@@ -164,6 +174,10 @@ func (s *Service) enabled(ctx context.Context) (bool, error) {
 	var enabled bool
 	var modelsReady bool
 	var dimension int
+	var embeddingRouteID string
+	var embeddingProviderID string
+	var embeddingModel string
+	var embeddingBaseURL string
 	err := s.pool.QueryRow(ctx, `SELECT c.enabled,
 		COALESCE(extraction.enabled, FALSE)
 			AND COALESCE(extraction_provider.enabled, FALSE)
@@ -173,13 +187,20 @@ func (s *Service) enabled(ctx context.Context) (bool, error) {
 			AND COALESCE(embedding_provider.enabled, FALSE)
 			AND embedding.protocol = 'openai-embeddings'
 			AND embedding_provider.type = 'openai_embeddings',
-		COALESCE(embedding.embedding_dimension, 0)
+		COALESCE(embedding.embedding_dimension, 0),
+		COALESCE(c.embedding_model_route_id, ''),
+		COALESCE(embedding.provider_id, ''),
+		COALESCE(embedding.real_model, ''),
+		COALESCE(embedding_provider.base_url, '')
 		FROM memory_config c
 		LEFT JOIN llm_model_routes extraction ON extraction.id=c.extraction_model_route_id
 		LEFT JOIN llm_providers extraction_provider ON extraction_provider.id=extraction.provider_id
 		LEFT JOIN llm_model_routes embedding ON embedding.id=c.embedding_model_route_id
 		LEFT JOIN llm_providers embedding_provider ON embedding_provider.id=embedding.provider_id
-		WHERE c.singleton=TRUE`).Scan(&enabled, &modelsReady, &dimension)
+		WHERE c.singleton=TRUE`).Scan(
+		&enabled, &modelsReady, &dimension, &embeddingRouteID,
+		&embeddingProviderID, &embeddingModel, &embeddingBaseURL,
+	)
 	if err != nil || !enabled {
 		return enabled, err
 	}
@@ -189,18 +210,31 @@ func (s *Service) enabled(ctx context.Context) (bool, error) {
 	if dimension != s.cfg.EmbeddingDimension {
 		return false, fmt.Errorf("%w: embedding dimension mismatch", ErrNotReady)
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO memory_index_state (singleton, embedding_dimension)
-		VALUES (TRUE, $1) ON CONFLICT (singleton) DO NOTHING`, dimension)
+	_, err = s.pool.Exec(ctx, `INSERT INTO memory_index_state
+		(singleton, embedding_dimension, embedding_model_route_id,
+		 embedding_provider_id, embedding_model, embedding_base_url)
+		VALUES (TRUE, $1, $2, $3, $4, $5) ON CONFLICT (singleton) DO NOTHING`,
+		dimension, embeddingRouteID, embeddingProviderID,
+		strings.TrimSpace(embeddingModel), strings.TrimRight(strings.TrimSpace(embeddingBaseURL), "/"))
 	if err != nil {
 		return false, err
 	}
 	var locked int
-	if err := s.pool.QueryRow(ctx, `SELECT embedding_dimension FROM memory_index_state
-		WHERE singleton=TRUE`).Scan(&locked); err != nil {
+	var lockedRouteID string
+	var lockedProviderID string
+	var lockedModel string
+	var lockedBaseURL string
+	if err := s.pool.QueryRow(ctx, `SELECT embedding_dimension, embedding_model_route_id,
+		embedding_provider_id, embedding_model, embedding_base_url
+		FROM memory_index_state WHERE singleton=TRUE`).Scan(
+		&locked, &lockedRouteID, &lockedProviderID, &lockedModel, &lockedBaseURL,
+	); err != nil {
 		return false, err
 	}
-	if locked != dimension {
-		return false, fmt.Errorf("%w: index dimension is locked", ErrNotReady)
+	if locked != dimension || lockedRouteID != embeddingRouteID ||
+		lockedProviderID != embeddingProviderID || lockedModel != strings.TrimSpace(embeddingModel) ||
+		lockedBaseURL != strings.TrimRight(strings.TrimSpace(embeddingBaseURL), "/") {
+		return false, fmt.Errorf("%w: embedding route is locked", ErrNotReady)
 	}
 	return true, nil
 }
@@ -254,6 +288,8 @@ func (s *Service) Recall(
 	query string,
 	onStart func(),
 ) RecallResult {
+	startedAt := time.Now()
+	defer func() { s.metrics.observeRecall(time.Since(startedAt)) }()
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.RecallTimeout)
 	defer cancel()
 	settings, err := s.GetSettings(ctx, identity)
@@ -267,30 +303,8 @@ func (s *Service) Recall(
 		s.metrics.recall("skipped")
 		return RecallResult{Status: RecallStatusSkipped}
 	}
-	type profileResult struct {
-		text string
-		err  error
-	}
-	type findResult struct {
-		items []memoryResult
-		err   error
-	}
-	profileCh := make(chan profileResult, 1)
-	findCh := make(chan findResult, 1)
-	go func() {
-		profile, profileErr := s.client.read(
-			ctx, identity, "viking://user/memories/profile.md",
-		)
-		profileCh <- profileResult{text: profile, err: profileErr}
-	}()
-	go func() {
-		items, findErr := s.client.find(ctx, identity, query, maxRecallItems)
-		findCh <- findResult{items: items, err: findErr}
-	}()
-
-	profile := <-profileCh
-	found := <-findCh
-	result := buildRecallResult(profile.text, found.items, profile.err, found.err)
+	items, searchErr := s.client.searchMemories(ctx, identity, query, maxRecallItems)
+	result := buildRecallResult(items, searchErr)
 	s.metrics.recall(result.Status)
 	return result
 }
@@ -308,30 +322,12 @@ func beginRecall(settings Settings, onStart func()) bool {
 	return true
 }
 
-func buildRecallResult(
-	profile string,
-	items []memoryResult,
-	profileErr error,
-	findErr error,
-) RecallResult {
-	if errors.Is(profileErr, ErrNotFound) {
-		profileErr = nil
-	}
-	if profileErr != nil {
-		profile = ""
-	}
-	if findErr != nil {
-		items = nil
-	}
-	formatted, uris := formatRecall(profile, items)
+func buildRecallResult(items []memoryResult, searchErr error) RecallResult {
+	formatted, uris := formatRecall(items)
 	result := RecallResult{Context: formatted, URIs: uris, Count: len(uris)}
-	if profileErr != nil || findErr != nil {
-		result.ErrorCode = recallErrorCode(errors.Join(profileErr, findErr))
-		if formatted == "" {
-			result.Status = RecallStatusUnavailable
-		} else {
-			result.Status = RecallStatusDegraded
-		}
+	if searchErr != nil {
+		result.Status = RecallStatusUnavailable
+		result.ErrorCode = recallErrorCode(searchErr)
 		return result
 	}
 	if formatted == "" {
@@ -353,9 +349,9 @@ func recallErrorCode(err error) string {
 	}
 }
 
-func formatRecall(profile string, items []memoryResult) (string, []string) {
+func formatRecall(items []memoryResult) (string, []string) {
 	var builder strings.Builder
-	remaining := maxRecallChars
+	remaining := maxRecallBytes
 	count := 0
 	uris := make([]string, 0, maxRecallItems)
 	appendBlock := func(label, uri, content string) bool {
@@ -367,33 +363,32 @@ func formatRecall(profile string, items []memoryResult) (string, []string) {
 		if builder.Len() > 0 {
 			separator = "\n\n"
 		}
-		if utf8.RuneCountInString(separator) >= remaining {
+		if len(separator) >= remaining {
 			return false
 		}
+		// URI is bookkeeping for OpenViking ContextParts, never user-facing
+		// recall content. Keep the injected summary readable and avoid leaking
+		// provider-internal identifiers into the conversation card.
 		block := label + ":\n" + content
-		if uri != "" {
-			block = label + " (" + uri + "):\n" + content
-		}
-		blockBudget := remaining - utf8.RuneCountInString(separator)
-		if utf8.RuneCountInString(block) > blockBudget {
-			block = truncateRunes(block, blockBudget)
+		blockBudget := remaining - len(separator)
+		if len(block) > blockBudget {
+			block = truncateUTF8Bytes(block, blockBudget)
 		}
 		builder.WriteString(separator)
 		builder.WriteString(block)
-		remaining -= utf8.RuneCountInString(separator) + utf8.RuneCountInString(block)
+		remaining -= len(separator) + len(block)
 		count++
 		if uri != "" {
 			uris = append(uris, uri)
 		}
 		return true
 	}
-	appendBlock("User profile", "viking://user/memories/profile.md", profile)
 	for _, item := range items {
 		content := item.Content
 		if content == "" {
 			content = item.Abstract
 		}
-		appendBlock("Relevant memory", item.URI, content)
+		appendBlock(memoryLabel(item.URI), item.URI, content)
 		if remaining <= 0 {
 			break
 		}
@@ -401,20 +396,38 @@ func formatRecall(profile string, items []memoryResult) (string, []string) {
 	return builder.String(), uris
 }
 
-func truncateRunes(value string, limit int) string {
+func memoryLabel(uri string) string {
+	switch {
+	case strings.HasSuffix(uri, "/profile.md"):
+		return "User profile"
+	case strings.Contains(uri, "/preferences/"):
+		return "User preference"
+	case strings.Contains(uri, "/entities/"):
+		return "Relevant entity"
+	case strings.Contains(uri, "/events/"):
+		return "Relevant event"
+	default:
+		return "Relevant memory"
+	}
+}
+
+func truncateUTF8Bytes(value string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
-	runes := []rune(value)
-	if len(runes) <= limit {
+	if len(value) <= limit {
 		return value
 	}
-	return string(runes[:limit])
+	value = value[:limit]
+	for len(value) > 0 && !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value
 }
 
 func (s *Service) ScheduleCapture(ctx context.Context, input CaptureInput) error {
-	if input.Source == "scheduled_task" {
-		s.metrics.capture("skipped_scheduled")
+	if reason := captureSkipReason(input); reason != "" {
+		s.metrics.capture(reason)
 		return nil
 	}
 	recalled, err := json.Marshal(input.RecalledURIs)
@@ -482,7 +495,7 @@ func (s *Service) ScheduleCapture(ctx context.Context, input CaptureInput) error
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO memory_capture_jobs
 		(run_id, tenant_id, user_id, conversation_id, epoch, recalled_uris,
-		 openviking_session_id)
+		 provider_session_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (run_id) DO NOTHING`, input.RunID, input.TenantID, input.UserID,
 		input.ConversationID, epoch, recalled, "cocola-"+input.RunID)
@@ -504,6 +517,23 @@ func (s *Service) ScheduleCapture(ctx context.Context, input CaptureInput) error
 	return nil
 }
 
+// captureSkipReason keeps product policy at the Memory boundary. Callers also
+// avoid scheduling these runs, but correctness does not depend on that call
+// order: scheduled work, planning flows, and project workspaces are never
+// persisted as personal long-term memory.
+func captureSkipReason(input CaptureInput) string {
+	switch {
+	case input.Source == "scheduled_task":
+		return "skipped_scheduled"
+	case input.InteractionMode == "plan" || strings.TrimSpace(input.PlanID) != "":
+		return "skipped_plan"
+	case strings.TrimSpace(input.ProjectID) != "":
+		return "skipped_project"
+	default:
+		return ""
+	}
+}
+
 func (s *Service) ListItems(
 	ctx context.Context,
 	identity Identity,
@@ -518,6 +548,20 @@ func (s *Service) ListItems(
 	if err != nil {
 		return ItemPage{}, err
 	}
+	if strings.TrimSpace(category) == "profile" {
+		content, readErr := s.client.read(ctx, identity, root)
+		if errors.Is(readErr, ErrNotFound) {
+			return ItemPage{Items: []Item{}}, nil
+		}
+		if readErr != nil {
+			return ItemPage{}, readErr
+		}
+		item := itemFromURI(root)
+		item.Content = content
+		return ItemPage{Items: []Item{item}}, nil
+	}
+	// Query category directories directly. Filtering a globally truncated list
+	// could otherwise hide an entire category once another category grows.
 	raw, err := s.client.list(ctx, identity, root)
 	if errors.Is(err, ErrNotFound) {
 		return ItemPage{Items: []Item{}}, nil
@@ -525,7 +569,17 @@ func (s *Service) ListItems(
 	if err != nil {
 		return ItemPage{}, err
 	}
-	items := collectItems(raw)
+	items := collectItems(raw, identity.UserID)
+	category = strings.TrimSpace(category)
+	if category != "" && category != "all" {
+		filtered := items[:0]
+		for _, item := range items {
+			if item.Category == category {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
 	sort.Slice(items, func(i, j int) bool { return items[i].URI < items[j].URI })
 	start := 0
 	if cursor != "" {
@@ -568,20 +622,50 @@ func (s *Service) DeleteItem(ctx context.Context, identity Identity, opaqueID st
 }
 
 func (s *Service) Clear(ctx context.Context, identity Identity) error {
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.ClearTimeout)
+	defer cancel()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO memory_user_settings (tenant_id,user_id,epoch)
+	var newEpoch int64
+	err = tx.QueryRow(ctx, `INSERT INTO memory_user_settings (tenant_id,user_id,epoch)
 		VALUES ($1,$2,1) ON CONFLICT (tenant_id,user_id) DO UPDATE SET
-		epoch=memory_user_settings.epoch+1, updated_at=now()`, identity.TenantID, identity.UserID)
+		epoch=memory_user_settings.epoch+1, updated_at=now()
+		RETURNING epoch`, identity.TenantID, identity.UserID).Scan(&newEpoch)
 	if err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT openviking_session_id FROM memory_capture_jobs
-		WHERE tenant_id=$1 AND user_id=$2 AND openviking_session_id<>''`,
-		identity.TenantID, identity.UserID)
+	_, err = tx.Exec(ctx, `UPDATE memory_capture_jobs
+		SET cancellation_requested=TRUE,
+			status=CASE WHEN status='submitting' THEN status ELSE 'cancel_requested' END,
+			next_attempt_at=CASE WHEN status='submitting' THEN next_attempt_at ELSE now() END,
+			updated_at=now()
+		WHERE tenant_id=$1 AND user_id=$2 AND epoch<$3
+			AND status IN ('pending','processing','submitting')`,
+		identity.TenantID, identity.UserID, newEpoch)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	if err := s.waitForCaptureCancellation(ctx, identity, newEpoch); err != nil {
+		return err
+	}
+	if err := s.client.remove(ctx, identity, "viking://user/memories/", true); err != nil &&
+		!errors.Is(err, ErrNotFound) {
+		return err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT provider_session_id
+		FROM memory_capture_jobs
+		WHERE tenant_id=$1 AND user_id=$2 AND epoch<$3 AND provider_session_id<>''`,
+		identity.TenantID, identity.UserID, newEpoch)
 	if err != nil {
 		return err
 	}
@@ -595,17 +679,7 @@ func (s *Service) Clear(ctx context.Context, identity Identity) error {
 		sessions = append(sessions, sessionID)
 	}
 	rows.Close()
-	_, err = tx.Exec(ctx, `UPDATE memory_capture_jobs SET status='cancelled', updated_at=now()
-		WHERE tenant_id=$1 AND user_id=$2 AND status IN ('pending','submitted','retry')`,
-		identity.TenantID, identity.UserID)
-	if err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	if err := s.client.remove(ctx, identity, "viking://user/memories/", true); err != nil &&
-		!errors.Is(err, ErrNotFound) {
+	if err := rows.Err(); err != nil {
 		return err
 	}
 	for _, sessionID := range sessions {
@@ -614,7 +688,79 @@ func (s *Service) Clear(ctx context.Context, identity Identity) error {
 			return err
 		}
 	}
+	_, err = s.pool.Exec(ctx, `DELETE FROM memory_capture_jobs
+		WHERE tenant_id=$1 AND user_id=$2 AND epoch<$3`,
+		identity.TenantID, identity.UserID, newEpoch)
+	return err
+}
+
+func (s *Service) waitForCaptureCancellation(
+	ctx context.Context,
+	identity Identity,
+	newEpoch int64,
+) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var remaining int
+		err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM memory_capture_jobs
+			WHERE tenant_id=$1 AND user_id=$2 AND epoch<$3
+				AND cancellation_requested
+				AND status IN ('pending','processing','submitting','cancel_requested')`,
+			identity.TenantID, identity.UserID, newEpoch).Scan(&remaining)
+		if err != nil {
+			return err
+		}
+		if remaining == 0 {
+			return nil
+		}
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("memory clear timed out while cancelling capture jobs: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Service) cancelAndWait(ctx context.Context, identity Identity, taskID string) error {
+	status, err := s.client.cancelTask(ctx, identity, taskID)
+	if err != nil {
+		status, err = s.client.taskStatus(ctx, identity, taskID)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+	for !terminalTaskStatus(status) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+		status, err = s.client.taskStatus(ctx, identity, taskID)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func terminalTaskStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "cancelled", "completed", "success", "succeeded", "failed", "error":
+		return true
+	default:
+		return false
+	}
 }
 
 func memoryRoot(category string) (string, error) {
@@ -630,7 +776,7 @@ func memoryRoot(category string) (string, error) {
 	}
 }
 
-func collectItems(raw any) []Item {
+func collectItems(raw any, userID string) []Item {
 	items := make([]Item, 0)
 	seen := make(map[string]struct{})
 	var walk func(any)
@@ -645,6 +791,7 @@ func collectItems(raw any) []Item {
 			if uri == "" {
 				uri = stringValue(node["path"])
 			}
+			uri = normalizeMemoryURI(uri, userID)
 			if validItemURI(uri) && !strings.HasSuffix(uri, "/") &&
 				!strings.Contains(uri, "/.") {
 				if _, exists := seen[uri]; !exists {
@@ -661,6 +808,17 @@ func collectItems(raw any) []Item {
 	}
 	walk(raw)
 	return items
+}
+
+func normalizeMemoryURI(uri, userID string) string {
+	if strings.HasPrefix(uri, "viking://user/memories/") {
+		return uri
+	}
+	prefix := "viking://user/" + url.PathEscape(userID) + "/memories/"
+	if strings.HasPrefix(uri, prefix) {
+		return "viking://user/memories/" + strings.TrimPrefix(uri, prefix)
+	}
+	return ""
 }
 
 func itemFromURI(uri string) Item {

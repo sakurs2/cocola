@@ -355,7 +355,7 @@ func runStoreContract(t *testing.T, st Store) {
 		UpdatedAt:              now,
 		UpdatedBy:              "admin",
 	}
-	savedMemory, err := st.UpdateMemoryConfig(ctx, memoryConfig, 0)
+	savedMemory, err := st.UpdateMemoryConfig(ctx, memoryConfig, 0, MemoryIndexLock{})
 	if err != nil {
 		t.Fatalf("UpdateMemoryConfig: %v", err)
 	}

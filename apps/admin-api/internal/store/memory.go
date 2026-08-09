@@ -12,55 +12,57 @@ import (
 // default backend for tests and dev. All slices returned are fresh copies so
 // callers cannot mutate internal state.
 type Memory struct {
-	mu                   sync.RWMutex
-	users                map[string]AuthUser
-	identifiers          map[string]string // normalized identifier -> user id
-	tokens               map[string]TokenRecord
-	quotas               map[string]QuotaOverride // key = scope + "/" + subject
-	settings             map[string]SystemSetting
-	skills               map[string]Skill
-	skillPrefs           map[string]UserSkillPreference
-	mcps                 map[string]MCPServer
-	mcpPrefs             map[string]UserMCPPreference
-	userInstructions     map[string]UserAgentInstructions
-	agentPrompts         map[string]AgentPrompt
-	llmProviders         map[string]LLMProvider
-	llmModels            map[string]LLMModelRoute
-	memoryConfig         MemoryConfig
-	memoryIndexDimension int
-	tasks                map[string]ScheduledTask
-	attachments          map[string]ScheduledTaskAttachment
-	runs                 map[string]ScheduledTaskRun
-	runEvents            map[string][]ScheduledTaskRunEvent
-	conversationRuns     map[string]ConversationRun
-	conversationSpans    map[string]map[string]ConversationTraceSpan
-	runEventSeq          int64
-	conversationSpanSeq  int64
+	mu                  sync.RWMutex
+	users               map[string]AuthUser
+	identifiers         map[string]string // normalized identifier -> user id
+	tokens              map[string]TokenRecord
+	quotas              map[string]QuotaOverride // key = scope + "/" + subject
+	settings            map[string]SystemSetting
+	skills              map[string]Skill
+	skillPrefs          map[string]UserSkillPreference
+	mcps                map[string]MCPServer
+	mcpPrefs            map[string]UserMCPPreference
+	userInstructions    map[string]UserAgentInstructions
+	agentPrompts        map[string]AgentPrompt
+	llmProviders        map[string]LLMProvider
+	llmModels           map[string]LLMModelRoute
+	memoryConfig        MemoryConfig
+	memoryIndexLock     MemoryIndexLock
+	memoryResetAccounts map[string]struct{}
+	tasks               map[string]ScheduledTask
+	attachments         map[string]ScheduledTaskAttachment
+	runs                map[string]ScheduledTaskRun
+	runEvents           map[string][]ScheduledTaskRunEvent
+	conversationRuns    map[string]ConversationRun
+	conversationSpans   map[string]map[string]ConversationTraceSpan
+	runEventSeq         int64
+	conversationSpanSeq int64
 }
 
 // NewMemory returns an empty in-memory store.
 func NewMemory() *Memory {
 	return &Memory{
-		users:             map[string]AuthUser{},
-		identifiers:       map[string]string{},
-		tokens:            map[string]TokenRecord{},
-		quotas:            map[string]QuotaOverride{},
-		settings:          map[string]SystemSetting{},
-		skills:            map[string]Skill{},
-		skillPrefs:        map[string]UserSkillPreference{},
-		mcps:              map[string]MCPServer{},
-		mcpPrefs:          map[string]UserMCPPreference{},
-		userInstructions:  map[string]UserAgentInstructions{},
-		agentPrompts:      map[string]AgentPrompt{},
-		llmProviders:      map[string]LLMProvider{},
-		llmModels:         map[string]LLMModelRoute{},
-		memoryConfig:      MemoryConfig{},
-		tasks:             map[string]ScheduledTask{},
-		attachments:       map[string]ScheduledTaskAttachment{},
-		runs:              map[string]ScheduledTaskRun{},
-		runEvents:         map[string][]ScheduledTaskRunEvent{},
-		conversationRuns:  map[string]ConversationRun{},
-		conversationSpans: map[string]map[string]ConversationTraceSpan{},
+		users:               map[string]AuthUser{},
+		identifiers:         map[string]string{},
+		tokens:              map[string]TokenRecord{},
+		quotas:              map[string]QuotaOverride{},
+		settings:            map[string]SystemSetting{},
+		skills:              map[string]Skill{},
+		skillPrefs:          map[string]UserSkillPreference{},
+		mcps:                map[string]MCPServer{},
+		mcpPrefs:            map[string]UserMCPPreference{},
+		userInstructions:    map[string]UserAgentInstructions{},
+		agentPrompts:        map[string]AgentPrompt{},
+		llmProviders:        map[string]LLMProvider{},
+		llmModels:           map[string]LLMModelRoute{},
+		memoryConfig:        MemoryConfig{},
+		memoryResetAccounts: map[string]struct{}{},
+		tasks:               map[string]ScheduledTask{},
+		attachments:         map[string]ScheduledTaskAttachment{},
+		runs:                map[string]ScheduledTaskRun{},
+		runEvents:           map[string][]ScheduledTaskRunEvent{},
+		conversationRuns:    map[string]ConversationRun{},
+		conversationSpans:   map[string]map[string]ConversationTraceSpan{},
 	}
 }
 
@@ -934,27 +936,94 @@ func (m *Memory) GetMemoryConfig(context.Context) (MemoryConfig, error) {
 	return m.memoryConfig, nil
 }
 
-func (m *Memory) UpdateMemoryConfig(_ context.Context, config MemoryConfig, expectedVersion int64) (MemoryConfig, error) {
+func (m *Memory) GetMemoryIndexLock(context.Context) (MemoryIndexLock, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.memoryIndexLock.Dimension == 0 {
+		return MemoryIndexLock{}, ErrNotFound
+	}
+	return m.memoryIndexLock, nil
+}
+
+func (m *Memory) UpdateMemoryConfig(
+	_ context.Context,
+	config MemoryConfig,
+	expectedVersion int64,
+	lock MemoryIndexLock,
+) (MemoryConfig, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.memoryConfig.Version != expectedVersion {
+		return MemoryConfig{}, ErrVersionConflict
+	}
+	if m.memoryConfig.Resetting {
 		return MemoryConfig{}, ErrConflict
+	}
+	if config.Enabled {
+		if strings.TrimSpace(config.EmbeddingModelRouteID) == "" || lock.Dimension <= 0 ||
+			strings.TrimSpace(lock.RouteID) == "" || strings.TrimSpace(lock.ProviderID) == "" ||
+			strings.TrimSpace(lock.Model) == "" || strings.TrimSpace(lock.BaseURL) == "" {
+			return MemoryConfig{}, ErrConflict
+		}
+		if m.memoryIndexLock.Dimension != 0 && m.memoryIndexLock != lock {
+			return MemoryConfig{}, ErrConflict
+		}
+		m.memoryIndexLock = lock
 	}
 	config.Version = expectedVersion + 1
 	m.memoryConfig = config
 	return config, nil
 }
 
-func (m *Memory) LockMemoryIndex(_ context.Context, embeddingDimension int) error {
+func (m *Memory) GetMemoryQueueStats(context.Context) (MemoryQueueStats, error) {
+	return MemoryQueueStats{}, nil
+}
+
+func (m *Memory) BeginMemoryReset(_ context.Context, actor string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if embeddingDimension <= 0 {
+	if !m.memoryConfig.Resetting {
+		m.memoryConfig.Version++
+	}
+	m.memoryConfig.Resetting = true
+	m.memoryConfig.Enabled = false
+	m.memoryConfig.ExtractionModelRouteID = ""
+	m.memoryConfig.EmbeddingModelRouteID = ""
+	m.memoryConfig.UpdatedBy = actor
+	m.memoryConfig.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (m *Memory) MemoryResetCapturesPending(context.Context) (bool, error) {
+	return false, nil
+}
+
+func (m *Memory) ListMemoryResetAccounts(context.Context, int) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	accounts := make([]string, 0, len(m.memoryResetAccounts))
+	for account := range m.memoryResetAccounts {
+		accounts = append(accounts, account)
+	}
+	sort.Strings(accounts)
+	return accounts, nil
+}
+
+func (m *Memory) CompleteMemoryResetAccount(_ context.Context, tenantID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.memoryResetAccounts, tenantID)
+	return nil
+}
+
+func (m *Memory) CompleteMemoryReset(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.memoryResetAccounts) != 0 {
 		return ErrConflict
 	}
-	if m.memoryIndexDimension != 0 && m.memoryIndexDimension != embeddingDimension {
-		return ErrConflict
-	}
-	m.memoryIndexDimension = embeddingDimension
+	m.memoryIndexLock = MemoryIndexLock{}
+	m.memoryConfig.Resetting = false
 	return nil
 }
 

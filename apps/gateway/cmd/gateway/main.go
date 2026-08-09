@@ -20,6 +20,9 @@
 //	COCOLA_AGENT_RUNTIME_PICKER_ENABLED expose experimental runtime choices (default false)
 //	COCOLA_WIKI_MAX_FILE_BYTES maximum bytes accepted for one Wiki file (default 20MiB)
 //	COCOLA_SKILL_PUBLISH_ENABLED enable run-scoped Personal Skill publishing (default false)
+//	COCOLA_OPENVIKING_URL internal OpenViking URL (default http://127.0.0.1:1933)
+//	COCOLA_OPENVIKING_ROOT_API_KEY service credential for OpenViking
+//	COCOLA_MEMORY_EMBEDDING_DIMENSION fixed vector dimension (default 1024)
 //
 // Required attachment/session object storage (ADR-0017 P1a):
 //
@@ -49,6 +52,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/apps/gateway/internal/httpapi"
+	"github.com/cocola-project/cocola/apps/gateway/internal/memory"
 	"github.com/cocola-project/cocola/apps/gateway/internal/objstore"
 	"github.com/cocola-project/cocola/apps/gateway/internal/project"
 	"github.com/cocola-project/cocola/apps/gateway/internal/sandboxmgr"
@@ -320,10 +324,21 @@ func main() {
 		log.Info("Projects enabled (local projects=" + strconv.FormatBool(projectService.LocalProjectsEnabled()) +
 			", github connector=" + strconv.FormatBool(projectService.GitHubConnectorEnabled()) +
 			", github agent write=" + strconv.FormatBool(projectService.GitHubAgentWriteEnabled()) + ")")
-		// Keep Memory deliberately unwired until its product and deployment
-		// lifecycle is ready. A nil service keeps recall and capture dark even if
-		// an older database still contains enabled memory configuration.
-		log.Info("Memory is unavailable while the feature is under development")
+		memoryService, memoryErr := memory.New(context.Background(), dsn, memory.Config{
+			OpenVikingURL:        env("COCOLA_OPENVIKING_URL", "http://127.0.0.1:1933"),
+			OpenVikingRootAPIKey: config.SecretFromEnv("COCOLA_OPENVIKING_ROOT_API_KEY"),
+			EmbeddingDimension:   mustBoundedEnvInt(log, "COCOLA_MEMORY_EMBEDDING_DIMENSION", 1024, 1, 100000),
+			Metrics:              reg.Registerer(),
+		}, logger.WithService(log, "gateway", "memory"))
+		if memoryErr != nil {
+			// Memory is an optional capability. Its configuration or dependency must
+			// never prevent the chat data plane from starting.
+			log.Warn("memory integration disabled: " + memoryErr.Error())
+		} else {
+			defer memoryService.Close()
+			api = api.WithMemory(memoryService)
+			log.Info("OpenViking memory integration loaded (globally disabled until configured)")
+		}
 		runStore, runErr := chatrun.NewPostgres(context.Background(), dsn)
 		if runErr != nil {
 			log.Fatal("chat run store connect failed: " + runErr.Error())

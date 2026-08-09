@@ -1,14 +1,10 @@
 package memory
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -17,8 +13,7 @@ import (
 
 var ErrNotFound = errors.New("memory: not found")
 
-// Align with OpenViking's default automatic-recall threshold.
-const minRecallScore = 0.15
+const minRecallScore = 0.35
 
 type Identity struct {
 	TenantID string
@@ -32,8 +27,8 @@ func (i Identity) openVikingAccount() string {
 	return "default"
 }
 
-// openVikingClient keeps the official v0.4.10 Go SDK behind the memory module.
-// The sole raw endpoint is /used, which that SDK release does not expose yet.
+// openVikingClient contains the complete OpenViking protocol boundary. The
+// rest of Gateway only deals in Cocola memory concepts and durable job state.
 type openVikingClient struct {
 	baseURL string
 	apiKey  string
@@ -44,15 +39,6 @@ type openVikingTask struct {
 	ID     string
 	Status string
 }
-
-type commitArchiveState int
-
-const (
-	commitArchiveAbsent commitArchiveState = iota
-	commitArchivePending
-	commitArchiveCompleted
-	commitArchiveFailed
-)
 
 func newOpenVikingClient(baseURL, apiKey string) *openVikingClient {
 	return &openVikingClient{
@@ -105,7 +91,7 @@ func normalizeOpenVikingError(err error) error {
 	return errors.New("OpenViking request failed: UNAVAILABLE")
 }
 
-func (c *openVikingClient) find(
+func (c *openVikingClient) searchMemories(
 	ctx context.Context,
 	identity Identity,
 	query string,
@@ -116,12 +102,9 @@ func (c *openVikingClient) find(
 		return nil, err
 	}
 	scoreThreshold := minRecallScore
-	result, err := client.Find(ctx, query, &openviking.FindOptions{
-		TargetURI: []string{
-			"viking://user/memories/preferences/",
-			"viking://user/memories/entities/",
-			"viking://user/memories/events/",
-		},
+	result, err := client.Search(ctx, query, &openviking.SearchOptions{
+		TargetURI:      "viking://user/memories/",
+		ContextType:    "memory",
 		Limit:          limit,
 		ScoreThreshold: &scoreThreshold,
 	})
@@ -133,11 +116,12 @@ func (c *openVikingClient) find(
 		if len(items) >= limit {
 			break
 		}
-		if item.Score < minRecallScore {
+		uri := normalizeMemoryURI(item.URI, identity.UserID)
+		if item.Score < minRecallScore || !validItemURI(uri) {
 			continue
 		}
 		items = append(items, memoryResult{
-			URI: item.URI, Abstract: item.Abstract, Content: item.Overview, Score: item.Score,
+			URI: uri, Abstract: item.Abstract, Content: item.Overview, Score: item.Score,
 		})
 	}
 	return items, nil
@@ -156,14 +140,21 @@ func (c *openVikingClient) read(
 	return content, normalizeOpenVikingError(err)
 }
 
-func (c *openVikingClient) createSession(
+func (c *openVikingClient) ensureSession(
 	ctx context.Context,
 	identity Identity,
 	sessionID string,
-) error {
+) (int, error) {
 	client, err := c.sdk(identity)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	info, err := client.GetSession(ctx, sessionID, nil)
+	if err == nil {
+		return intValue(info["message_count"]), nil
+	}
+	if !openviking.IsCode(err, "NOT_FOUND") {
+		return 0, normalizeOpenVikingError(err)
 	}
 	_, err = client.CreateSession(ctx, &openviking.CreateSessionOptions{
 		SessionID: sessionID,
@@ -175,47 +166,41 @@ func (c *openVikingClient) createSession(
 		},
 	})
 	if openviking.IsCode(err, "ALREADY_EXISTS") {
-		return nil
+		info, getErr := client.GetSession(ctx, sessionID, nil)
+		if getErr != nil {
+			return 0, normalizeOpenVikingError(getErr)
+		}
+		return intValue(info["message_count"]), nil
 	}
-	return normalizeOpenVikingError(err)
+	return 0, normalizeOpenVikingError(err)
 }
 
-func (c *openVikingClient) addMessages(
+func (c *openVikingClient) addTurn(
 	ctx context.Context,
 	identity Identity,
 	sessionID string,
-	messages []map[string]string,
+	userText string,
+	assistantText string,
+	contexts []string,
 ) error {
 	client, err := c.sdk(identity)
 	if err != nil {
 		return err
 	}
-	batch := make([]openviking.Message, 0, len(messages))
-	for _, message := range messages {
-		content := message["content"]
-		batch = append(batch, openviking.Message{Role: message["role"], Content: &content})
+	userContent := userText
+	parts := []map[string]any{{"type": "text", "text": assistantText}}
+	for _, uri := range contexts {
+		if validItemURI(uri) {
+			parts = append(parts, map[string]any{
+				"type": "context", "uri": uri, "context_type": "memory",
+			})
+		}
 	}
-	_, err = client.BatchAddMessages(ctx, sessionID, batch, nil)
+	_, err = client.BatchAddMessages(ctx, sessionID, []openviking.Message{
+		{Role: "user", Content: &userContent},
+		{Role: "assistant", Parts: parts},
+	}, nil)
 	return normalizeOpenVikingError(err)
-}
-
-func (c *openVikingClient) used(
-	ctx context.Context,
-	identity Identity,
-	sessionID string,
-	contexts []string,
-) error {
-	if len(contexts) == 0 {
-		return nil
-	}
-	return c.rawCall(
-		ctx,
-		identity,
-		http.MethodPost,
-		"/api/v1/sessions/"+url.PathEscape(sessionID)+"/used",
-		map[string]any{"contexts": contexts},
-		nil,
-	)
 }
 
 func (c *openVikingClient) commit(
@@ -255,6 +240,22 @@ func (c *openVikingClient) taskStatus(
 	return strings.ToLower(stringValue(result["status"])), nil
 }
 
+func (c *openVikingClient) cancelTask(
+	ctx context.Context,
+	identity Identity,
+	taskID string,
+) (string, error) {
+	client, err := c.sdk(identity)
+	if err != nil {
+		return "", err
+	}
+	result, err := client.CancelTask(ctx, taskID)
+	if err != nil {
+		return "", normalizeOpenVikingError(err)
+	}
+	return strings.ToLower(stringValue(result["status"])), nil
+}
+
 func (c *openVikingClient) latestCommitTask(
 	ctx context.Context,
 	identity Identity,
@@ -278,53 +279,11 @@ func (c *openVikingClient) latestCommitTask(
 		task := openVikingTask{
 			ID: stringValue(item["task_id"]), Status: strings.ToLower(stringValue(item["status"])),
 		}
-		if task.ID == "" {
-			continue
+		if task.ID != "" {
+			return task, true, nil
 		}
-		// OpenViking returns newest tasks first. Only the newest task belongs to
-		// the current deterministic-session attempt; older terminal records must
-		// not override it after the session has been reset and retried.
-		return task, true, nil
 	}
 	return openVikingTask{}, false, nil
-}
-
-func (c *openVikingClient) commitArchiveState(
-	ctx context.Context,
-	identity Identity,
-	sessionID string,
-) (commitArchiveState, error) {
-	client, err := c.sdk(identity)
-	if err != nil {
-		return commitArchiveAbsent, err
-	}
-	base := "viking://session/" + sessionID + "/history/archive_001/"
-	exists := func(uri string) (bool, error) {
-		_, statErr := client.Stat(ctx, uri)
-		if statErr == nil {
-			return true, nil
-		}
-		if openviking.IsCode(statErr, "NOT_FOUND") {
-			return false, nil
-		}
-		return false, normalizeOpenVikingError(statErr)
-	}
-	if found, statErr := exists(base + ".done"); statErr != nil {
-		return commitArchiveAbsent, statErr
-	} else if found {
-		return commitArchiveCompleted, nil
-	}
-	if found, statErr := exists(base + ".failed.json"); statErr != nil {
-		return commitArchiveAbsent, statErr
-	} else if found {
-		return commitArchiveFailed, nil
-	}
-	if found, statErr := exists(base + "messages.jsonl"); statErr != nil {
-		return commitArchiveAbsent, statErr
-	} else if found {
-		return commitArchivePending, nil
-	}
-	return commitArchiveAbsent, nil
 }
 
 func (c *openVikingClient) list(
@@ -369,60 +328,6 @@ func (c *openVikingClient) deleteSession(
 	return normalizeOpenVikingError(client.DeleteSession(ctx, sessionID))
 }
 
-type openVikingEnvelope struct {
-	Status string          `json:"status"`
-	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Code string `json:"code"`
-	} `json:"error"`
-}
-
-func (c *openVikingClient) rawCall(
-	ctx context.Context,
-	identity Identity,
-	method string,
-	path string,
-	body any,
-	out any,
-) error {
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(encoded))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("X-API-Key", c.apiKey)
-	req.Header.Set("X-OpenViking-Account", identity.openVikingAccount())
-	req.Header.Set("X-OpenViking-User", identity.UserID)
-	response, err := c.http.Do(req)
-	if err != nil {
-		return errors.New("OpenViking request failed: UNAVAILABLE")
-	}
-	defer response.Body.Close()
-	var envelope openVikingEnvelope
-	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&envelope); err != nil {
-		return errors.New("OpenViking request failed: INVALID_RESPONSE")
-	}
-	if response.StatusCode == http.StatusNotFound ||
-		(envelope.Error != nil && envelope.Error.Code == "NOT_FOUND") {
-		return ErrNotFound
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 || envelope.Status == "error" {
-		code := "UNAVAILABLE"
-		if envelope.Error != nil && envelope.Error.Code != "" {
-			code = envelope.Error.Code
-		}
-		return fmt.Errorf("OpenViking request failed: %s", code)
-	}
-	if out == nil || len(envelope.Result) == 0 || string(envelope.Result) == "null" {
-		return nil
-	}
-	return json.Unmarshal(envelope.Result, out)
-}
-
 type memoryResult struct {
 	URI      string
 	Abstract string
@@ -433,4 +338,17 @@ type memoryResult struct {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func intValue(value any) int {
+	switch number := value.(type) {
+	case int:
+		return number
+	case int64:
+		return int(number)
+	case float64:
+		return int(number)
+	default:
+		return 0
+	}
 }

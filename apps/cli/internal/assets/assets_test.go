@@ -5,15 +5,42 @@ import (
 	"testing"
 )
 
-func TestComposeDoesNotDeployOpenViking(t *testing.T) {
-	for _, forbidden := range [][]byte{
-		[]byte("openviking:"),
-		[]byte("COCOLA_OPENVIKING_"),
+func TestComposeDeploysInternalOpenVikingWithoutHostPort(t *testing.T) {
+	for _, required := range [][]byte{
+		[]byte("  openviking:"),
+		[]byte("ghcr.io/volcengine/openviking:v0.4.12@sha256:"),
+		[]byte("COCOLA_OPENVIKING_ROOT_API_KEY"),
 		[]byte("COCOLA_MEMORY_LLM_SERVICE_TOKEN"),
+		[]byte(`"memory":{"version":"v2"}`),
+		[]byte(`"prefix":"openviking-memory-v2/"`),
+		[]byte("openvikingdata_memory_v2:/app/.openviking/data"),
+		[]byte("COCOLA_MEMORY_BOOTSTRAP_URL"),
+		[]byte(`"metrics":{"enabled":true}`),
 	} {
-		if bytes.Contains(Compose, forbidden) {
-			t.Fatalf("production compose still contains disabled Memory dependency %q", forbidden)
+		if !bytes.Contains(Compose, required) {
+			t.Fatalf("production compose is missing Memory dependency %q", required)
 		}
+	}
+	start := bytes.Index(Compose, []byte("  openviking:\n"))
+	end := bytes.Index(Compose[start:], []byte("\n  opensandbox-server:\n"))
+	if start < 0 || end < 0 {
+		t.Fatal("OpenViking service block is missing")
+	}
+	block := Compose[start : start+end]
+	if bytes.Contains(block, []byte("ports:")) {
+		t.Fatal("production OpenViking must not publish a host port")
+	}
+	if bytes.Contains(block, []byte("healthcheck:")) {
+		t.Fatal("disabled Memory must not block compose --wait on OpenViking readiness")
+	}
+	if !bytes.Contains(block, []byte("openviking-entrypoint")) {
+		t.Fatal("OpenViking must start only after the configured embedding route is usable")
+	}
+	if !bytes.Contains(Compose, []byte("mc rm --recursive --force local/cocola/openviking/")) {
+		t.Fatal("production upgrade must remove the incompatible legacy Memory object prefix")
+	}
+	if !bytes.Contains(Compose, []byte("mc rm --recursive --force local/cocola/openviking-v2/")) {
+		t.Fatal("production upgrade must remove the incompatible Memory V2 preview prefix")
 	}
 }
 

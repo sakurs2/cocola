@@ -108,6 +108,7 @@ type Credentials struct {
 type secrets struct {
 	auth, authJS, admin, model, config, postgres, minio string
 	forgejoDB, forgejo, scm                             string
+	openVikingRoot, memoryLLMService                    string
 }
 
 func DefaultHome() string {
@@ -457,6 +458,10 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"AUTH_SECRET", s.authJS}, {"COCOLA_ADMIN_KEY", s.admin},
 		{"COCOLA_MODEL_SECRET_KEY", s.model}, {"COCOLA_CONFIG_SECRET_KEY", s.config},
 		{"COCOLA_PG_PASSWORD", s.postgres}, {"COCOLA_MINIO_ROOT_PASSWORD", s.minio},
+		{"COCOLA_OPENVIKING_URL", "http://openviking:1933"},
+		{"COCOLA_OPENVIKING_ROOT_API_KEY", s.openVikingRoot},
+		{"COCOLA_MEMORY_LLM_SERVICE_TOKEN", s.memoryLLMService},
+		{"COCOLA_MEMORY_EMBEDDING_DIMENSION", "1024"},
 		{"COCOLA_FORGEJO_DB_PASSWORD", s.forgejoDB}, {"COCOLA_FORGEJO_PASSWORD", s.forgejo},
 		{"COCOLA_FORGEJO_HOST_PORT", strconv.Itoa(internalSCM.HostPort)},
 		{"COCOLA_FORGEJO_API_URL", internalSCM.APIURL},
@@ -501,7 +506,7 @@ func quoteEnv(value string) string {
 }
 
 func newSecrets() (secrets, error) {
-	values := make([]string, 9)
+	values := make([]string, 11)
 	for index := range values {
 		value, err := randomSecret(32)
 		if err != nil {
@@ -517,6 +522,7 @@ func newSecrets() (secrets, error) {
 		auth: values[0], authJS: values[1], admin: values[2], model: values[3],
 		config: values[4], postgres: values[5], minio: values[6],
 		forgejoDB: values[7], forgejo: values[8],
+		openVikingRoot: values[9], memoryLLMService: values[10],
 		scm: base64.StdEncoding.EncodeToString(scmBytes),
 	}, nil
 }

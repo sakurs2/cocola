@@ -85,6 +85,10 @@ export COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS="${COCOLA_AGENT_TOOL_STEP_TIMEOUT_SEC
 export COCOLA_SANDBOX_TOKEN_TTL_SECONDS="${COCOLA_SANDBOX_TOKEN_TTL_SECONDS:-604800}"
 export COCOLA_SANDBOX_HEARTBEAT_SECS="${COCOLA_SANDBOX_HEARTBEAT_SECS:-20}"
 export COCOLA_LLM_TIMEOUT_SECS="${COCOLA_LLM_TIMEOUT_SECS:-600}"
+export COCOLA_OPENVIKING_URL="${COCOLA_OPENVIKING_URL:-http://127.0.0.1:1933}"
+export COCOLA_OPENVIKING_ROOT_API_KEY="${COCOLA_OPENVIKING_ROOT_API_KEY:-cocola-local-openviking-root-key}"
+export COCOLA_MEMORY_LLM_SERVICE_TOKEN="${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}"
+export COCOLA_MEMORY_EMBEDDING_DIMENSION="${COCOLA_MEMORY_EMBEDDING_DIMENSION:-1024}"
 export COCOLA_PROJECT_MAX_REPOSITORY_MB="${COCOLA_PROJECT_MAX_REPOSITORY_MB:-512}"
 export COCOLA_SCM_SECRET_KEY="${COCOLA_SCM_SECRET_KEY:-Y29jb2xhLWxvY2FsLXNjbS1zZWNyZXQta2V5LTAwMDE=}"
 export COCOLA_FORGEJO_HOST_PORT="${COCOLA_FORGEJO_HOST_PORT:-3001}"
@@ -459,9 +463,9 @@ dev_up() {
     fi
   fi
 
-  # (2) Infra only: redis / postgres / minio / hidden internal SCM.
+  # (2) Infra only: redis / postgres / minio / hidden Internal SCM / Memory.
   docker_compose -f deploy/docker-compose/docker-compose.dev.yml up -d \
-      redis postgres minio minio-init forgejo-db-init forgejo forgejo-init \
+      redis postgres minio minio-init forgejo-db-init forgejo forgejo-init openviking \
       >"$(log_redirect dev-infra)" 2>&1 \
     || { echo "!! [dev] infra bring-up failed; see .run-logs/dev-infra.log" >&2; exit 1; }
   wait_port 127.0.0.1 6379 "redis"    120

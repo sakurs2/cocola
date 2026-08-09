@@ -1397,6 +1397,15 @@ func (a *API) updateMemoryConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, config)
 }
 
+func (a *API) resetMemory(w http.ResponseWriter, r *http.Request) {
+	config, err := a.svc.ResetMemory(r.Context(), actorOf(r))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, config)
+}
+
 type embeddingModelReq struct {
 	RouteID string  `json:"route_id,omitempty"`
 	Model   string  `json:"model"`

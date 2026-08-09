@@ -122,7 +122,43 @@ services:
         condition: service_healthy
     entrypoint: >-
       sh -c "mc alias set -- local http://minio:9000 cocola '${COCOLA_MINIO_ROOT_PASSWORD}'
-      && mc mb --ignore-existing local/cocola"
+      && mc mb --ignore-existing local/cocola
+      && (mc rm --recursive --force local/cocola/openviking/ || true)
+      && (mc rm --recursive --force local/cocola/openviking-v2/ || true)
+      && (mc rm --recursive --force local/cocola/openviking-v3/ || true)"
+
+  openviking:
+    image: ghcr.io/volcengine/openviking:v0.4.12@sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb
+    restart: unless-stopped
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import json, os, time, urllib.request
+        delay = 2
+        while True:
+            try:
+                request = urllib.request.Request(os.environ["COCOLA_MEMORY_BOOTSTRAP_URL"], headers={"Authorization": "Bearer " + os.environ["COCOLA_MEMORY_LLM_SERVICE_TOKEN"]})
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    if response.status == 200 and json.load(response).get("embedding_configured"):
+                        break
+            except Exception:
+                pass
+            time.sleep(delay)
+            delay = min(delay * 2, 15)
+        os.execv("/usr/local/bin/openviking-entrypoint", ["openviking-entrypoint", "--without-bot"])
+    depends_on:
+      llm-gateway:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      OPENVIKING_WITH_BOT: "0"
+      COCOLA_MEMORY_BOOTSTRAP_URL: "http://llm-gateway:8080/internal/memory/v1/status"
+      COCOLA_MEMORY_LLM_SERVICE_TOKEN: "${COCOLA_MEMORY_LLM_SERVICE_TOKEN}"
+      OPENVIKING_CONF_CONTENT: >-
+        {"memory":{"version":"v2"},"storage":{"workspace":"/app/.openviking/data","vectordb":{"name":"context","backend":"local","dimension":${COCOLA_MEMORY_EMBEDDING_DIMENSION}},"agfs":{"backend":"s3","s3":{"bucket":"cocola","prefix":"openviking-memory-v2/","endpoint":"http://minio:9000","region":"us-east-1","access_key":"cocola","secret_key":"${COCOLA_MINIO_ROOT_PASSWORD}","use_ssl":false,"use_path_style":true}}},"embedding":{"dense":{"provider":"openai","api_base":"http://llm-gateway:8080/internal/memory/v1","api_key":"${COCOLA_MEMORY_LLM_SERVICE_TOKEN}","model":"cocola-memory-embedding","dimension":${COCOLA_MEMORY_EMBEDDING_DIMENSION},"encoding_format":"float"}},"vlm":{"provider":"openai","api_base":"http://llm-gateway:8080/internal/memory/v1","api_key":"${COCOLA_MEMORY_LLM_SERVICE_TOKEN}","model":"cocola-memory-extraction"},"server":{"host":"0.0.0.0","port":1933,"auth_mode":"trusted","root_api_key":"${COCOLA_OPENVIKING_ROOT_API_KEY}","profile_enabled":false,"cors_origins":[],"observability":{"metrics":{"enabled":true}}}}
+    volumes:
+      - openvikingdata_memory_v2:/app/.openviking/data
 
   opensandbox-server:
     profiles: ["managed"]
@@ -223,6 +259,7 @@ services:
       COCOLA_AUTH_ISSUER: cocola
       COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY}"
       COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY}"
+      COCOLA_MEMORY_LLM_SERVICE_TOKEN: "${COCOLA_MEMORY_LLM_SERVICE_TOKEN}"
       COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
     ports:
       - "${COCOLA_LLM_HOST_PORT}:8080"
@@ -269,6 +306,9 @@ services:
       COCOLA_FORGEJO_VERSION: "16.0.1"
       COCOLA_MODEL_SECRET_KEY: "${COCOLA_MODEL_SECRET_KEY}"
       COCOLA_CONFIG_SECRET_KEY: "${COCOLA_CONFIG_SECRET_KEY}"
+      COCOLA_OPENVIKING_URL: "${COCOLA_OPENVIKING_URL}"
+      COCOLA_OPENVIKING_ROOT_API_KEY: "${COCOLA_OPENVIKING_ROOT_API_KEY}"
+      COCOLA_MEMORY_EMBEDDING_DIMENSION: "${COCOLA_MEMORY_EMBEDDING_DIMENSION}"
       COCOLA_MINIO_ENDPOINT: minio:9000
       COCOLA_MINIO_ACCESS_KEY: cocola
       COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
@@ -361,6 +401,9 @@ services:
       COCOLA_MINIO_ACCESS_KEY: cocola
       COCOLA_MINIO_SECRET_KEY: "${COCOLA_MINIO_ROOT_PASSWORD}"
       COCOLA_MINIO_BUCKET: cocola
+      COCOLA_OPENVIKING_URL: "${COCOLA_OPENVIKING_URL}"
+      COCOLA_OPENVIKING_ROOT_API_KEY: "${COCOLA_OPENVIKING_ROOT_API_KEY}"
+      COCOLA_MEMORY_EMBEDDING_DIMENSION: "${COCOLA_MEMORY_EMBEDDING_DIMENSION}"
       COCOLA_SCM_SECRET_KEY: "${COCOLA_SCM_SECRET_KEY}"
       COCOLA_SCM_SECRET_KEY_FILE: "${COCOLA_SCM_SECRET_KEY_FILE:-}"
       COCOLA_PUBLIC_ORIGINS: "${COCOLA_PUBLIC_ORIGINS}"
@@ -453,3 +496,4 @@ volumes:
   pgdata:
   miniodata:
   forgejodata:
+  openvikingdata_memory_v2:

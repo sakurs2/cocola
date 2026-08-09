@@ -145,11 +145,51 @@ services:
       sh -c "
       mc alias set local http://minio:9000 cocola cocola_dev_pw &&
       mc mb --ignore-existing local/cocola &&
+      (mc rm --recursive --force local/cocola/openviking/ || true) &&
+      (mc rm --recursive --force local/cocola/openviking-v2/ || true) &&
+      (mc rm --recursive --force local/cocola/openviking-v3/ || true) &&
       mc anonymous set download local/cocola/public || true
       "
+
+  openviking:
+    image: ghcr.io/volcengine/openviking:v0.4.12@sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb
+    container_name: cocola-openviking
+    restart: unless-stopped
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        import json, os, time, urllib.request
+        delay = 2
+        while True:
+            try:
+                request = urllib.request.Request(os.environ["COCOLA_MEMORY_BOOTSTRAP_URL"], headers={"Authorization": "Bearer " + os.environ["COCOLA_MEMORY_LLM_SERVICE_TOKEN"]})
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    if response.status == 200 and json.load(response).get("embedding_configured"):
+                        break
+            except Exception:
+                pass
+            time.sleep(delay)
+            delay = min(delay * 2, 15)
+        os.execv("/usr/local/bin/openviking-entrypoint", ["openviking-entrypoint", "--without-bot"])
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      OPENVIKING_WITH_BOT: "0"
+      COCOLA_MEMORY_BOOTSTRAP_URL: "http://host.docker.internal:${COCOLA_LLM_PORT:-8081}/internal/memory/v1/status"
+      COCOLA_MEMORY_LLM_SERVICE_TOKEN: "${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}"
+      OPENVIKING_CONF_CONTENT: >-
+        {"memory":{"version":"v2"},"storage":{"workspace":"/app/.openviking/data","vectordb":{"name":"context","backend":"local","dimension":${COCOLA_MEMORY_EMBEDDING_DIMENSION:-1024}},"agfs":{"backend":"s3","s3":{"bucket":"cocola","prefix":"openviking-memory-v2/","endpoint":"http://minio:9000","region":"us-east-1","access_key":"cocola","secret_key":"cocola_dev_pw","use_ssl":false,"use_path_style":true}}},"embedding":{"dense":{"provider":"openai","api_base":"http://host.docker.internal:${COCOLA_LLM_PORT:-8081}/internal/memory/v1","api_key":"${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}","model":"cocola-memory-embedding","dimension":${COCOLA_MEMORY_EMBEDDING_DIMENSION:-1024},"encoding_format":"float"}},"vlm":{"provider":"openai","api_base":"http://host.docker.internal:${COCOLA_LLM_PORT:-8081}/internal/memory/v1","api_key":"${COCOLA_MEMORY_LLM_SERVICE_TOKEN:-cocola-local-memory-service-token}","model":"cocola-memory-extraction"},"server":{"host":"0.0.0.0","port":1933,"auth_mode":"trusted","root_api_key":"${COCOLA_OPENVIKING_ROOT_API_KEY:-cocola-local-openviking-root-key}","profile_enabled":false,"cors_origins":[],"observability":{"metrics":{"enabled":true}}}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:1933:1933"
+    volumes:
+      - openvikingdata_memory_v2:/app/.openviking/data
 
 volumes:
   pgdata:
   redisdata:
   miniodata:
   forgejodata:
+  openvikingdata_memory_v2:

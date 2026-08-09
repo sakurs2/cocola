@@ -1178,10 +1178,10 @@ func (p *Postgres) DeleteLLMModelRoute(ctx context.Context, id string) error {
 
 func (p *Postgres) GetMemoryConfig(ctx context.Context) (MemoryConfig, error) {
 	var config MemoryConfig
-	err := p.pool.QueryRow(ctx, `SELECT enabled, COALESCE(extraction_model_route_id, ''),
+	err := p.pool.QueryRow(ctx, `SELECT enabled, resetting, COALESCE(extraction_model_route_id, ''),
 		COALESCE(embedding_model_route_id, ''), version, updated_at, updated_by
 		FROM memory_config WHERE singleton=TRUE`).Scan(
-		&config.Enabled, &config.ExtractionModelRouteID, &config.EmbeddingModelRouteID,
+		&config.Enabled, &config.Resetting, &config.ExtractionModelRouteID, &config.EmbeddingModelRouteID,
 		&config.Version, &config.UpdatedAt, &config.UpdatedBy,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1190,39 +1190,200 @@ func (p *Postgres) GetMemoryConfig(ctx context.Context) (MemoryConfig, error) {
 	return config, err
 }
 
-func (p *Postgres) UpdateMemoryConfig(ctx context.Context, config MemoryConfig, expectedVersion int64) (MemoryConfig, error) {
-	row := p.pool.QueryRow(ctx, `UPDATE memory_config SET enabled=$1,
+func (p *Postgres) GetMemoryIndexLock(ctx context.Context) (MemoryIndexLock, error) {
+	var lock MemoryIndexLock
+	err := p.pool.QueryRow(ctx, `SELECT embedding_model_route_id, embedding_provider_id,
+		embedding_model, embedding_base_url, embedding_dimension
+		FROM memory_index_state WHERE singleton=TRUE`).Scan(
+		&lock.RouteID, &lock.ProviderID, &lock.Model, &lock.BaseURL, &lock.Dimension,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return MemoryIndexLock{}, ErrNotFound
+	}
+	return lock, err
+}
+
+func (p *Postgres) UpdateMemoryConfig(
+	ctx context.Context,
+	config MemoryConfig,
+	expectedVersion int64,
+	lock MemoryIndexLock,
+) (MemoryConfig, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return MemoryConfig{}, err
+	}
+	defer tx.Rollback(ctx)
+	var resetting bool
+	if err := tx.QueryRow(ctx, `SELECT resetting FROM memory_config
+		WHERE singleton=TRUE FOR UPDATE`).Scan(&resetting); err != nil {
+		return MemoryConfig{}, err
+	}
+	if resetting {
+		return MemoryConfig{}, ErrConflict
+	}
+	if config.Enabled {
+		if strings.TrimSpace(config.EmbeddingModelRouteID) == "" || lock.Dimension <= 0 ||
+			strings.TrimSpace(lock.RouteID) == "" || strings.TrimSpace(lock.ProviderID) == "" ||
+			strings.TrimSpace(lock.Model) == "" || strings.TrimSpace(lock.BaseURL) == "" {
+			return MemoryConfig{}, ErrConflict
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO memory_index_state
+			(singleton, embedding_dimension, embedding_model_route_id,
+			 embedding_provider_id, embedding_model, embedding_base_url)
+			VALUES (TRUE, $1, $2, $3, $4, $5) ON CONFLICT (singleton) DO NOTHING`,
+			lock.Dimension, lock.RouteID, lock.ProviderID, lock.Model, lock.BaseURL); err != nil {
+			return MemoryConfig{}, err
+		}
+		var locked MemoryIndexLock
+		if err := tx.QueryRow(ctx, `SELECT embedding_model_route_id, embedding_provider_id,
+			embedding_model, embedding_base_url, embedding_dimension
+			FROM memory_index_state WHERE singleton=TRUE FOR UPDATE`).Scan(
+			&locked.RouteID, &locked.ProviderID, &locked.Model, &locked.BaseURL, &locked.Dimension,
+		); err != nil {
+			return MemoryConfig{}, err
+		}
+		if locked != lock {
+			return MemoryConfig{}, ErrConflict
+		}
+	}
+	row := tx.QueryRow(ctx, `UPDATE memory_config SET enabled=$1,
 		extraction_model_route_id=NULLIF($2,''), embedding_model_route_id=NULLIF($3,''),
 		version=version+1, updated_at=$4, updated_by=$5
 		WHERE singleton=TRUE AND version=$6
-		RETURNING enabled, COALESCE(extraction_model_route_id, ''),
+		RETURNING enabled, resetting, COALESCE(extraction_model_route_id, ''),
 		COALESCE(embedding_model_route_id, ''), version, updated_at, updated_by`,
 		config.Enabled, config.ExtractionModelRouteID, config.EmbeddingModelRouteID,
 		config.UpdatedAt, config.UpdatedBy, expectedVersion)
 	var updated MemoryConfig
-	err := row.Scan(&updated.Enabled, &updated.ExtractionModelRouteID,
+	err = row.Scan(&updated.Enabled, &updated.Resetting, &updated.ExtractionModelRouteID,
 		&updated.EmbeddingModelRouteID, &updated.Version, &updated.UpdatedAt, &updated.UpdatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return MemoryConfig{}, ErrConflict
+		return MemoryConfig{}, ErrVersionConflict
 	}
-	return updated, err
+	if err != nil {
+		return MemoryConfig{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return MemoryConfig{}, err
+	}
+	return updated, nil
 }
 
-func (p *Postgres) LockMemoryIndex(ctx context.Context, embeddingDimension int) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO memory_index_state (singleton, embedding_dimension)
-		VALUES (TRUE, $1) ON CONFLICT (singleton) DO NOTHING`, embeddingDimension)
+func (p *Postgres) GetMemoryQueueStats(ctx context.Context) (MemoryQueueStats, error) {
+	var stats MemoryQueueStats
+	err := p.pool.QueryRow(ctx, `SELECT
+		(SELECT COUNT(*) FROM memory_capture_jobs
+			WHERE status IN ('pending','processing','submitting','cancel_requested')),
+		(SELECT COUNT(*) FROM memory_capture_jobs WHERE status='dead')`).Scan(
+		&stats.Pending, &stats.Dead,
+	)
+	return stats, err
+}
+
+func (p *Postgres) BeginMemoryReset(ctx context.Context, actor string) error {
+	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	var locked int
-	if err := p.pool.QueryRow(ctx, `SELECT embedding_dimension FROM memory_index_state
-		WHERE singleton=TRUE`).Scan(&locked); err != nil {
+	defer tx.Rollback(ctx)
+	var alreadyResetting bool
+	if err := tx.QueryRow(ctx, `SELECT resetting FROM memory_config
+		WHERE singleton=TRUE FOR UPDATE`).Scan(&alreadyResetting); err != nil {
 		return err
 	}
-	if locked != embeddingDimension {
+	if alreadyResetting {
+		return tx.Commit(ctx)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO memory_reset_accounts (tenant_id)
+		SELECT DISTINCT COALESCE(NULLIF(trim(tenant_id),''), 'default') FROM (
+		SELECT tenant_id FROM memory_user_settings
+		UNION ALL
+		SELECT tenant_id FROM memory_capture_jobs
+		) identities ON CONFLICT (tenant_id) DO NOTHING`)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE memory_config SET enabled=FALSE,
+		extraction_model_route_id=NULL, embedding_model_route_id=NULL,
+		resetting=TRUE, version=version+1,
+		updated_at=now(), updated_by=$1 WHERE singleton=TRUE`, actor)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE memory_capture_jobs SET cancellation_requested=TRUE,
+		status=CASE WHEN status='submitting' THEN status ELSE 'cancel_requested' END,
+		next_attempt_at=CASE WHEN status='submitting' THEN next_attempt_at ELSE now() END,
+		updated_at=now() WHERE status IN ('pending','processing','submitting')`)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) MemoryResetCapturesPending(ctx context.Context) (bool, error) {
+	var pending bool
+	err := p.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM memory_capture_jobs
+		WHERE cancellation_requested
+			AND status IN ('pending','processing','submitting','cancel_requested')
+	)`).Scan(&pending)
+	return pending, err
+}
+
+func (p *Postgres) ListMemoryResetAccounts(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := p.pool.Query(ctx, `SELECT tenant_id FROM memory_reset_accounts
+		ORDER BY tenant_id LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	accounts := make([]string, 0)
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, tenantID)
+	}
+	return accounts, rows.Err()
+}
+
+func (p *Postgres) CompleteMemoryResetAccount(ctx context.Context, tenantID string) error {
+	_, err := p.pool.Exec(ctx, `DELETE FROM memory_reset_accounts WHERE tenant_id=$1`, tenantID)
+	return err
+}
+
+func (p *Postgres) CompleteMemoryReset(ctx context.Context) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var remaining bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM memory_reset_accounts)`).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining {
 		return ErrConflict
 	}
-	return nil
+	if _, err := tx.Exec(ctx, `DELETE FROM memory_capture_jobs`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM memory_user_settings`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM memory_index_state`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memory_config SET resetting=FALSE,
+		updated_at=now() WHERE singleton=TRUE`); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ---- Scheduled tasks ----

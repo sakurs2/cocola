@@ -202,11 +202,29 @@ type LLMModelRoute struct {
 // lands in PostgreSQL; this row only controls the integration.
 type MemoryConfig struct {
 	Enabled                bool      `json:"enabled"`
+	Resetting              bool      `json:"resetting"`
 	ExtractionModelRouteID string    `json:"extraction_model_route_id"`
 	EmbeddingModelRouteID  string    `json:"embedding_model_route_id"`
 	Version                int64     `json:"version"`
 	UpdatedAt              time.Time `json:"updated_at"`
 	UpdatedBy              string    `json:"updated_by"`
+}
+
+// MemoryIndexLock is the immutable semantic identity of an initialized vector
+// index. API credentials are deliberately excluded so they can be rotated.
+type MemoryIndexLock struct {
+	RouteID    string `json:"route_id"`
+	ProviderID string `json:"provider_id"`
+	Model      string `json:"model"`
+	BaseURL    string `json:"base_url"`
+	Dimension  int    `json:"dimension"`
+}
+
+// MemoryQueueStats exposes only operator-relevant backlog health. Provider
+// task details remain owned by Gateway and OpenViking.
+type MemoryQueueStats struct {
+	Pending int64 `json:"pending"`
+	Dead    int64 `json:"dead"`
 }
 
 type LLMModelIcon struct {
@@ -566,8 +584,14 @@ type Store interface {
 
 	// User-memory integration configuration
 	GetMemoryConfig(ctx context.Context) (MemoryConfig, error)
-	UpdateMemoryConfig(ctx context.Context, config MemoryConfig, expectedVersion int64) (MemoryConfig, error)
-	LockMemoryIndex(ctx context.Context, embeddingDimension int) error
+	GetMemoryIndexLock(ctx context.Context) (MemoryIndexLock, error)
+	UpdateMemoryConfig(ctx context.Context, config MemoryConfig, expectedVersion int64, lock MemoryIndexLock) (MemoryConfig, error)
+	GetMemoryQueueStats(ctx context.Context) (MemoryQueueStats, error)
+	BeginMemoryReset(ctx context.Context, actor string) error
+	MemoryResetCapturesPending(ctx context.Context) (bool, error)
+	ListMemoryResetAccounts(ctx context.Context, limit int) ([]string, error)
+	CompleteMemoryResetAccount(ctx context.Context, tenantID string) error
+	CompleteMemoryReset(ctx context.Context) error
 
 	// Scheduled tasks
 	CreateScheduledTask(ctx context.Context, task ScheduledTask, attachments []ScheduledTaskAttachment) error

@@ -5,12 +5,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestBuildRecallResultSurfacesSanitizedOutcomes(t *testing.T) {
@@ -18,36 +21,56 @@ func TestBuildRecallResultSurfacesSanitizedOutcomes(t *testing.T) {
 		URI: "viking://user/memories/preferences/editor.md", Content: "Uses dark mode",
 	}}
 	tests := []struct {
-		name       string
-		profile    string
-		items      []memoryResult
-		profileErr error
-		findErr    error
-		status     string
-		count      int
-		errorCode  string
+		name      string
+		items     []memoryResult
+		searchErr error
+		status    string
+		count     int
+		errorCode string
 	}{
 		{name: "hit", items: items, status: RecallStatusHit, count: 1},
 		{name: "miss", status: RecallStatusMiss},
-		{name: "missing profile is a normal miss", profileErr: ErrNotFound, status: RecallStatusMiss},
 		{
-			name: "partial recall", profile: "Prefers concise answers",
-			findErr: context.DeadlineExceeded, status: RecallStatusDegraded,
-			count: 1, errorCode: "MEMORY_RECALL_TIMEOUT",
+			name: "timeout", searchErr: context.DeadlineExceeded,
+			status: RecallStatusUnavailable, errorCode: "MEMORY_RECALL_TIMEOUT",
 		},
 		{
-			name: "unavailable", profileErr: errors.New("transport failed"),
-			findErr: errors.New("transport failed"), status: RecallStatusUnavailable,
-			errorCode: "MEMORY_UNAVAILABLE",
+			name: "unavailable", searchErr: errors.New("transport failed"),
+			status: RecallStatusUnavailable, errorCode: "MEMORY_UNAVAILABLE",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := buildRecallResult(test.profile, test.items, test.profileErr, test.findErr)
+			result := buildRecallResult(test.items, test.searchErr)
 			if result.Status != test.status || result.Count != test.count ||
 				result.ErrorCode != test.errorCode {
 				t.Fatalf("result = %+v, want status=%s count=%d error=%s",
 					result, test.status, test.count, test.errorCode)
+			}
+		})
+	}
+	result := buildRecallResult(items, nil)
+	if strings.Contains(result.Context, "viking://") {
+		t.Fatalf("user-visible recall content leaked provider URI: %q", result.Context)
+	}
+}
+
+func TestCaptureSkipReasonEnforcesProductBoundary(t *testing.T) {
+	tests := []struct {
+		name  string
+		input CaptureInput
+		want  string
+	}{
+		{name: "interactive", input: CaptureInput{Source: "chat", InteractionMode: "execute"}},
+		{name: "scheduled", input: CaptureInput{Source: "scheduled_task"}, want: "skipped_scheduled"},
+		{name: "plan mode", input: CaptureInput{InteractionMode: "plan"}, want: "skipped_plan"},
+		{name: "approved plan execution", input: CaptureInput{PlanID: "plan-1"}, want: "skipped_plan"},
+		{name: "project", input: CaptureInput{ProjectID: "project-1"}, want: "skipped_project"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := captureSkipReason(test.input); got != test.want {
+				t.Fatalf("captureSkipReason() = %q, want %q", got, test.want)
 			}
 		})
 	}
@@ -89,18 +112,19 @@ func TestFormatRecallCapsItemsAndCharacters(t *testing.T) {
 			Content: "memory",
 		})
 	}
-
-	context, uris := formatRecall("profile", items)
+	contextText, uris := formatRecall(items)
 	if len(uris) != maxRecallItems {
-		t.Fatalf("got %d recalled URIs, want %d total items", len(uris), maxRecallItems)
-	}
-	if uris[0] != "viking://user/memories/profile.md" {
-		t.Fatalf("profile URI missing from used contexts: %#v", uris)
+		t.Fatalf("got %d recalled URIs, want %d", len(uris), maxRecallItems)
 	}
 
-	context, _ = formatRecall(strings.Repeat("记", maxRecallChars*2), nil)
-	if got := utf8.RuneCountInString(context); got > maxRecallChars {
-		t.Fatalf("recall context has %d runes, want at most %d", got, maxRecallChars)
+	contextText, _ = formatRecall([]memoryResult{{
+		URI: "viking://user/memories/profile.md", Content: strings.Repeat("记", maxRecallBytes*2),
+	}})
+	if got := len(contextText); got > maxRecallBytes {
+		t.Fatalf("recall context has %d bytes, want at most %d", got, maxRecallBytes)
+	}
+	if !utf8.ValidString(contextText) {
+		t.Fatal("recall byte truncation produced invalid UTF-8")
 	}
 }
 
@@ -113,10 +137,14 @@ func TestOpenVikingAccountFallsBackForDefaultTenant(t *testing.T) {
 	}
 }
 
-func TestOpenVikingFindAppliesMinimumRecallScore(t *testing.T) {
+func TestOpenVikingSearchUsesBoundedMemoryContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/search/find" {
+		if r.URL.Path != "/api/v1/search/search" {
 			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if r.Header.Get("X-OpenViking-Account") != "tenant" ||
+			r.Header.Get("X-OpenViking-User") != "user" {
+			t.Fatalf("identity headers missing: %#v", r.Header)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -125,18 +153,27 @@ func TestOpenVikingFindAppliesMinimumRecallScore(t *testing.T) {
 		if got, ok := body["score_threshold"].(float64); !ok || got != minRecallScore {
 			t.Fatalf("score_threshold = %#v, want %v", body["score_threshold"], minRecallScore)
 		}
+		if body["target_uri"] != "viking://user/memories/" || body["context_type"] != "memory" {
+			t.Fatalf("unexpected search scope: %#v", body)
+		}
+		if body["limit"] != float64(maxRecallItems) {
+			t.Fatalf("limit = %#v, want %d", body["limit"], maxRecallItems)
+		}
 		writeOpenVikingTestJSON(t, w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"result": map[string]any{
 				"memories": []any{
 					map[string]any{
-						"uri": "viking://user/memories/preferences/below.md", "score": 0.149,
+						"uri": "viking://user/user/memories/preferences/below.md", "score": 0.349,
 					},
 					map[string]any{
-						"uri": "viking://user/memories/preferences/boundary.md", "score": 0.15,
+						"uri": "viking://user/user/memories/preferences/boundary.md", "score": 0.35,
 					},
 					map[string]any{
-						"uri": "viking://user/memories/preferences/above.md", "score": 0.8,
+						"uri": "viking://user/user/memories/preferences/above.md", "score": 0.8,
+					},
+					map[string]any{
+						"uri": "viking://user/other/memories/preferences/leak.md", "score": 1.0,
 					},
 				},
 			},
@@ -145,8 +182,8 @@ func TestOpenVikingFindAppliesMinimumRecallScore(t *testing.T) {
 	defer server.Close()
 
 	client := newOpenVikingClient(server.URL, "root-key")
-	items, err := client.find(
-		context.Background(), Identity{TenantID: "tenant", UserID: "user"}, "editor", 6,
+	items, err := client.searchMemories(
+		context.Background(), Identity{TenantID: "tenant", UserID: "user"}, "editor", maxRecallItems,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -160,28 +197,29 @@ func TestOpenVikingFindAppliesMinimumRecallScore(t *testing.T) {
 }
 
 func TestFormatRecallFallsBackToAbstract(t *testing.T) {
-	context, uris := formatRecall("", []memoryResult{{
+	contextText, uris := formatRecall([]memoryResult{{
 		URI: "viking://user/memories/entities/cocola.md", Abstract: "Cocola project",
 	}})
-	if !strings.Contains(context, "Cocola project") {
-		t.Fatalf("abstract missing from context: %q", context)
+	if !strings.Contains(contextText, "Cocola project") {
+		t.Fatalf("abstract missing from context: %q", contextText)
 	}
 	if len(uris) != 1 || uris[0] != "viking://user/memories/entities/cocola.md" {
 		t.Fatalf("unexpected recalled URIs: %#v", uris)
 	}
 }
 
-func TestCollectItemsDeduplicatesAndHidesMetadata(t *testing.T) {
-	uri := "viking://user/memories/preferences/editor.md"
+func TestCollectItemsNormalizesIdentityAndHidesMetadata(t *testing.T) {
+	canonical := "viking://user/user/memories/preferences/editor.md"
 	raw := []any{
-		map[string]any{"uri": uri, "abstract": "first"},
-		map[string]any{"child": map[string]any{"uri": uri}},
-		map[string]any{"uri": "viking://user/memories/preferences/.overview.md"},
-		map[string]any{"uri": "viking://user/memories/cases/unsupported.md"},
+		map[string]any{"uri": canonical, "abstract": "first"},
+		map[string]any{"child": map[string]any{"uri": canonical}},
+		map[string]any{"uri": "viking://user/user/memories/preferences/.overview.md"},
+		map[string]any{"uri": "viking://user/other/memories/preferences/leak.md"},
+		map[string]any{"uri": "viking://user/user/memories/cases/unsupported.md"},
 	}
 
-	items := collectItems(raw)
-	if len(items) != 1 || items[0].URI != uri {
+	items := collectItems(raw, "user")
+	if len(items) != 1 || items[0].URI != "viking://user/memories/preferences/editor.md" {
 		t.Fatalf("unexpected items: %#v", items)
 	}
 }
@@ -245,14 +283,15 @@ func TestCaptureRetryDelayIsBounded(t *testing.T) {
 		want     time.Duration
 		dead     bool
 	}{
-		{name: "first", attempts: 1, want: time.Minute},
-		{name: "horizon remainder", attempts: 3, age: 23*time.Hour + 59*time.Minute, want: time.Minute},
-		{name: "attempt limit", attempts: 8, dead: true},
-		{name: "horizon", attempts: 2, age: 24 * time.Hour, dead: true},
+		{name: "first", attempts: 1, want: 15 * time.Second},
+		{name: "second", attempts: 2, want: time.Minute},
+		{name: "horizon remainder", attempts: 3, age: 5*time.Hour + 59*time.Minute, want: time.Minute},
+		{name: "attempt limit", attempts: 5, dead: true},
+		{name: "horizon", attempts: 2, age: 6 * time.Hour, dead: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, dead := captureRetryDelay(test.attempts, test.age, 8, 24*time.Hour)
+			got, dead := captureRetryDelay(test.attempts, test.age, 5, 6*time.Hour)
 			if got != test.want || dead != test.dead {
 				t.Fatalf("got (%s, %t), want (%s, %t)", got, dead, test.want, test.dead)
 			}
@@ -260,40 +299,108 @@ func TestCaptureRetryDelayIsBounded(t *testing.T) {
 	}
 }
 
-func TestCaptureSessionResetOnlyForReclaimedJobs(t *testing.T) {
-	for _, status := range []string{"submitted", "retry"} {
-		if !captureNeedsSessionReset(status) {
-			t.Fatalf("status %q should reset its deterministic session", status)
-		}
+func TestCaptureLoadFailureClassification(t *testing.T) {
+	if !permanentCaptureLoadFailure(pgx.ErrNoRows) {
+		t.Fatal("missing run must be a permanent capture failure")
 	}
-	for _, status := range []string{"pending", "completed", "dead", "cancelled"} {
-		if captureNeedsSessionReset(status) {
-			t.Fatalf("status %q should not reset its session", status)
-		}
+	if !permanentCaptureLoadFailure(fmt.Errorf("decode: %w", errCapturePayload)) {
+		t.Fatal("invalid persisted JSON must be a permanent capture failure")
+	}
+	if permanentCaptureLoadFailure(errors.New("temporary database timeout")) {
+		t.Fatal("transient database failures must remain retryable")
 	}
 }
 
-func TestCommitRecoveryDecision(t *testing.T) {
-	tests := []struct {
-		name    string
-		task    *openVikingTask
-		archive commitArchiveState
-		want    commitRecoveryDecision
-	}{
-		{name: "running task", task: &openVikingTask{ID: "task-1", Status: "running"}, want: commitRecoveryAdopt},
-		{name: "completed task", task: &openVikingTask{ID: "task-1", Status: "completed"}, want: commitRecoveryComplete},
-		{name: "failed task", task: &openVikingTask{ID: "task-1", Status: "failed"}, want: commitRecoveryResubmit},
-		{name: "completed archive", archive: commitArchiveCompleted, want: commitRecoveryComplete},
-		{name: "queued archive", archive: commitArchivePending, want: commitRecoveryWait},
-		{name: "failed archive", archive: commitArchiveFailed, want: commitRecoveryResubmit},
-		{name: "no commit evidence", archive: commitArchiveAbsent, want: commitRecoveryResubmit},
+func TestCapturePollExpiresEvenWhenProviderKeepsReturningRunning(t *testing.T) {
+	createdAt := time.Unix(100, 0)
+	if capturePollExpired(createdAt, createdAt.Add(6*time.Hour-time.Second), 6*time.Hour) {
+		t.Fatal("capture expired before its retry horizon")
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := decideCommitRecovery(test.task, test.archive); got != test.want {
-				t.Fatalf("decision = %d, want %d", got, test.want)
+	if !capturePollExpired(createdAt, createdAt.Add(6*time.Hour), 6*time.Hour) {
+		t.Fatal("running provider tasks must expire at the retry horizon")
+	}
+}
+
+func TestOpenVikingEnsureSessionCreatesRestrictedPolicy(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions/cocola-run-1":
+			writeOpenVikingTestJSON(t, w, http.StatusNotFound, map[string]any{
+				"status": "error", "error": map[string]any{"code": "NOT_FOUND", "message": "missing"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
 			}
+			policy, ok := body["memory_policy"].(map[string]any)
+			if !ok || policy["working_memory"].(map[string]any)["enabled"] != false {
+				t.Fatalf("unexpected memory policy: %#v", body["memory_policy"])
+			}
+			types, ok := policy["memory_types"].([]any)
+			if !ok || len(types) != 4 {
+				t.Fatalf("memory types = %#v, want four user types", policy["memory_types"])
+			}
+			writeOpenVikingTestJSON(t, w, http.StatusOK, map[string]any{
+				"status": "ok", "result": map[string]any{"session_id": "cocola-run-1"},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := newOpenVikingClient(server.URL, "root-key")
+	count, err := client.ensureSession(
+		context.Background(), Identity{TenantID: "tenant", UserID: "user"}, "cocola-run-1",
+	)
+	if err != nil || count != 0 || requests != 2 {
+		t.Fatalf("ensureSession = (%d, %v), requests=%d", count, err, requests)
+	}
+}
+
+func TestOpenVikingAddTurnUsesOneBatchAndContextParts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions/cocola-run-1/messages/batch" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			Messages []struct {
+				Role    string           `json:"role"`
+				Content string           `json:"content"`
+				Parts   []map[string]any `json:"parts"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Messages) != 2 || body.Messages[0].Role != "user" ||
+			body.Messages[0].Content != "Question" || body.Messages[1].Role != "assistant" {
+			t.Fatalf("unexpected messages: %#v", body.Messages)
+		}
+		parts := body.Messages[1].Parts
+		if len(parts) != 2 || parts[0]["type"] != "text" || parts[0]["text"] != "Answer" ||
+			parts[1]["type"] != "context" || parts[1]["context_type"] != "memory" {
+			t.Fatalf("unexpected assistant parts: %#v", parts)
+		}
+		writeOpenVikingTestJSON(t, w, http.StatusOK, map[string]any{
+			"status": "ok", "result": map[string]any{"message_count": 2},
 		})
+	}))
+	defer server.Close()
+
+	client := newOpenVikingClient(server.URL, "root-key")
+	err := client.addTurn(
+		context.Background(), Identity{TenantID: "tenant", UserID: "user"}, "cocola-run-1",
+		"Question", "Answer", []string{
+			"viking://user/memories/preferences/editor.md",
+			"viking://agent/memories/preferences/invalid.md",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -310,6 +417,21 @@ func TestProcessAvailableStopsBeforeClaimWhenWorkerIsCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("cancelled worker tried to process the batch")
+	}
+}
+
+func TestTerminalTaskStatusRecognizesProviderAliases(t *testing.T) {
+	for _, status := range []string{
+		"cancelled", "completed", "success", "succeeded", "failed", "error",
+	} {
+		if !terminalTaskStatus(status) {
+			t.Fatalf("status %q must be terminal", status)
+		}
+	}
+	for _, status := range []string{"", "pending", "processing", "running"} {
+		if terminalTaskStatus(status) {
+			t.Fatalf("status %q must remain active", status)
+		}
 	}
 }
 
@@ -343,51 +465,6 @@ func TestLatestCommitTaskKeepsNewestTerminalRecord(t *testing.T) {
 	}
 	if !found || task.ID != "new-failed" || task.Status != "failed" {
 		t.Fatalf("unexpected task: found=%t task=%+v", found, task)
-	}
-}
-
-func TestCommitArchiveStateUsesDurableMarkers(t *testing.T) {
-	tests := []struct {
-		name   string
-		exists string
-		want   commitArchiveState
-	}{
-		{name: "completed", exists: ".done", want: commitArchiveCompleted},
-		{name: "failed", exists: ".failed.json", want: commitArchiveFailed},
-		{name: "queued", exists: "messages.jsonl", want: commitArchivePending},
-		{name: "absent", want: commitArchiveAbsent},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/api/v1/fs/stat" {
-					t.Fatalf("path = %q", r.URL.Path)
-				}
-				uri := r.URL.Query().Get("uri")
-				if test.exists != "" && strings.HasSuffix(uri, "/"+test.exists) {
-					writeOpenVikingTestJSON(t, w, http.StatusOK, map[string]any{
-						"status": "ok", "result": map[string]any{"uri": uri},
-					})
-					return
-				}
-				writeOpenVikingTestJSON(t, w, http.StatusNotFound, map[string]any{
-					"status": "error",
-					"error":  map[string]any{"code": "NOT_FOUND", "message": "missing"},
-				})
-			}))
-			defer server.Close()
-
-			client := newOpenVikingClient(server.URL, "root-key")
-			got, err := client.commitArchiveState(
-				context.Background(), Identity{TenantID: "tenant", UserID: "user"}, "cocola-run-1",
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != test.want {
-				t.Fatalf("state = %d, want %d", got, test.want)
-			}
-		})
 	}
 }
 

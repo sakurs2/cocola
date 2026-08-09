@@ -214,6 +214,7 @@ func (a *API) Router() http.Handler {
 		r.Route("/memory", func(r chi.Router) {
 			r.Get("/config", a.getMemoryConfig)
 			r.Patch("/config", a.updateMemoryConfig)
+			r.Post("/reset", a.resetMemory)
 		})
 
 		r.Route("/scheduled-tasks", func(r chi.Router) {
@@ -377,8 +378,6 @@ func mapErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "INVALID_EXPIRATION", "expiration must allow at least one future run")
 	case errors.Is(err, service.ErrInvalidArg):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
-	case errors.Is(err, service.ErrMemoryUnderDevelopment):
-		writeErr(w, http.StatusNotImplemented, "FEATURE_NOT_AVAILABLE", "memory is currently under development")
 	case errors.Is(err, service.ErrWorkspaceNotFound):
 		writeErr(w, http.StatusNotFound, "WORKSPACE_NOT_FOUND", "workspace not found")
 	case errors.Is(err, service.ErrWorkspaceFileTooLarge):

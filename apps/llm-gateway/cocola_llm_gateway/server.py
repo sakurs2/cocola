@@ -152,6 +152,15 @@ def create_app(
             log.warning("memory extraction failed", error_type=type(exc).__name__)
             return _responses_err(503, "memory extraction unavailable")
 
+    @app.get("/internal/memory/v1/status")
+    async def memory_status(request: Request):
+        if not _memory_authenticated(request):
+            return _responses_err(
+                401, "invalid memory service token", error_type="authentication_error"
+            )
+        configured = await service.memory_embedding_configured()
+        return {"embedding_configured": configured}
+
     @app.post("/internal/memory/v1/embeddings")
     async def memory_embeddings(request: Request):
         if not _memory_authenticated(request):

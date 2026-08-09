@@ -184,6 +184,33 @@ async def test_memory_adapter_requires_its_own_service_token():
     assert wrong.status_code == 401
 
 
+async def test_memory_status_is_passive_and_authenticated():
+    service, ledger, _, embedding = _chat_embedding_service()
+    async with _client(service) as client:
+        unauthorized = await client.get("/internal/memory/v1/status")
+        configured = await client.get(
+            "/internal/memory/v1/status",
+            headers={"authorization": "Bearer memory-secret"},
+        )
+
+    assert unauthorized.status_code == 401
+    assert configured.status_code == 200
+    assert configured.json() == {"embedding_configured": True}
+    assert embedding.payloads == []
+    assert await ledger.recent(user_id="memory-service") == []
+
+    empty_service = GatewayService(
+        Registry(providers={}, routes={}, default_alias=""), MemoryLedger()
+    )
+    async with _client(empty_service) as client:
+        missing = await client.get(
+            "/internal/memory/v1/status",
+            headers={"authorization": "Bearer memory-secret"},
+        )
+    assert missing.status_code == 200
+    assert missing.json() == {"embedding_configured": False}
+
+
 async def test_anthropic_memory_adapter_supports_json_and_platform_usage():
     service, ledger, chat, _ = _chat_embedding_service()
     async with _client(service) as client:
