@@ -50,28 +50,28 @@ func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
 	}
 }
 
-func TestStartSummaryUsesCommittedVersionAndSourceSemantics(t *testing.T) {
+func TestStartSummaryUsesCommittedVersionAndRegistrySemantics(t *testing.T) {
 	state := config.State{
-		Version: "v0.2.0", ImageSource: config.ImageSourceDirect,
+		Version:   "v0.2.0",
 		PublicURL: "http://localhost:3000", WebPort: 3000,
 	}
 	pending := &config.PendingUpgrade{
 		FromVersion: "v0.1.0", ToVersion: "v0.2.0",
-		FromImageSource: config.ImageSourceCNMirror, ToImageSource: config.ImageSourceDirect,
-		FromImageRegistry: config.CNMirrorRegistry, ToImageRegistry: config.DefaultRegistry,
+		FromImageRegistry: "ghcr.nju.edu.cn/sakurs2", ToImageRegistry: config.DefaultRegistry,
 	}
 	var output bytes.Buffer
 	printStartSummary(ui.Printer{Out: &output, Err: &output}, state, pending, "")
 	text := output.String()
 	for _, expected := range []string{
 		"Before version", "v0.1.0", "Current version", "v0.2.0",
-		"Before image source", "Mainland China acceleration", "Image source", "Direct download",
+		"Before image registry", "ghcr.nju.edu.cn/sakurs2", "Current image registry", config.DefaultRegistry,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("start summary missing %q: %q", expected, text)
 		}
 	}
-	if strings.Contains(text, "Target version") || strings.Contains(text, "New version") {
+	if strings.Contains(text, "Target version") || strings.Contains(text, "New version") ||
+		strings.Contains(text, "image source") {
 		t.Fatalf("successful start still uses preparation copy: %q", text)
 	}
 
@@ -80,7 +80,7 @@ func TestStartSummaryUsesCommittedVersionAndSourceSemantics(t *testing.T) {
 	pending.ToVersion = state.Version
 	printStartSummary(ui.Printer{Out: &output, Err: &output}, state, pending, "")
 	if strings.Contains(output.String(), "Before version") {
-		t.Fatalf("same-version source switch duplicated the version: %q", output.String())
+		t.Fatalf("same-version registry migration duplicated the version: %q", output.String())
 	}
 }
 
@@ -137,7 +137,7 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 	if !strings.Contains(output.String(), "Cocola is ready") ||
 		!strings.Contains(output.String(), "/admin/models") ||
 		!strings.Contains(output.String(), "Current version") ||
-		!strings.Contains(output.String(), "Mainland China acceleration") {
+		strings.Contains(output.String(), "Image source") {
 		t.Fatalf("start summary = %q", output.String())
 	}
 	paths, err := config.ResolvePaths(home)
@@ -173,7 +173,7 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 	}
 }
 
-func TestMirrorPullFailureDoesNotFallBackToDirectSource(t *testing.T) {
+func TestPullFailureUsesStandardDiagnosticsWithoutRemovedSourceHint(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "cocola")
 	var output, stderr bytes.Buffer
 	if err := Execute(context.Background(), []string{
@@ -192,7 +192,7 @@ if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; f
 if [ "$1" = "info" ]; then exit 0; fi
 if [ "$1" = "image" ]; then exit 1; fi
 case "$*" in
-  *'config --images'*) printf '%s\n' 'docker.nju.edu.cn/library/redis:7.4.10-alpine3.21' 'ghcr.nju.edu.cn/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
+  *'config --images'*) printf '%s\n' 'docker.io/library/redis:7.4.10-alpine3.21' 'ghcr.io/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
   *' config --quiet'*) exit 0 ;;
   *' pull') exit 1 ;;
   *' ps --format json'*) printf '[]\n'; exit 0 ;;
@@ -212,19 +212,19 @@ exit 0
 		In: &bytes.Buffer{}, Out: &output, Err: &stderr,
 	})
 	if err == nil {
-		t.Fatal("mirror pull failure unexpectedly succeeded")
+		t.Fatal("image pull failure unexpectedly succeeded")
 	}
 	combined := output.String() + stderr.String()
-	if !strings.Contains(combined, "cocola install --image-source direct") ||
-		!strings.Contains(combined, "cocola start") {
-		t.Fatalf("mirror failure is not actionable: %q", combined)
+	if !strings.Contains(combined, "cocola logs --tail 200") ||
+		!strings.Contains(combined, "cocola doctor") || strings.Contains(combined, "--image-source") {
+		t.Fatalf("pull failure diagnostics = %q", combined)
 	}
 	logged, readErr := os.ReadFile(logPath)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	if strings.Contains(string(logged), "docker.io") || strings.Contains(string(logged), "ghcr.io") {
-		t.Fatalf("mirror failure silently attempted the direct source:\n%s", logged)
+	if strings.Contains(string(logged), "nju.edu.cn") {
+		t.Fatalf("pull failure used a retired mirror:\n%s", logged)
 	}
 }
 

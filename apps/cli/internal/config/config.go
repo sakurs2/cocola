@@ -21,7 +21,7 @@ import (
 // CurrentSchemaVersion versions the CLI-owned deployment files independently
 // from the Cocola release. Every incompatible config change must add an
 // explicit migration before this value is incremented.
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 
 const (
 	defaultAgentRuntimeID       = "claude-code"
@@ -49,7 +49,6 @@ type Options struct {
 	Version                string
 	Registry               string
 	RegistryExplicit       bool
-	ImageSource            ImageSource
 	PublicURL              string
 	AdminUsername          string
 	AdminEmail             string
@@ -81,7 +80,6 @@ type State struct {
 	DeploymentRevision     string              `json:"deployment_revision"`
 	LastSuccessfulRevision string              `json:"last_successful_revision,omitempty"`
 	ManagedOpenSandbox     bool                `json:"managed_opensandbox"`
-	ImageSource            ImageSource         `json:"image_source"`
 	SandboxImage           string              `json:"sandbox_image"`
 	ManagedRuntimeImages   []string            `json:"managed_runtime_images"`
 	PublicURL              string              `json:"public_url"`
@@ -93,16 +91,14 @@ type State struct {
 }
 
 type PendingUpgrade struct {
-	FromVersion       string      `json:"from_version"`
-	ToVersion         string      `json:"to_version"`
-	FromRevision      string      `json:"from_revision,omitempty"`
-	ToRevision        string      `json:"to_revision"`
-	FromImageSource   ImageSource `json:"from_image_source,omitempty"`
-	ToImageSource     ImageSource `json:"to_image_source"`
-	FromImageRegistry string      `json:"from_image_registry,omitempty"`
-	ToImageRegistry   string      `json:"to_image_registry"`
-	BackupDir         string      `json:"backup_dir"`
-	PreparedAt        string      `json:"prepared_at"`
+	FromVersion       string `json:"from_version"`
+	ToVersion         string `json:"to_version"`
+	FromRevision      string `json:"from_revision,omitempty"`
+	ToRevision        string `json:"to_revision"`
+	FromImageRegistry string `json:"from_image_registry,omitempty"`
+	ToImageRegistry   string `json:"to_image_registry"`
+	BackupDir         string `json:"backup_dir"`
+	PreparedAt        string `json:"prepared_at"`
 }
 
 type Credentials struct {
@@ -130,7 +126,7 @@ func DefaultHome() string {
 
 func Defaults(imageTag string) Options {
 	return Options{
-		Home: DefaultHome(), Version: imageTag, Registry: DefaultRegistry, ImageSource: DefaultImageSource,
+		Home: DefaultHome(), Version: imageTag, Registry: DefaultRegistry,
 		AdminUsername: "admin", AdminEmail: "admin@cocola.local",
 		WebPort: 3000, GatewayPort: 8080, LLMPort: 18091,
 		ManagedOpenSandbox: true, SessionVolumeSize: "2Gi",
@@ -170,9 +166,6 @@ func (o Options) Validate() error {
 	}
 	if strings.TrimSpace(o.Version) == "" {
 		return errors.New("version is required")
-	}
-	if !o.ImageSource.Valid() {
-		return errors.New("image source must be cn-mirror or direct")
 	}
 	if !validImagePart(o.Version) {
 		return errors.New("version contains characters that are invalid in an image tag")
@@ -263,10 +256,11 @@ func (o Options) Validate() error {
 }
 
 func (o Options) resolvedImageRegistry() string {
-	if o.RegistryExplicit || strings.TrimSuffix(strings.TrimSpace(o.Registry), "/") != DefaultRegistry {
-		return strings.TrimSuffix(strings.TrimSpace(o.Registry), "/")
+	registry := strings.TrimSuffix(strings.TrimSpace(o.Registry), "/")
+	if registry == "" {
+		return DefaultRegistry
 	}
-	return o.ImageSource.Registry()
+	return registry
 }
 
 func (o Options) resolvedInternalSCM() InternalSCMEndpoint {
@@ -370,14 +364,14 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 		return Credentials{}, fmt.Errorf("create sandbox directory: %w", err)
 	}
 
-	images, err := ResolveImageReferences(options.ImageSource, options.Version, options.resolvedImageRegistry())
+	images, err := ResolveImageReferences(options.Version, options.resolvedImageRegistry())
 	if err != nil {
 		return Credentials{}, err
 	}
 	state := State{
 		ConfigSchemaVersion: CurrentSchemaVersion,
 		Version:             options.Version, ManagedOpenSandbox: options.ManagedOpenSandbox,
-		ImageSource: options.ImageSource, SandboxImage: images.SandboxRuntime,
+		SandboxImage:         images.SandboxRuntime,
 		ManagedRuntimeImages: images.ManagedRuntimeImages(),
 		PublicURL:            publicURLOrDefault(options),
 		WebPort:              options.WebPort, GatewayPort: options.GatewayPort, LLMPort: options.LLMPort,
@@ -462,7 +456,7 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 	}
 	publicOrigin, _ := o.PublicOrigin()
 	internalSCM := o.resolvedInternalSCM()
-	images, _ := ResolveImageReferences(o.ImageSource, o.Version, o.resolvedImageRegistry())
+	images, _ := ResolveImageReferences(o.Version, o.resolvedImageRegistry())
 	publicOrigins := []string{
 		fmt.Sprintf("http://127.0.0.1:%d", o.WebPort),
 		fmt.Sprintf("http://localhost:%d", o.WebPort),
@@ -471,7 +465,7 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		publicOrigins = append(publicOrigins, publicOrigin)
 	}
 	values := [][2]string{
-		{"COCOLA_VERSION", o.Version}, {"COCOLA_IMAGE_SOURCE", string(o.ImageSource)},
+		{"COCOLA_VERSION", o.Version},
 		{"COCOLA_IMAGE_REGISTRY", images.Registry},
 		{"COCOLA_REDIS_IMAGE", images.Redis}, {"COCOLA_POSTGRES_IMAGE", images.Postgres},
 		{"COCOLA_FORGEJO_IMAGE", images.Forgejo}, {"COCOLA_MINIO_IMAGE", images.MinIO},

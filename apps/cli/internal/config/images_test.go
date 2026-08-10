@@ -5,91 +5,53 @@ import (
 	"testing"
 )
 
-func TestResolveImageReferencesUsesOnlySelectedPreset(t *testing.T) {
-	tests := []struct {
-		name              string
-		source            ImageSource
-		forbidden         []string
-		required          []string
-		openSandboxServer string
-		openSandboxEgress string
-	}{
-		{
-			name: "mainland China mirror", source: ImageSourceCNMirror,
-			forbidden:         []string{"ghcr.io", "docker.io", "codeberg.org"},
-			required:          []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn"},
-			openSandboxServer: openSandboxAliyunRegistry + "/server:v0.1.14",
-			openSandboxEgress: openSandboxAliyunRegistry + "/egress:v1.1.2",
-		},
-		{
-			name: "direct", source: ImageSourceDirect,
-			forbidden:         []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn", "codeberg.org"},
-			required:          []string{"ghcr.io", "docker.io"},
-			openSandboxServer: "docker.io/opensandbox/server:v0.1.14",
-			openSandboxEgress: "docker.io/opensandbox/egress:v1.1.2",
-		},
+func TestResolveImageReferencesUsesOfficialRegistries(t *testing.T) {
+	refs, err := ResolveImageReferences("v0.2.0", "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			refs, err := ResolveImageReferences(test.source, "v0.2.0", "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			joined := strings.Join([]string{
-				refs.Registry, refs.Redis, refs.Postgres, refs.Forgejo, refs.MinIO,
-				refs.MinIOClient, refs.OpenViking, refs.OpenSandboxServer,
-				refs.OpenSandboxEgress, refs.SandboxRuntime,
-			}, "\n")
-			for _, expected := range test.required {
-				if !strings.Contains(joined, expected) {
-					t.Fatalf("references do not contain %q:\n%s", expected, joined)
-				}
-			}
-			for _, forbidden := range test.forbidden {
-				if strings.Contains(joined, forbidden) {
-					t.Fatalf("references unexpectedly contain %q:\n%s", forbidden, joined)
-				}
-			}
-			if !strings.Contains(refs.Forgejo, "16.0.1@sha256:3eb3107") {
-				t.Fatalf("Forgejo reference is not pinned by version and digest: %s", refs.Forgejo)
-			}
-			if !strings.Contains(refs.OpenViking, "v0.4.12@sha256:0d993") {
-				t.Fatalf("OpenViking reference lost its digest: %s", refs.OpenViking)
-			}
-			if refs.OpenSandboxServer != test.openSandboxServer {
-				t.Fatalf("OpenSandbox server reference = %q, want %q", refs.OpenSandboxServer, test.openSandboxServer)
-			}
-			if refs.OpenSandboxEgress != test.openSandboxEgress {
-				t.Fatalf("OpenSandbox egress reference = %q, want %q", refs.OpenSandboxEgress, test.openSandboxEgress)
-			}
-			if refs.OpenSandboxExecd != openSandboxAliyunRegistry+"/execd:v1.0.19" {
-				t.Fatalf("OpenSandbox execd reference unexpectedly changed: %s", refs.OpenSandboxExecd)
-			}
-		})
+	joined := strings.Join([]string{
+		refs.Registry, refs.Redis, refs.Postgres, refs.Forgejo, refs.MinIO,
+		refs.MinIOClient, refs.OpenViking, refs.OpenSandboxServer,
+		refs.OpenSandboxExecd, refs.OpenSandboxEgress, refs.SandboxRuntime,
+	}, "\n")
+	for _, forbidden := range []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn", "codeberg.org"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("references unexpectedly contain retired mirror %q:\n%s", forbidden, joined)
+		}
+	}
+	if refs.Registry != DefaultRegistry || refs.Redis != "docker.io/library/redis:7.4.10-alpine3.21" ||
+		refs.Postgres != "docker.io/library/postgres:16.14-alpine3.23" ||
+		refs.OpenSandboxServer != "docker.io/opensandbox/server:v0.1.14" ||
+		refs.OpenSandboxEgress != "docker.io/opensandbox/egress:v1.1.2" {
+		t.Fatalf("official image references are incomplete: %+v", refs)
+	}
+	if !strings.Contains(refs.Forgejo, "16.0.1@sha256:3eb3107") {
+		t.Fatalf("Forgejo reference is not pinned by version and digest: %s", refs.Forgejo)
+	}
+	if !strings.Contains(refs.OpenViking, "v0.4.12@sha256:0d993") {
+		t.Fatalf("OpenViking reference lost its digest: %s", refs.OpenViking)
+	}
+	if refs.OpenSandboxExecd != openSandboxAliyunRegistry+"/execd:v1.0.19" {
+		t.Fatalf("OpenSandbox execd reference unexpectedly changed: %s", refs.OpenSandboxExecd)
 	}
 }
 
 func TestCustomRegistryOnlyOverridesCocolaImages(t *testing.T) {
-	refs, err := ResolveImageReferences(ImageSourceCNMirror, "v1.0.0", "registry.example/team")
+	refs, err := ResolveImageReferences("v1.0.0", "registry.example/team")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if refs.Registry != "registry.example/team" || refs.SandboxRuntime != "registry.example/team/cocola-sandbox-runtime:v1.0.0" {
 		t.Fatalf("custom registry was not preserved: %+v", refs)
 	}
-	if !strings.HasPrefix(refs.OpenViking, "ghcr.nju.edu.cn/") || !strings.HasPrefix(refs.Redis, "docker.nju.edu.cn/") {
-		t.Fatalf("custom Cocola registry unexpectedly disabled the selected third-party source: %+v", refs)
-	}
-}
-
-func TestParseImageSourceRejectsUnknownValues(t *testing.T) {
-	if _, err := ParseImageSource("automatic"); err == nil {
-		t.Fatal("unknown image source was accepted")
+	if !strings.HasPrefix(refs.OpenViking, "ghcr.io/") || !strings.HasPrefix(refs.Redis, "docker.io/") {
+		t.Fatalf("custom Cocola registry unexpectedly changed third-party sources: %+v", refs)
 	}
 }
 
 func TestImageRegistryRejectsShellMetacharacters(t *testing.T) {
-	if _, err := ResolveImageReferences(ImageSourceDirect, "v1.0.0", "registry.example/team;echo"); err == nil {
+	if _, err := ResolveImageReferences("v1.0.0", "registry.example/team;echo"); err == nil {
 		t.Fatal("unsafe registry was accepted")
 	}
 }

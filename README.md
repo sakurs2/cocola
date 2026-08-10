@@ -67,8 +67,8 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
-首次安装会让你选择一次镜像下载源，默认推荐中国大陆加速；也可以选择直接连接 GHCR 和
-Docker Hub。Cocola 不会修改 Docker daemon 配置，也不会在下载失败时静默切换来源。
+镜像默认从 Cocola 发布仓库及依赖项目的上游 Registry 直接下载。Cocola 不会修改 Docker daemon
+配置，也不会在下载失败时静默切换到公共代理。
 
 安装器会下载对应平台的 CLI、校验 SHA-256，并把部署配置写入 `~/.cocola`。Web 默认监听
 所有网卡，可直接通过 `http://<server-ip>:3000` 访问，无需额外填写访问地址。请保存安装器

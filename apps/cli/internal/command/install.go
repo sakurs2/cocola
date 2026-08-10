@@ -16,30 +16,23 @@ import (
 )
 
 type installResult struct {
-	Status        string             `json:"status"`
-	Home          string             `json:"home"`
-	ConfigFile    string             `json:"config_file"`
-	WebURL        string             `json:"web_url"`
-	GatewayURL    string             `json:"gateway_url"`
-	AdminUsername string             `json:"admin_username"`
-	AdminEmail    string             `json:"admin_email"`
-	AdminPassword string             `json:"admin_password"`
-	ImageSource   config.ImageSource `json:"image_source"`
+	Status        string `json:"status"`
+	Home          string `json:"home"`
+	ConfigFile    string `json:"config_file"`
+	WebURL        string `json:"web_url"`
+	GatewayURL    string `json:"gateway_url"`
+	AdminUsername string `json:"admin_username"`
+	AdminEmail    string `json:"admin_email"`
+	AdminPassword string `json:"admin_password"`
 }
 
 func (a *application) installCommand() *cobra.Command {
 	options := config.Defaults(version.ImageTag())
-	imageSourceValue := string(options.ImageSource)
 	var yes bool
 	command := &cobra.Command{
 		Use:   "install",
 		Short: "Create or upgrade the Cocola deployment configuration",
 		RunE: func(command *cobra.Command, _ []string) error {
-			parsedImageSource, err := config.ParseImageSource(imageSourceValue)
-			if err != nil {
-				return err
-			}
-			options.ImageSource = parsedImageSource
 			options.RegistryExplicit = command.Flags().Changed("registry")
 			options.Home = a.home
 			paths, err := config.ResolvePaths(options.Home)
@@ -49,9 +42,6 @@ func (a *application) installCommand() *cobra.Command {
 			if _, err := os.Stat(paths.Environment); err == nil {
 				return withOperationLock(paths, "cocola install", func() error {
 					upgradeOptions := config.UpgradeOptions{Version: options.Version}
-					if command.Flags().Changed("image-source") {
-						upgradeOptions.ImageSource = &options.ImageSource
-					}
 					if options.RegistryExplicit {
 						upgradeOptions.Registry = &options.Registry
 					}
@@ -117,7 +107,6 @@ func (a *application) installCommand() *cobra.Command {
 				GatewayURL:    fmt.Sprintf("http://localhost:%d", options.GatewayPort),
 				AdminUsername: credentials.AdminUsername, AdminEmail: credentials.AdminEmail,
 				AdminPassword: credentials.AdminPassword,
-				ImageSource:   options.ImageSource,
 			}
 			if a.json {
 				return printer.Encode(result)
@@ -128,11 +117,10 @@ func (a *application) installCommand() *cobra.Command {
 	}
 	flags := command.Flags()
 	flags.StringVar(&options.Version, "version", options.Version, "container image version")
-	flags.StringVar(&options.Registry, "registry", options.Registry, "custom registry for Cocola-owned images (overrides the source preset)")
+	flags.StringVar(&options.Registry, "registry", options.Registry, "custom registry for Cocola-owned images")
 	if flag := flags.Lookup("registry"); flag != nil {
 		flag.DefValue = ""
 	}
-	flags.StringVar(&imageSourceValue, "image-source", imageSourceValue, "image download source (cn-mirror or direct)")
 	flags.StringVar(&options.PublicURL, "public-url", options.PublicURL, "additional public URL for callbacks or a host-rewriting proxy")
 	flags.StringVar(&options.AdminUsername, "admin-username", options.AdminUsername, "bootstrap admin username")
 	flags.StringVar(&options.AdminEmail, "admin-email", options.AdminEmail, "bootstrap admin email")
@@ -166,12 +154,6 @@ func printUpgradeSummary(printer ui.Printer, result config.UpgradeResult) {
 	if result.FromVersion != result.ToVersion {
 		values = append(values, [2]string{"Before version", result.FromVersion}, [2]string{"New version", result.ToVersion})
 	}
-	if result.FromImageSource != result.ToImageSource {
-		values = append(values,
-			[2]string{"Before image source", result.FromImageSource.DisplayName()},
-			[2]string{"New image source", result.ToImageSource.DisplayName()},
-		)
-	}
 	if result.FromImageRegistry != result.ToImageRegistry {
 		values = append(values,
 			[2]string{"Before image registry", result.FromImageRegistry},
@@ -198,16 +180,6 @@ func (a *application) runInstallForm(options *config.Options) error {
 				Next(true).
 				NextLabel("Start setup"),
 		).Title("Quick setup"),
-		huh.NewGroup(
-			huh.NewSelect[config.ImageSource]().
-				Title("Image downloads").
-				Description("The acceleration source is recommended in Mainland China. Cocola never switches sources silently.").
-				Options(
-					huh.NewOption("Mainland China acceleration (Recommended)", config.ImageSourceCNMirror),
-					huh.NewOption("Direct download", config.ImageSourceDirect),
-				).
-				Value(&options.ImageSource),
-		).Title("Image downloads"),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Admin username").
@@ -287,7 +259,6 @@ func printInstallSummary(printer ui.Printer, result installResult) {
 		{"Admin account", result.AdminUsername + " / " + result.AdminEmail},
 		{"Admin password", result.AdminPassword},
 		{"Configuration", result.ConfigFile},
-		{"Image source", result.ImageSource.DisplayName()},
 	})
 	printer.Warn("The admin password is shown only once. Store it securely.")
 	printer.Section("Next step")

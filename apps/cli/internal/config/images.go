@@ -2,21 +2,11 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 )
 
-type ImageSource string
-
 const (
-	ImageSourceCNMirror ImageSource = "cn-mirror"
-	ImageSourceDirect   ImageSource = "direct"
-
-	DefaultImageSource = ImageSourceCNMirror
-	LegacyImageSource  = ImageSourceDirect
-
 	DefaultRegistry           = "ghcr.io/sakurs2"
-	CNMirrorRegistry          = "ghcr.nju.edu.cn/sakurs2"
 	openSandboxAliyunRegistry = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
 	forgejoVersion            = "16.0.1"
 	forgejoManifestDigest     = "sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07"
@@ -37,46 +27,13 @@ type ImageReferences struct {
 	SandboxRuntime    string
 }
 
-func ParseImageSource(value string) (ImageSource, error) {
-	source := ImageSource(strings.TrimSpace(value))
-	if !source.Valid() {
-		return "", fmt.Errorf("image source must be %q or %q", ImageSourceCNMirror, ImageSourceDirect)
-	}
-	return source, nil
-}
-
-func (source ImageSource) Valid() bool {
-	return source == ImageSourceCNMirror || source == ImageSourceDirect
-}
-
-func (source ImageSource) DisplayName() string {
-	switch source {
-	case ImageSourceCNMirror:
-		return "Mainland China acceleration"
-	case ImageSourceDirect:
-		return "Direct download"
-	default:
-		return "Unknown"
-	}
-}
-
-func (source ImageSource) Registry() string {
-	if source == ImageSourceCNMirror {
-		return CNMirrorRegistry
-	}
-	return DefaultRegistry
-}
-
-func ResolveImageReferences(source ImageSource, version, customRegistry string) (ImageReferences, error) {
-	if !source.Valid() {
-		return ImageReferences{}, errors.New("invalid image source")
-	}
+func ResolveImageReferences(version, customRegistry string) (ImageReferences, error) {
 	if !validImagePart(version) {
 		return ImageReferences{}, errors.New("version contains characters that are invalid in an image tag")
 	}
 	registry := customRegistry
 	if registry == "" {
-		registry = source.Registry()
+		registry = DefaultRegistry
 	}
 	if err := validateImageRegistry(registry); err != nil {
 		return ImageReferences{}, err
@@ -85,17 +42,6 @@ func ResolveImageReferences(source ImageSource, version, customRegistry string) 
 		Registry:         registry,
 		OpenSandboxExecd: openSandboxAliyunRegistry + "/execd:v1.0.19",
 		SandboxRuntime:   registry + "/cocola-sandbox-runtime:" + version,
-	}
-	if source == ImageSourceCNMirror {
-		refs.Redis = "docker.nju.edu.cn/library/redis:7.4.10-alpine3.21"
-		refs.Postgres = "docker.nju.edu.cn/library/postgres:16.14-alpine3.23"
-		refs.Forgejo = "ghcr.nju.edu.cn/sakurs2/cocola-forgejo:" + forgejoVersion + "@" + forgejoManifestDigest
-		refs.MinIO = "docker.nju.edu.cn/minio/minio:RELEASE.2025-09-07T16-13-09Z"
-		refs.MinIOClient = "docker.nju.edu.cn/minio/mc:RELEASE.2025-08-13T08-35-41Z"
-		refs.OpenViking = "ghcr.nju.edu.cn/volcengine/openviking:v0.4.12@" + openVikingDigest
-		refs.OpenSandboxServer = openSandboxAliyunRegistry + "/server:v0.1.14"
-		refs.OpenSandboxEgress = openSandboxAliyunRegistry + "/egress:v1.1.2"
-		return refs, nil
 	}
 	refs.Redis = "docker.io/library/redis:7.4.10-alpine3.21"
 	refs.Postgres = "docker.io/library/postgres:16.14-alpine3.23"

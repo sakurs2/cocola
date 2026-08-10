@@ -28,8 +28,8 @@ func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, e
 	if runner.State.ConfigSchemaVersion != config.CurrentSchemaVersion {
 		return nil, errors.New("deployment configuration is outdated; run cocola install to migrate it before starting Cocola")
 	}
-	if !runner.State.ImageSource.Valid() || len(runner.State.ManagedRuntimeImages) == 0 {
-		return nil, errors.New("deployment image source is incomplete; run cocola install to repair it before starting Cocola")
+	if len(runner.State.ManagedRuntimeImages) == 0 {
+		return nil, errors.New("deployment image configuration is incomplete; run cocola install to repair it before starting Cocola")
 	}
 	if err := prepareSandboxRoot(runner.Paths.SandboxRoot); err != nil {
 		return nil, err

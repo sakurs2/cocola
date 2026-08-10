@@ -62,14 +62,13 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 }
 
 type lifecycleResult struct {
-	Status          string             `json:"status"`
-	Version         string             `json:"version"`
-	PreviousVersion string             `json:"previous_version,omitempty"`
-	ImageSource     config.ImageSource `json:"image_source"`
-	WebURL          string             `json:"web_url"`
-	AdminURL        string             `json:"admin_url"`
-	ModelSetupURL   string             `json:"model_setup_url"`
-	BackupDir       string             `json:"backup_dir,omitempty"`
+	Status          string `json:"status"`
+	Version         string `json:"version"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+	WebURL          string `json:"web_url"`
+	AdminURL        string `json:"admin_url"`
+	ModelSetupURL   string `json:"model_setup_url"`
+	BackupDir       string `json:"backup_dir,omitempty"`
 }
 
 func (a *application) start(ctx context.Context, runner *compose.Runner) error {
@@ -97,14 +96,13 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 
 	needsPull := pending != nil || runner.State.LastSuccessfulVersion == ""
 	if needsPull {
-		printer.Info("Pulling images through " + runner.State.ImageSource.DisplayName())
+		printer.Info("Pulling required Cocola images")
 		if pullErr := runner.Pull(ctx); pullErr != nil {
 			cached, inspectErr := runner.ImagesPresent(ctx)
 			if inspectErr != nil {
 				pullErr = errors.Join(pullErr, inspectErr)
 			}
 			if !cached {
-				a.printImageSourceFailureHint(runner.State.ImageSource)
 				if pending != nil {
 					return a.restoreFailedUpgrade(ctx, runner.Paths, pending, pullErr)
 				}
@@ -150,7 +148,7 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 	}
 	webURL := stateWebURL(state)
 	result := lifecycleResult{
-		Status: "ready", Version: state.Version, ImageSource: state.ImageSource, WebURL: webURL,
+		Status: "ready", Version: state.Version, WebURL: webURL,
 		AdminURL:      strings.TrimRight(webURL, "/") + "/admin",
 		ModelSetupURL: strings.TrimRight(webURL, "/") + "/admin/models",
 		BackupDir:     backupDir,
@@ -294,10 +292,7 @@ func (a *application) restoreFailedUpgrade(
 	printer.Command("cocola start")
 	printer.Info("Retry the deployment update after resolving the error with:")
 	retry := "cocola install --version " + pending.ToVersion
-	if pending.ToImageSource.Valid() {
-		retry += " --image-source " + string(pending.ToImageSource)
-	}
-	if pending.ToImageRegistry != "" && pending.ToImageRegistry != pending.ToImageSource.Registry() {
+	if pending.ToImageRegistry != "" && pending.ToImageRegistry != config.DefaultRegistry {
 		retry += " --registry " + pending.ToImageRegistry
 	}
 	printer.Command(retry)
@@ -314,16 +309,6 @@ func (a *application) restoreFailedUpgrade(
 	}
 	a.printStartFailure(ctx, restoredRunner)
 	return cause
-}
-
-func (a *application) printImageSourceFailureHint(source config.ImageSource) {
-	if a.json || source != config.ImageSourceCNMirror {
-		return
-	}
-	printer := a.printer()
-	printer.Info("The selected acceleration source could not provide every required image. Switch to direct download with:")
-	printer.Command("cocola install --image-source direct")
-	printer.Command("cocola start")
 }
 
 func (a *application) printPostgresMismatch() {
@@ -360,10 +345,6 @@ func printStartSummary(printer ui.Printer, state config.State, pending *config.P
 		values = append(values, [2]string{"Before version", pending.FromVersion})
 	}
 	values = append(values, [2]string{"Current version", state.Version})
-	if pending != nil && pending.FromImageSource != state.ImageSource {
-		values = append(values, [2]string{"Before image source", pending.FromImageSource.DisplayName()})
-	}
-	values = append(values, [2]string{"Image source", state.ImageSource.DisplayName()})
 	if pending != nil && pending.FromImageRegistry != pending.ToImageRegistry {
 		values = append(values,
 			[2]string{"Before image registry", pending.FromImageRegistry},

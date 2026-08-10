@@ -14,25 +14,25 @@ import (
 	"time"
 )
 
-const backupDirectoryName = "backups"
+const (
+	backupDirectoryName    = "backups"
+	legacyCNMirrorRegistry = "ghcr.nju.edu.cn/sakurs2"
+)
 
 var environmentKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type UpgradeResult struct {
-	Updated           bool        `json:"updated"`
-	FromVersion       string      `json:"from_version"`
-	ToVersion         string      `json:"to_version"`
-	FromImageSource   ImageSource `json:"from_image_source"`
-	ToImageSource     ImageSource `json:"to_image_source"`
-	FromImageRegistry string      `json:"from_image_registry"`
-	ToImageRegistry   string      `json:"to_image_registry"`
-	BackupDir         string      `json:"backup_dir,omitempty"`
+	Updated           bool   `json:"updated"`
+	FromVersion       string `json:"from_version"`
+	ToVersion         string `json:"to_version"`
+	FromImageRegistry string `json:"from_image_registry"`
+	ToImageRegistry   string `json:"to_image_registry"`
+	BackupDir         string `json:"backup_dir,omitempty"`
 }
 
 type UpgradeOptions struct {
-	Version     string
-	ImageSource *ImageSource
-	Registry    *string
+	Version  string
+	Registry *string
 }
 
 type backupManifest struct {
@@ -57,9 +57,6 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	if !validImagePart(targetVersion) {
 		return UpgradeResult{}, errors.New("target version contains characters that are invalid in an image tag")
 	}
-	if options.ImageSource != nil && !options.ImageSource.Valid() {
-		return UpgradeResult{}, errors.New("image source must be cn-mirror or direct")
-	}
 	if options.Registry != nil {
 		if err := validateImageRegistry(*options.Registry); err != nil {
 			return UpgradeResult{}, err
@@ -72,15 +69,12 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	targetRevision := deploymentRevision(compose)
 	if state.PendingUpgrade != nil {
 		pending := state.PendingUpgrade
-		requestedSourceMatches := options.ImageSource == nil || pending.ToImageSource == *options.ImageSource
 		requestedRegistryMatches := options.Registry == nil || pending.ToImageRegistry == strings.TrimSuffix(strings.TrimSpace(*options.Registry), "/")
-		if state.ConfigSchemaVersion == CurrentSchemaVersion && pending.ToImageSource.Valid() &&
-			pending.ToImageRegistry != "" && pending.ToVersion == targetVersion && pending.ToRevision == targetRevision &&
-			requestedSourceMatches && requestedRegistryMatches {
+		if state.ConfigSchemaVersion == CurrentSchemaVersion && pending.ToImageRegistry != "" &&
+			pending.ToVersion == targetVersion && pending.ToRevision == targetRevision && requestedRegistryMatches {
 			return UpgradeResult{
 				Updated: true, FromVersion: pending.FromVersion,
-				ToVersion: pending.ToVersion, FromImageSource: pending.FromImageSource,
-				ToImageSource: pending.ToImageSource, FromImageRegistry: pending.FromImageRegistry,
+				ToVersion: pending.ToVersion, FromImageRegistry: pending.FromImageRegistry,
 				ToImageRegistry: pending.ToImageRegistry, BackupDir: pending.BackupDir,
 			}, nil
 		}
@@ -97,7 +91,7 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	if err != nil {
 		return UpgradeResult{}, fmt.Errorf("read deployment environment: %w", err)
 	}
-	migratedEnvironment, derived, err := migrateEnvironmentWithOptions(paths, state, targetVersion, options.ImageSource, options.Registry, environment)
+	migratedEnvironment, derived, err := migrateEnvironmentWithOptions(paths, state, targetVersion, options.Registry, environment)
 	if err != nil {
 		return UpgradeResult{}, err
 	}
@@ -121,13 +115,12 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 
 	needsUpdate := state.ConfigSchemaVersion != CurrentSchemaVersion ||
 		state.Version != targetVersion || state.DeploymentRevision != targetRevision ||
-		state.ImageSource != derived.imageSource || state.SandboxImage != derived.images.SandboxRuntime ||
+		state.SandboxImage != derived.images.SandboxRuntime ||
 		!slices.Equal(state.ManagedRuntimeImages, derived.images.ManagedRuntimeImages()) ||
 		!bytes.Equal(environment, migratedEnvironment) || !fileEquals(paths.Compose, compose)
 	if !needsUpdate {
 		return UpgradeResult{
 			FromVersion: fromVersion, ToVersion: targetVersion,
-			FromImageSource: derived.currentImageSource, ToImageSource: derived.imageSource,
 			FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
 		}, nil
 	}
@@ -142,7 +135,6 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	state.DeploymentRevision = targetRevision
 	state.LastSuccessfulRevision = fromRevision
 	state.ManagedOpenSandbox = derived.managedOpenSandbox
-	state.ImageSource = derived.imageSource
 	state.SandboxImage = derived.images.SandboxRuntime
 	state.ManagedRuntimeImages = derived.images.ManagedRuntimeImages()
 	state.PublicURL = derived.publicURL
@@ -153,7 +145,6 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	state.PendingUpgrade = &PendingUpgrade{
 		FromVersion: fromVersion, ToVersion: targetVersion,
 		FromRevision: fromRevision, ToRevision: targetRevision,
-		FromImageSource: derived.currentImageSource, ToImageSource: derived.imageSource,
 		FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
 		BackupDir: backupDir, PreparedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -167,7 +158,6 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	}
 	return UpgradeResult{
 		Updated: true, FromVersion: fromVersion, ToVersion: targetVersion,
-		FromImageSource: derived.currentImageSource, ToImageSource: derived.imageSource,
 		FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
 		BackupDir: backupDir,
 	}, nil
@@ -365,9 +355,7 @@ func safePathPart(value string) string {
 
 type derivedEnvironment struct {
 	version            string
-	currentImageSource ImageSource
 	currentRegistry    string
-	imageSource        ImageSource
 	images             ImageReferences
 	publicURL          string
 	webPort            int
@@ -378,14 +366,13 @@ type derivedEnvironment struct {
 }
 
 func migrateEnvironment(paths Paths, state State, targetVersion string, data []byte) ([]byte, derivedEnvironment, error) {
-	return migrateEnvironmentWithOptions(paths, state, targetVersion, nil, nil, data)
+	return migrateEnvironmentWithOptions(paths, state, targetVersion, nil, data)
 }
 
 func migrateEnvironmentWithOptions(
 	paths Paths,
 	state State,
 	targetVersion string,
-	requestedSource *ImageSource,
 	requestedRegistry *string,
 	data []byte,
 ) ([]byte, derivedEnvironment, error) {
@@ -413,29 +400,17 @@ func migrateEnvironmentWithOptions(
 	if err != nil {
 		return nil, derivedEnvironment{}, err
 	}
-	currentSource := state.ImageSource
-	if !currentSource.Valid() {
-		currentSource = LegacyImageSource
-	}
-	imageSource := currentSource
-	if requestedSource != nil {
-		if !requestedSource.Valid() {
-			return nil, derivedEnvironment{}, errors.New("image source must be cn-mirror or direct")
-		}
-		imageSource = *requestedSource
-	}
-	currentRegistry := strings.TrimSuffix(environmentValue(document, "COCOLA_IMAGE_REGISTRY", currentSource.Registry()), "/")
+	currentRegistry := strings.TrimSuffix(environmentValue(document, "COCOLA_IMAGE_REGISTRY", DefaultRegistry), "/")
 	if currentRegistry == "" {
 		return nil, derivedEnvironment{}, errors.New("COCOLA_IMAGE_REGISTRY cannot be empty")
 	}
 	registry := currentRegistry
 	if requestedRegistry != nil {
 		registry = strings.TrimSuffix(strings.TrimSpace(*requestedRegistry), "/")
-	} else if imageSource != currentSource &&
-		(currentRegistry == DefaultRegistry || currentRegistry == CNMirrorRegistry) {
-		registry = imageSource.Registry()
+	} else if currentRegistry == legacyCNMirrorRegistry {
+		registry = DefaultRegistry
 	}
-	images, err := ResolveImageReferences(imageSource, targetVersion, registry)
+	images, err := ResolveImageReferences(targetVersion, registry)
 	if err != nil {
 		return nil, derivedEnvironment{}, err
 	}
@@ -495,7 +470,6 @@ func migrateEnvironmentWithOptions(
 	}
 	values := [][2]string{
 		{"COCOLA_VERSION", targetVersion},
-		{"COCOLA_IMAGE_SOURCE", string(imageSource)},
 		{"COCOLA_IMAGE_REGISTRY", images.Registry},
 		{"COCOLA_REDIS_IMAGE", images.Redis},
 		{"COCOLA_POSTGRES_IMAGE", images.Postgres},
@@ -561,9 +535,10 @@ func migrateEnvironmentWithOptions(
 			document.ensure(item[0], item[1])
 		}
 	}
+	document.remove("COCOLA_IMAGE_SOURCE")
 	return document.render(), derivedEnvironment{
-		version: targetVersion, currentImageSource: currentSource, currentRegistry: currentRegistry,
-		imageSource: imageSource, images: images, publicURL: publicURL,
+		version: targetVersion, currentRegistry: currentRegistry,
+		images: images, publicURL: publicURL,
 		webPort: webPort, gatewayPort: gatewayPort, llmPort: llmPort,
 		internalSCM:        internalSCM,
 		managedOpenSandbox: managed,
@@ -573,7 +548,7 @@ func migrateEnvironmentWithOptions(
 func migrationReplacesValue(key string) bool {
 	switch key {
 	case "COCOLA_VERSION", "COCOLA_HOME", "COCOLA_SANDBOX_ROOT",
-		"COCOLA_IMAGE_SOURCE", "COCOLA_IMAGE_REGISTRY", "COCOLA_REDIS_IMAGE",
+		"COCOLA_IMAGE_REGISTRY", "COCOLA_REDIS_IMAGE",
 		"COCOLA_POSTGRES_IMAGE", "COCOLA_FORGEJO_IMAGE", "COCOLA_MINIO_IMAGE",
 		"COCOLA_MINIO_MC_IMAGE", "COCOLA_OPENVIKING_IMAGE", "COCOLA_OPENSANDBOX_IMAGE",
 		"COCOLA_OPENSANDBOX_EXECD_IMAGE", "COCOLA_OPENSANDBOX_EGRESS_IMAGE":
@@ -684,6 +659,14 @@ func (document *environmentDocument) ensure(key, value string) {
 	if _, ok := document.values[key]; !ok {
 		document.set(key, value)
 	}
+}
+
+func (document *environmentDocument) remove(key string) {
+	for _, index := range document.indices[key] {
+		document.lines[index] = ""
+	}
+	delete(document.values, key)
+	delete(document.indices, key)
 }
 
 func (document *environmentDocument) render() []byte {

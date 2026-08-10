@@ -86,8 +86,7 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.Version != "v0.1.0" || !state.ManagedOpenSandbox ||
-		state.ImageSource != ImageSourceCNMirror ||
-		state.SandboxImage != "ghcr.nju.edu.cn/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
+		state.SandboxImage != "ghcr.io/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
 		len(state.ManagedRuntimeImages) != 3 ||
 		state.ConfigSchemaVersion != CurrentSchemaVersion || state.DeploymentRevision == "" ||
 		state.LLMPort != 18091 || state.InternalSCM.HostPort != 3001 ||
@@ -231,7 +230,6 @@ func TestPrepareUpgradeMigratesLegacyStateAndCommitsAfterStart(t *testing.T) {
 	}
 	if !strings.Contains(string(migrated), `COCOLA_PG_PASSWORD="database-secret"`) ||
 		!strings.Contains(string(migrated), `COCOLA_BOOTSTRAP_ADMIN_PASSWORD="admin-secret"`) ||
-		!strings.Contains(string(migrated), `COCOLA_IMAGE_SOURCE="direct"`) ||
 		!strings.Contains(string(migrated), `COCOLA_IMAGE_REGISTRY="registry.example"`) {
 		t.Fatalf("legacy secrets changed: %s", migrated)
 	}
@@ -240,12 +238,12 @@ func TestPrepareUpgradeMigratesLegacyStateAndCommitsAfterStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.PendingUpgrade != nil || state.LastSuccessfulVersion != "v0.2.0" ||
-		state.ConfigSchemaVersion != CurrentSchemaVersion || state.ImageSource != ImageSourceDirect {
+		state.ConfigSchemaVersion != CurrentSchemaVersion {
 		t.Fatalf("committed state = %+v", state)
 	}
 }
 
-func TestPrepareUpgradeSwitchesImageSourceAtSameVersionAndRollsBack(t *testing.T) {
+func TestPrepareUpgradeMigratesRemovedCNMirrorAndRollsBack(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "cocola")
 	paths, err := ResolvePaths(home)
 	if err != nil {
@@ -260,36 +258,76 @@ func TestPrepareUpgradeSwitchesImageSourceAtSameVersionAndRollsBack(t *testing.T
 	if _, err := MarkStarted(paths); err != nil {
 		t.Fatal(err)
 	}
-	originalEnvironment, err := os.ReadFile(paths.Environment)
+	directEnvironment, err := os.ReadFile(paths.Environment)
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct := ImageSourceDirect
-	result, err := PrepareUpgradeWithOptions(paths, UpgradeOptions{
-		Version: "v0.1.0", ImageSource: &direct,
-	}, []byte("services:\n  app: {}\n"))
+	mirrorEnvironment := strings.ReplaceAll(string(directEnvironment), "ghcr.io/", "ghcr.nju.edu.cn/")
+	mirrorEnvironment = strings.ReplaceAll(mirrorEnvironment, "docker.io/", "docker.nju.edu.cn/")
+	mirrorEnvironment = strings.Replace(
+		mirrorEnvironment,
+		"COCOLA_VERSION=\"v0.1.0\"\n",
+		"COCOLA_VERSION=\"v0.1.0\"\nCOCOLA_IMAGE_SOURCE=\"cn-mirror\"\n",
+		1,
+	)
+	if err := os.WriteFile(paths.Environment, []byte(mirrorEnvironment), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateData, err := os.ReadFile(paths.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyState map[string]any
+	if err := json.Unmarshal(stateData, &legacyState); err != nil {
+		t.Fatal(err)
+	}
+	legacyState["config_schema_version"] = float64(3)
+	legacyState["image_source"] = "cn-mirror"
+	legacyState["sandbox_image"] = "ghcr.nju.edu.cn/sakurs2/cocola-sandbox-runtime:v0.1.0"
+	legacyState["managed_runtime_images"] = []string{
+		"ghcr.nju.edu.cn/sakurs2/cocola-sandbox-runtime:v0.1.0",
+		openSandboxAliyunRegistry + "/execd:v1.0.19",
+		openSandboxAliyunRegistry + "/egress:v1.1.2",
+	}
+	stateData, err = json.Marshal(legacyState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.State, stateData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := PrepareUpgrade(paths, "v0.1.0", []byte("services:\n  app: {}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.Updated || result.FromVersion != result.ToVersion ||
-		result.FromImageSource != ImageSourceCNMirror || result.ToImageSource != ImageSourceDirect {
-		t.Fatalf("source switch result = %+v", result)
+		result.FromImageRegistry != legacyCNMirrorRegistry || result.ToImageRegistry != DefaultRegistry {
+		t.Fatalf("mirror migration result = %+v", result)
 	}
 	state, err := Load(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.PendingUpgrade == nil || state.ImageSource != ImageSourceDirect ||
+	if state.PendingUpgrade == nil || state.ConfigSchemaVersion != CurrentSchemaVersion ||
 		!strings.HasPrefix(state.SandboxImage, "ghcr.io/sakurs2/") {
-		t.Fatalf("pending source switch = %+v", state)
+		t.Fatalf("pending mirror migration = %+v", state)
+	}
+	migratedState, err := os.ReadFile(paths.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(migratedState), "image_source") {
+		t.Fatalf("migrated state still contains removed image-source fields: %s", migratedState)
 	}
 	migratedEnvironment, err := os.ReadFile(paths.Environment)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(migratedEnvironment), "ghcr.nju.edu.cn") ||
+	if strings.Contains(string(migratedEnvironment), "COCOLA_IMAGE_SOURCE") ||
+		strings.Contains(string(migratedEnvironment), "ghcr.nju.edu.cn") ||
 		strings.Contains(string(migratedEnvironment), "docker.nju.edu.cn") {
-		t.Fatalf("direct environment still contains mirror references:\n%s", migratedEnvironment)
+		t.Fatalf("migrated environment still contains image-source state:\n%s", migratedEnvironment)
 	}
 	if _, err := RollbackUpgrade(paths); err != nil {
 		t.Fatal(err)
@@ -298,8 +336,8 @@ func TestPrepareUpgradeSwitchesImageSourceAtSameVersionAndRollsBack(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(restoredEnvironment) != string(originalEnvironment) {
-		t.Fatal("source switch rollback did not restore the original environment")
+	if string(restoredEnvironment) != mirrorEnvironment {
+		t.Fatal("mirror migration rollback did not restore the original environment")
 	}
 }
 

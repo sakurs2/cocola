@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,14 +107,16 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 		t.Fatal("generated environment must not trust wildcard origins")
 	}
 	for _, expected := range []string{
-		`COCOLA_IMAGE_SOURCE="cn-mirror"`,
-		`COCOLA_IMAGE_REGISTRY="ghcr.nju.edu.cn/sakurs2"`,
-		`COCOLA_REDIS_IMAGE="docker.nju.edu.cn/library/redis:7.4.10-alpine3.21"`,
-		`COCOLA_FORGEJO_IMAGE="ghcr.nju.edu.cn/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
+		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
+		`COCOLA_REDIS_IMAGE="docker.io/library/redis:7.4.10-alpine3.21"`,
+		`COCOLA_FORGEJO_IMAGE="ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
 	} {
 		if !strings.Contains(string(environment), expected) {
 			t.Fatalf("generated environment missing %q: %s", expected, environment)
 		}
+	}
+	if strings.Contains(string(environment), "COCOLA_IMAGE_SOURCE") || strings.Contains(string(environment), "nju.edu.cn") {
+		t.Fatalf("generated environment contains removed image-source configuration: %s", environment)
 	}
 	if !strings.Contains(output.String(), "cocola start") {
 		t.Fatalf("install output must explain how to start Cocola: %q", output.String())
@@ -145,32 +148,32 @@ func TestInstallPersistsPublicURLAndReportsIt(t *testing.T) {
 	}
 }
 
-func TestInstallAcceptsDirectImageSource(t *testing.T) {
+func TestInstallRejectsRemovedImageSourceFlag(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+		"--image-source", "direct",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr})
+	if err == nil || !strings.Contains(err.Error(), "unknown flag: --image-source") {
+		t.Fatalf("removed image-source flag error = %v, stderr=%s", err, stderr.String())
+	}
+}
+
+func TestInstallJSONOmitsRemovedImageSource(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "cocola")
 	var output, stderr bytes.Buffer
 	if err := Execute(context.Background(), []string{
-		"install", "--home", home, "--yes", "--admin-password", "test-password",
-		"--image-source", "direct",
+		"install", "--json", "--home", home, "--yes", "--admin-password", "test-password",
 	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
 		t.Fatalf("install: %v, stderr=%s", err, stderr.String())
 	}
-	environment, err := os.ReadFile(filepath.Join(home, "config.env"))
-	if err != nil {
-		t.Fatal(err)
+	var result map[string]any
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode install JSON: %v, output=%s", err, output.String())
 	}
-	text := string(environment)
-	for _, expected := range []string{
-		`COCOLA_IMAGE_SOURCE="direct"`,
-		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
-		`COCOLA_POSTGRES_IMAGE="docker.io/library/postgres:16.14-alpine3.23"`,
-		`COCOLA_FORGEJO_IMAGE="ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("direct environment missing %q: %s", expected, text)
-		}
-	}
-	if strings.Contains(text, "nju.edu.cn") {
-		t.Fatalf("direct environment contains mirror reference: %s", text)
+	if _, exists := result["image_source"]; exists {
+		t.Fatalf("install JSON contains removed image_source field: %s", output.String())
 	}
 }
 
@@ -227,36 +230,6 @@ func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *tes
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("upgrade output missing %q: %q", expected, output.String())
 		}
-	}
-}
-
-func TestSameVersionImageSourceSwitchHasSourceOnlySummary(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "cocola")
-	var output, stderr bytes.Buffer
-	if err := Execute(context.Background(), []string{
-		"install", "--home", home, "--yes", "--version", "v0.1.0",
-		"--admin-password", "test-password",
-	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
-		t.Fatal(err)
-	}
-	paths, err := config.ResolvePaths(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := config.MarkStarted(paths); err != nil {
-		t.Fatal(err)
-	}
-	output.Reset()
-	stderr.Reset()
-	if err := Execute(context.Background(), []string{
-		"install", "--home", home, "--version", "v0.1.0", "--image-source", "direct",
-	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
-		t.Fatalf("switch source: %v, stderr=%s", err, stderr.String())
-	}
-	text := output.String()
-	if !strings.Contains(text, "Before image source") || !strings.Contains(text, "New image source") ||
-		strings.Contains(text, "Before version") || strings.Contains(text, "New version") {
-		t.Fatalf("same-version source switch summary = %q", text)
 	}
 }
 
