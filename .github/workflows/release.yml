@@ -192,13 +192,26 @@ jobs:
               --notes-file "$notes"
             release_json="$(get_release)"
           fi
-          actual_title="$(jq -r '.name' <<< "$release_json")"
-          actual_body="$(jq -r '.body' <<< "$release_json")"
-          expected_body="$(cat "$notes")"
-          if [[ "$actual_title" != "$release_title" || "$actual_body" != "$expected_body" ]]; then
-            echo "::error::Forgejo source release metadata does not match the pinned distribution"
+          actual_title="$(jq -r '.name // ""' <<< "$release_json")"
+          actual_body="$(jq -r '.body // ""' <<< "$release_json")"
+          if [[ "$actual_title" != "$release_title" ]]; then
+            echo "::error::Forgejo source release title does not match the pinned distribution"
             exit 1
           fi
+          required_body_values=(
+            "https://codeberg.org/forgejo/forgejo"
+            "v${FORGEJO_VERSION}"
+            "$FORGEJO_COMMIT"
+            "GPL-3.0-or-later"
+            "${TARGET_IMAGE}@${FORGEJO_MANIFEST_DIGEST}"
+            "$FORGEJO_SOURCE_SHA256"
+          )
+          for required_value in "${required_body_values[@]}"; do
+            if [[ "$actual_body" != *"$required_value"* ]]; then
+              echo "::error::Forgejo source release body is missing pinned value: ${required_value}"
+              exit 1
+            fi
+          done
           if [[ "$(jq -r '.prerelease' <<< "$release_json")" != "false" ]]; then
             echo "::error::Forgejo source archive must not be a prerelease"
             exit 1

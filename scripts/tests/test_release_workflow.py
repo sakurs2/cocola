@@ -73,6 +73,23 @@ def test_forgejo_release_commands_are_explicitly_repo_scoped() -> None:
     assert all('--repo "$GITHUB_REPOSITORY"' in command for command in release_commands)
 
 
+def test_forgejo_release_metadata_validation_is_semantic() -> None:
+    forgejo_job, _ = WORKFLOW.split("\n  images:\n", 1)
+
+    assert '"$actual_title" != "$release_title"' in forgejo_job
+    assert '"$actual_body" != *"$required_value"*' in forgejo_job
+    assert '"$actual_body" != "$expected_body"' not in forgejo_job
+    for required_value in (
+        "https://codeberg.org/forgejo/forgejo",
+        '"v${FORGEJO_VERSION}"',
+        '"$FORGEJO_COMMIT"',
+        "GPL-3.0-or-later",
+        '"${TARGET_IMAGE}@${FORGEJO_MANIFEST_DIGEST}"',
+        '"$FORGEJO_SOURCE_SHA256"',
+    ):
+        assert required_value in forgejo_job
+
+
 def test_ghcr_writes_have_bounded_parallelism() -> None:
     _, images_and_remaining = WORKFLOW.split("\n  images:\n", 1)
     images_job, remaining = images_and_remaining.split("\n  promote-images:\n", 1)
