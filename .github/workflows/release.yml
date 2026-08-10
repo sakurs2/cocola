@@ -56,13 +56,18 @@ jobs:
     name: mirror Forgejo image and source
     needs: [ci, validate]
     runs-on: ubuntu-latest
+    concurrency:
+      group: forgejo-distribution-16.0.1
+      cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       packages: write
     env:
       FORGEJO_VERSION: 16.0.1
       FORGEJO_COMMIT: b3d7e4ac3cbccc220703097a51fa4c16bf302579
       FORGEJO_MANIFEST_DIGEST: sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07
+      FORGEJO_SOURCE_SHA256: 727e46ee360f00679d66fb12aaf935513109e6988c5834394a1ccf2931bb8db7
+      FORGEJO_SOURCE_RELEASE_TAG: forgejo-source-v16.0.1
       SOURCE_IMAGE: codeberg.org/forgejo/forgejo:16.0.1
       TARGET_IMAGE: ghcr.io/${{ github.repository_owner }}/cocola-forgejo:16.0.1
     steps:
@@ -112,23 +117,21 @@ jobs:
           done
           echo "::error::$TARGET_IMAGE is not anonymously readable. Mark the GHCR package Public, then rerun the failed workflow."
           exit 1
-      - name: Archive the corresponding Forgejo source
+      - name: Ensure the corresponding Forgejo source archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p forgejo-source
-          observed_commit="$(git ls-remote https://code.forgejo.org/forgejo/forgejo.git "refs/tags/v${FORGEJO_VERSION}")"
-          observed_commit="${observed_commit%%[[:space:]]*}"
-          if [[ "$observed_commit" != "$FORGEJO_COMMIT" ]]; then
-            echo "::error::Forgejo tag commit changed: expected $FORGEJO_COMMIT, got $observed_commit"
-            exit 1
-          fi
-          archive="forgejo-source/forgejo-${FORGEJO_VERSION}-source.tar.gz"
-          curl --fail --location --retry 3 \
-            "https://code.forgejo.org/forgejo/forgejo/archive/v${FORGEJO_VERSION}.tar.gz" \
-            --output "$archive"
-          tar -tzf "$archive" > /tmp/forgejo-source-files.txt
-          grep -Eq '/(LICENSE|COPYING)$' /tmp/forgejo-source-files.txt
-          archive_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          source_dir="${RUNNER_TEMP}/forgejo-source-${FORGEJO_VERSION}"
+          archive_name="forgejo-${FORGEJO_VERSION}-source.tar.gz"
+          provenance_name="forgejo-${FORGEJO_VERSION}-source.txt"
+          archive="${source_dir}/${archive_name}"
+          provenance="${source_dir}/${provenance_name}"
+          notes="${source_dir}/release-notes.md"
+          release_title="Forgejo ${FORGEJO_VERSION} corresponding source"
+          expected_archive_digest="sha256:${FORGEJO_SOURCE_SHA256}"
+          mkdir -p "$source_dir"
+
           {
             echo "Forgejo ${FORGEJO_VERSION} complete corresponding source"
             echo "Upstream: https://codeberg.org/forgejo/forgejo"
@@ -136,18 +139,116 @@ jobs:
             echo "Commit: ${FORGEJO_COMMIT}"
             echo "License: GPL-3.0-or-later (included in the source archive)"
             echo "Distributed image: ${TARGET_IMAGE}@${FORGEJO_MANIFEST_DIGEST}"
-            echo "Source SHA-256: ${archive_sha256}"
-          } > "forgejo-source/forgejo-${FORGEJO_VERSION}-source.txt"
+            echo "Source SHA-256: ${FORGEJO_SOURCE_SHA256}"
+          } > "$provenance"
+          expected_provenance_digest="sha256:$(sha256sum "$provenance" | cut -d' ' -f1)"
+
+          cat > "$notes" <<EOF
+          This release stores the complete corresponding source for the unmodified
+          Forgejo ${FORGEJO_VERSION} container image redistributed by Cocola. It is a
+          third-party source archive, not a Cocola application release, and must not be
+          marked as the latest Cocola release.
+
+          - Upstream: https://codeberg.org/forgejo/forgejo
+          - Tag: v${FORGEJO_VERSION}
+          - Commit: ${FORGEJO_COMMIT}
+          - License: GPL-3.0-or-later
+          - Mirrored image: ${TARGET_IMAGE}@${FORGEJO_MANIFEST_DIGEST}
+          - Source SHA-256: ${FORGEJO_SOURCE_SHA256}
+          EOF
+
+          get_release() {
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+              jq -c --arg tag "$FORGEJO_SOURCE_RELEASE_TAG" \
+                '[.[][] | select(.tag_name == $tag)] | if length == 0 then empty elif length == 1 then .[0] else error("duplicate source releases") end'
+          }
+
+          verify_asset() {
+            local release_json="$1" name="$2" expected_digest="$3"
+            local matches state digest
+            matches="$(jq -r --arg name "$name" '[.assets[] | select(.name == $name)] | length' <<< "$release_json")"
+            if [[ "$matches" == "0" ]]; then
+              return 1
+            fi
+            if [[ "$matches" != "1" ]]; then
+              echo "::error::Forgejo source release has duplicate ${name} assets"
+              exit 1
+            fi
+            state="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .state' <<< "$release_json")"
+            digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest' <<< "$release_json")"
+            if [[ "$state" != "uploaded" || "$digest" != "$expected_digest" ]]; then
+              echo "::error::Refusing to replace ${name}: expected ${expected_digest}, got state=${state} digest=${digest}"
+              exit 1
+            fi
+          }
+
+          release_json="$(get_release)"
+          if [[ -z "$release_json" ]]; then
+            gh release create "$FORGEJO_SOURCE_RELEASE_TAG" \
+              --draft \
+              --latest=false \
+              --target "$GITHUB_SHA" \
+              --title "$release_title" \
+              --notes-file "$notes"
+            release_json="$(get_release)"
+          fi
+          actual_title="$(jq -r '.name' <<< "$release_json")"
+          actual_body="$(jq -r '.body' <<< "$release_json")"
+          expected_body="$(cat "$notes")"
+          if [[ "$actual_title" != "$release_title" || "$actual_body" != "$expected_body" ]]; then
+            echo "::error::Forgejo source release metadata does not match the pinned distribution"
+            exit 1
+          fi
+          if [[ "$(jq -r '.prerelease' <<< "$release_json")" != "false" ]]; then
+            echo "::error::Forgejo source archive must not be a prerelease"
+            exit 1
+          fi
+
+          if ! verify_asset "$release_json" "$archive_name" "$expected_archive_digest"; then
+            observed_commit="$(git ls-remote https://code.forgejo.org/forgejo/forgejo.git "refs/tags/v${FORGEJO_VERSION}")"
+            observed_commit="${observed_commit%%[[:space:]]*}"
+            if [[ "$observed_commit" != "$FORGEJO_COMMIT" ]]; then
+              echo "::error::Forgejo tag commit changed: expected $FORGEJO_COMMIT, got $observed_commit"
+              exit 1
+            fi
+            curl --fail --location --retry 3 \
+              "https://code.forgejo.org/forgejo/forgejo/archive/v${FORGEJO_VERSION}.tar.gz" \
+              --output "$archive"
+            echo "${FORGEJO_SOURCE_SHA256}  ${archive}" | sha256sum --check --strict
+            tar -tzf "$archive" > "${source_dir}/archive-files.txt"
+            grep -Eq '/(LICENSE|COPYING)$' "${source_dir}/archive-files.txt"
+            gh release upload "$FORGEJO_SOURCE_RELEASE_TAG" "$archive"
+            release_json="$(get_release)"
+            verify_asset "$release_json" "$archive_name" "$expected_archive_digest"
+          fi
+
+          if ! verify_asset "$release_json" "$provenance_name" "$expected_provenance_digest"; then
+            gh release upload "$FORGEJO_SOURCE_RELEASE_TAG" "$provenance"
+            release_json="$(get_release)"
+            verify_asset "$release_json" "$provenance_name" "$expected_provenance_digest"
+          fi
+
+          if [[ "$(jq -r '.draft' <<< "$release_json")" == "true" ]]; then
+            gh release edit "$FORGEJO_SOURCE_RELEASE_TAG" --draft=false --latest=false
+            release_json="$(get_release)"
+          fi
+          if [[ "$(jq -r '.draft' <<< "$release_json")" != "false" ]]; then
+            echo "::error::Forgejo source archive release is not published"
+            exit 1
+          fi
+          if latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null)"; then
+            if [[ "$latest_tag" == "$FORGEJO_SOURCE_RELEASE_TAG" ]]; then
+              echo "::error::Forgejo source archive must not replace the latest Cocola release"
+              exit 1
+            fi
+          fi
+          archive_url="$(jq -r --arg name "$archive_name" '.assets[] | select(.name == $name) | .browser_download_url' <<< "$release_json")"
+          curl --fail --location --head --retry 3 --silent --show-error "$archive_url" >/dev/null
           {
             echo "### Forgejo redistribution"
             echo "Cocola mirrors the unmodified Forgejo ${FORGEJO_VERSION} image at ${FORGEJO_MANIFEST_DIGEST}."
-            echo "The complete corresponding source is attached to the Cocola release."
+            echo "The complete corresponding source is available at https://github.com/${GITHUB_REPOSITORY}/releases/tag/${FORGEJO_SOURCE_RELEASE_TAG}."
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: forgejo-source
-          path: forgejo-source/
-          if-no-files-found: error
 
   images:
     name: image / ${{ matrix.name }}
@@ -352,10 +453,6 @@ jobs:
         with:
           go-version: "1.24"
           cache-dependency-path: apps/cli/go.sum
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: forgejo-source
-          path: release-assets/forgejo-source
       - name: Test CLI
         working-directory: apps/cli
         run: go test ./...
@@ -366,7 +463,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Attach Forgejo corresponding source to the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" release-assets/forgejo-source/*

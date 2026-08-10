@@ -14,10 +14,12 @@ for reliable internal SCM installation:
   source archive
 
 The mirrored image is copied byte-for-byte between OCI registries. Cocola does
-not rebuild, modify, or claim authorship of Forgejo. Every Cocola release that
-depends on this image includes `forgejo-16.0.1-source.tar.gz` and its provenance
-record as stable release assets, providing the complete corresponding source
-and the exact GPL license distributed by Forgejo.
+not rebuild, modify, or claim authorship of Forgejo. The complete corresponding
+source and its provenance are archived once for this Forgejo version in the
+dedicated
+[`forgejo-source-v16.0.1`](https://github.com/sakurs2/cocola/releases/tag/forgejo-source-v16.0.1)
+release. Cocola verifies the immutable source asset digest before every
+application release instead of duplicating the same source archive.
 
 Forgejo is a trademark of its respective owners and is not part of the Cocola
 source code licensed under Apache-2.0.

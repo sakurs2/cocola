@@ -3,6 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text()
 CI_WORKFLOW = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+GORELEASER_CONFIG = (ROOT / ".goreleaser.yml").read_text()
 WEB_DOCKERFILE = (ROOT / "apps" / "web" / "Dockerfile").read_text()
 MAKEFILE = (ROOT / "Makefile").read_text()
 
@@ -40,13 +41,35 @@ def test_forgejo_mirror_is_immutable_multiarch_and_public() -> None:
     assert "Verify anonymous mirror access" in forgejo_job
 
 
-def test_forgejo_corresponding_source_is_attached_to_release() -> None:
+def test_forgejo_corresponding_source_is_archived_once_per_version() -> None:
+    forgejo_job, _ = WORKFLOW.split("\n  images:\n", 1)
+
     assert "b3d7e4ac3cbccc220703097a51fa4c16bf302579" in WORKFLOW
+    assert "727e46ee360f00679d66fb12aaf935513109e6988c5834394a1ccf2931bb8db7" in WORKFLOW
+    assert "forgejo-source-v16.0.1" in WORKFLOW
+    assert "group: forgejo-distribution-16.0.1" in forgejo_job
+    assert "contents: write" in forgejo_job
+    assert "${RUNNER_TEMP}/forgejo-source-${FORGEJO_VERSION}" in WORKFLOW
     assert "forgejo-${FORGEJO_VERSION}-source.tar.gz" in WORKFLOW
     assert "License: GPL-3.0-or-later" in WORKFLOW
-    assert "actions/upload-artifact@ea165f8d" in WORKFLOW
-    assert "actions/download-artifact@d3f86a10" in WORKFLOW
-    assert 'gh release upload "$GITHUB_REF_NAME"' in WORKFLOW
+    assert 'gh release create "$FORGEJO_SOURCE_RELEASE_TAG"' in WORKFLOW
+    assert 'gh release upload "$FORGEJO_SOURCE_RELEASE_TAG"' in WORKFLOW
+    assert '"$digest" != "$expected_digest"' in WORKFLOW
+    assert "--latest=false" in WORKFLOW
+    assert 'releases/latest" --jq' in WORKFLOW
+    assert "--head" in WORKFLOW
+    assert forgejo_job.index('if ! verify_asset "$release_json" "$archive_name"') < (
+        forgejo_job.index("forgejo/archive/v${FORGEJO_VERSION}.tar.gz")
+    )
+
+
+def test_cli_release_keeps_the_goreleaser_checkout_clean() -> None:
+    _, cli_job = WORKFLOW.split("\n  cli:\n", 1)
+
+    assert "actions/download-artifact" not in cli_job
+    assert "release-assets/" not in cli_job
+    assert 'gh release upload "$GITHUB_REF_NAME"' not in cli_job
+    assert 'ignore_tags:\n    - "forgejo-source-*"' in GORELEASER_CONFIG
 
 
 def test_unchanged_sandbox_runtime_reuses_the_previous_digest() -> None:

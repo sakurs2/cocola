@@ -2,6 +2,10 @@ version: 2
 
 project_name: cocola
 
+git:
+  ignore_tags:
+    - "forgejo-source-*"
+
 builds:
   - id: cocola
     dir: apps/cli
