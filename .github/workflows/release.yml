@@ -184,7 +184,7 @@ jobs:
 
           release_json="$(get_release)"
           if [[ -z "$release_json" ]]; then
-            gh release create "$FORGEJO_SOURCE_RELEASE_TAG" \
+            gh release create "$FORGEJO_SOURCE_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
               --draft \
               --latest=false \
               --target "$GITHUB_SHA" \
@@ -217,19 +217,19 @@ jobs:
             echo "${FORGEJO_SOURCE_SHA256}  ${archive}" | sha256sum --check --strict
             tar -tzf "$archive" > "${source_dir}/archive-files.txt"
             grep -Eq '/(LICENSE|COPYING)$' "${source_dir}/archive-files.txt"
-            gh release upload "$FORGEJO_SOURCE_RELEASE_TAG" "$archive"
+            gh release upload "$FORGEJO_SOURCE_RELEASE_TAG" "$archive" --repo "$GITHUB_REPOSITORY"
             release_json="$(get_release)"
             verify_asset "$release_json" "$archive_name" "$expected_archive_digest"
           fi
 
           if ! verify_asset "$release_json" "$provenance_name" "$expected_provenance_digest"; then
-            gh release upload "$FORGEJO_SOURCE_RELEASE_TAG" "$provenance"
+            gh release upload "$FORGEJO_SOURCE_RELEASE_TAG" "$provenance" --repo "$GITHUB_REPOSITORY"
             release_json="$(get_release)"
             verify_asset "$release_json" "$provenance_name" "$expected_provenance_digest"
           fi
 
           if [[ "$(jq -r '.draft' <<< "$release_json")" == "true" ]]; then
-            gh release edit "$FORGEJO_SOURCE_RELEASE_TAG" --draft=false --latest=false
+            gh release edit "$FORGEJO_SOURCE_RELEASE_TAG" --draft=false --latest=false --repo "$GITHUB_REPOSITORY"
             release_json="$(get_release)"
           fi
           if [[ "$(jq -r '.draft' <<< "$release_json")" != "false" ]]; then
@@ -259,6 +259,7 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
           - name: gateway
@@ -394,6 +395,7 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         name:
           - gateway

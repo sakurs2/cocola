@@ -63,6 +63,26 @@ def test_forgejo_corresponding_source_is_archived_once_per_version() -> None:
     )
 
 
+def test_forgejo_release_commands_are_explicitly_repo_scoped() -> None:
+    forgejo_job, _ = WORKFLOW.split("\n  images:\n", 1)
+    release_commands = [
+        line.strip() for line in forgejo_job.splitlines() if line.strip().startswith("gh release ")
+    ]
+
+    assert len(release_commands) == 4
+    assert all('--repo "$GITHUB_REPOSITORY"' in command for command in release_commands)
+
+
+def test_ghcr_writes_have_bounded_parallelism() -> None:
+    _, images_and_remaining = WORKFLOW.split("\n  images:\n", 1)
+    images_job, remaining = images_and_remaining.split("\n  promote-images:\n", 1)
+    promote_job, _ = remaining.split("\n  cli:\n", 1)
+    bounded_strategy = "strategy:\n      fail-fast: false\n      max-parallel: 4"
+
+    assert bounded_strategy in images_job
+    assert bounded_strategy in promote_job
+
+
 def test_cli_release_keeps_the_goreleaser_checkout_clean() -> None:
     _, cli_job = WORKFLOW.split("\n  cli:\n", 1)
 
