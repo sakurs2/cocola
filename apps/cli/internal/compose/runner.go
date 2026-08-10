@@ -344,6 +344,23 @@ func (r *Runner) ServiceRunning(ctx context.Context, service string) (bool, erro
 	return len(ids) > 0, err
 }
 
+// ServiceDefined reports whether the installed Compose topology contains the
+// exact service. Upgrade backup uses this before inspecting service-specific
+// volumes so artifacts from a failed candidate deployment cannot be mistaken
+// for data owned by an older release.
+func (r *Runner) ServiceDefined(ctx context.Context, service string) (bool, error) {
+	output, err := r.capture(ctx, "config", "--services")
+	if err != nil {
+		return false, err
+	}
+	for _, defined := range strings.Fields(string(output)) {
+		if defined == service {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *Runner) serviceContainerIDs(ctx context.Context, service string) ([]string, error) {
 	command := exec.CommandContext(
 		ctx,
@@ -574,6 +591,18 @@ func (r *Runner) stopForDrain(ctx context.Context) []error {
 func (r *Runner) Stop(ctx context.Context) error {
 	failures := r.stopForDrain(ctx)
 	if err := r.run(ctx, "stop", "--timeout", "30"); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
+}
+
+// RemoveFailedStart leaves a failed candidate deployment in a known state
+// before its configuration is rolled back. It preserves named volumes and
+// images, but removes candidate containers, orphan containers, and the project
+// network so a later retry cannot inherit a partially applied topology.
+func (r *Runner) RemoveFailedStart(ctx context.Context) error {
+	failures := r.stopForDrain(ctx)
+	if err := r.run(ctx, "down", "--remove-orphans", "--timeout", "30"); err != nil {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)

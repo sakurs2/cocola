@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
@@ -130,7 +131,10 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 	printer.Info("Starting Cocola and waiting for service health checks")
 	if err := runner.Start(ctx); err != nil {
 		if pending != nil {
-			return a.restoreFailedUpgrade(ctx, runner.Paths, pending, err)
+			cleanupContext, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			cleanupErr := runner.RemoveFailedStart(cleanupContext)
+			cancelCleanup()
+			return a.restoreFailedUpgrade(ctx, runner.Paths, pending, errors.Join(err, cleanupErr))
 		}
 		a.printStartFailure(ctx, runner)
 		return err
@@ -170,9 +174,16 @@ func (a *application) backupUpgradeDatabase(
 	if err != nil {
 		return err
 	}
-	hasForgejoData, err := backupRunner.VolumePresent(ctx, "forgejodata")
+	hasForgejoService, err := backupRunner.ServiceDefined(ctx, "forgejo")
 	if err != nil {
 		return err
+	}
+	hasForgejoData := false
+	if hasForgejoService {
+		hasForgejoData, err = backupRunner.VolumePresent(ctx, "forgejodata")
+		if err != nil {
+			return err
+		}
 	}
 	if !hasDatabase {
 		if hasForgejoData {

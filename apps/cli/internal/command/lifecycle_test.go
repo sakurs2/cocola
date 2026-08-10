@@ -225,6 +225,79 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 	if count := strings.Count(string(dockerLog), "up -d --wait opensandbox-server"); count != 1 {
 		t.Fatalf("previous version was restarted automatically; start count = %d\n%s", count, dockerLog)
 	}
+	if !strings.Contains(string(dockerLog), "down --remove-orphans --timeout 30") {
+		t.Fatalf("failed candidate containers were not removed before rollback:\n%s", dockerLog)
+	}
+	if strings.Contains(string(dockerLog), "down --remove-orphans --timeout 30 --volumes") {
+		t.Fatalf("failed candidate cleanup unexpectedly removed data volumes:\n%s", dockerLog)
+	}
+}
+
+func TestUpgradeBackupIgnoresStrayForgejoVolumeWhenPreviousTopologyHasNoForgejo(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0",
+		"--admin-password", "test-password",
+		"--web-port", "33301", "--gateway-port", "33302", "--llm-port", "33303",
+		"--internal-scm-port", "33304",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--version", "v0.2.0",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := config.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.PendingUpgrade == nil {
+		t.Fatal("upgrade did not create pending backup state")
+	}
+
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	logPath := filepath.Join(directory, "docker.log")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$DOCKER_ARGS_LOG"
+case "$*" in
+  *'config --services'*) printf '%s\n' 'postgres' 'gateway'; exit 0 ;;
+  'volume inspect cocola_pgdata') exit 0 ;;
+  *'up -d --wait postgres') exit 0 ;;
+  *'exec -T postgres pg_dump -U cocola -d cocola --format=custom'*) printf 'postgres-dump'; exit 0 ;;
+esac
+printf '%s\n' 'unexpected docker command' >&2
+exit 1
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
+	t.Setenv("DOCKER_ARGS_LOG", logPath)
+	app := &application{io: IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}}
+	if err := app.backupUpgradeDatabase(context.Background(), paths, state.PendingUpgrade); err != nil {
+		t.Fatalf("backupUpgradeDatabase() error = %v, stderr = %s", err, stderr.String())
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logged), "forgejo") {
+		t.Fatalf("old topology without Forgejo unexpectedly accessed Forgejo data:\n%s", logged)
+	}
+	if !strings.Contains(string(logged), "pg_dump -U cocola -d cocola") {
+		t.Fatalf("PostgreSQL backup was not created:\n%s", logged)
+	}
 }
 
 func TestFirstStartRejectsPostgresVolumeFromDifferentConfiguration(t *testing.T) {
@@ -284,13 +357,35 @@ func TestFirstStartRejectsPostgresVolumeFromDifferentConfiguration(t *testing.T)
 
 func TestCheckPortAvailableReportsCollision(t *testing.T) {
 	previous := listenTCP
-	listenTCP = func(_, _ string) (net.Listener, error) {
+	var network, address string
+	listenTCP = func(gotNetwork, gotAddress string) (net.Listener, error) {
+		network, address = gotNetwork, gotAddress
 		return nil, errors.New("address already in use")
 	}
 	defer func() { listenTCP = previous }()
-	if err := checkPortAvailable(33001); err == nil || !strings.Contains(err.Error(), "address already in use") {
+	if err := checkPortAvailable("127.0.0.1", 33001); err == nil || !strings.Contains(err.Error(), "address already in use") {
 		t.Fatalf("port collision error = %v", err)
 	}
+	if network != "tcp4" || address != "127.0.0.1:33001" {
+		t.Fatalf("listen address = %s %s", network, address)
+	}
+}
+
+func TestInternalSCMPreflightUsesLoopbackBinding(t *testing.T) {
+	bindings := startPortBindings(config.State{
+		WebPort: 3000, GatewayPort: 8080, LLMPort: 18091,
+		InternalSCM: config.InternalSCMEndpoint{HostPort: 3001},
+	})
+	for _, binding := range bindings {
+		if binding.service != "forgejo" {
+			continue
+		}
+		if binding.bindHost != "127.0.0.1" || binding.port != 3001 {
+			t.Fatalf("Internal SCM binding = %+v", binding)
+		}
+		return
+	}
+	t.Fatal("Internal SCM preflight binding is missing")
 }
 
 func TestPrepareSandboxRootCreatesWritableDirectory(t *testing.T) {

@@ -81,6 +81,27 @@ func TestExternalProviderStopUsesDrainOrderWithoutManagedProfile(t *testing.T) {
 	})
 }
 
+func TestRemoveFailedStartRemovesContainersButPreservesVolumes(t *testing.T) {
+	runner, logPath, paths := newRecordingRunner(t, true)
+	if err := runner.RemoveFailedStart(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := "compose --project-name cocola --env-file " + paths.Environment +
+		" --file " + paths.Compose + " --profile managed "
+	assertRecordedCommands(t, logPath, []string{
+		prefix + "stop --timeout 30 web gateway agent-runtime",
+		prefix + "stop --timeout 45 sandbox-manager",
+		prefix + "down --remove-orphans --timeout 30",
+	})
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contents), "--volumes") {
+		t.Fatalf("failed-start cleanup must preserve data volumes: %s", contents)
+	}
+}
+
 func TestParseComposeVersion(t *testing.T) {
 	tests := []struct {
 		raw  string
@@ -364,6 +385,34 @@ func TestVolumePresentFindsDataWithoutAServiceContainer(t *testing.T) {
 	present, err = runner.VolumePresent(context.Background(), "missing")
 	if err != nil || present {
 		t.Fatalf("VolumePresent(missing) = %v, %v", present, err)
+	}
+}
+
+func TestServiceDefinedRequiresExactComposeService(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+case "$*" in
+  *'config --services'*) printf '%s\n' 'postgres' 'forgejo-init' 'gateway'; exit 0 ;;
+esac
+exit 1
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	paths := writeRunnerState(t, directory, false)
+	runner, err := New(paths, nil, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defined, err := runner.ServiceDefined(context.Background(), "forgejo")
+	if err != nil || defined {
+		t.Fatalf("ServiceDefined(forgejo) = %v, %v", defined, err)
+	}
+	defined, err = runner.ServiceDefined(context.Background(), "forgejo-init")
+	if err != nil || !defined {
+		t.Fatalf("ServiceDefined(forgejo-init) = %v, %v", defined, err)
 	}
 }
 

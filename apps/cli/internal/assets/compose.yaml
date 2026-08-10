@@ -130,6 +130,8 @@ services:
   openviking:
     image: ghcr.io/volcengine/openviking:v0.4.12@sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb
     restart: unless-stopped
+    healthcheck:
+      disable: true
     entrypoint: ["python", "-c"]
     command:
       - |
