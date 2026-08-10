@@ -15,11 +15,12 @@ const (
 	DefaultImageSource = ImageSourceCNMirror
 	LegacyImageSource  = ImageSourceDirect
 
-	DefaultRegistry       = "ghcr.io/sakurs2"
-	CNMirrorRegistry      = "ghcr.nju.edu.cn/sakurs2"
-	forgejoVersion        = "16.0.1"
-	forgejoManifestDigest = "sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07"
-	openVikingDigest      = "sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb"
+	DefaultRegistry           = "ghcr.io/sakurs2"
+	CNMirrorRegistry          = "ghcr.nju.edu.cn/sakurs2"
+	openSandboxAliyunRegistry = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
+	forgejoVersion            = "16.0.1"
+	forgejoManifestDigest     = "sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07"
+	openVikingDigest          = "sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb"
 )
 
 type ImageReferences struct {
@@ -82,7 +83,7 @@ func ResolveImageReferences(source ImageSource, version, customRegistry string) 
 	}
 	refs := ImageReferences{
 		Registry:         registry,
-		OpenSandboxExecd: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19",
+		OpenSandboxExecd: openSandboxAliyunRegistry + "/execd:v1.0.19",
 		SandboxRuntime:   registry + "/cocola-sandbox-runtime:" + version,
 	}
 	if source == ImageSourceCNMirror {
@@ -92,8 +93,8 @@ func ResolveImageReferences(source ImageSource, version, customRegistry string) 
 		refs.MinIO = "docker.nju.edu.cn/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 		refs.MinIOClient = "docker.nju.edu.cn/minio/mc:RELEASE.2025-08-13T08-35-41Z"
 		refs.OpenViking = "ghcr.nju.edu.cn/volcengine/openviking:v0.4.12@" + openVikingDigest
-		refs.OpenSandboxServer = "docker.nju.edu.cn/opensandbox/server:v0.1.14"
-		refs.OpenSandboxEgress = "docker.nju.edu.cn/opensandbox/egress:v1.1.2"
+		refs.OpenSandboxServer = openSandboxAliyunRegistry + "/server:v0.1.14"
+		refs.OpenSandboxEgress = openSandboxAliyunRegistry + "/egress:v1.1.2"
 		return refs, nil
 	}
 	refs.Redis = "docker.io/library/redis:7.4.10-alpine3.21"

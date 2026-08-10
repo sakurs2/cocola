@@ -46,7 +46,8 @@ cocola version                 查看 CLI 构建版本
 Host 的反向代理，以及 GitHub/飞书等需要生成固定外部回调或跳转地址的集成。
 新安装默认选中 `Mainland China acceleration`，也可以选择 `Direct download`。CLI 会为 Cocola、
 Forgejo、OpenViking 和 Docker Hub 依赖生成完整镜像引用，不修改 Docker daemon 配置，也不会在
-代理失败时静默切换供应链来源。可随时显式切换并通过下一次启动提交：
+代理失败时静默切换供应链来源。中国模式下，OpenSandbox 的 Server、Execd 和 Egress 直接使用
+项目官方发布的阿里云容器仓库，不再经过第三方 Docker Hub 代理。可随时显式切换并通过下一次启动提交：
 
 ```bash
 cocola install --image-source cn-mirror  # 中国大陆加速（新安装默认）

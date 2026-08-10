@@ -7,20 +7,26 @@ import (
 
 func TestResolveImageReferencesUsesOnlySelectedPreset(t *testing.T) {
 	tests := []struct {
-		name      string
-		source    ImageSource
-		forbidden []string
-		required  []string
+		name              string
+		source            ImageSource
+		forbidden         []string
+		required          []string
+		openSandboxServer string
+		openSandboxEgress string
 	}{
 		{
 			name: "mainland China mirror", source: ImageSourceCNMirror,
-			forbidden: []string{"ghcr.io", "docker.io", "codeberg.org"},
-			required:  []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn"},
+			forbidden:         []string{"ghcr.io", "docker.io", "codeberg.org"},
+			required:          []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn"},
+			openSandboxServer: openSandboxAliyunRegistry + "/server:v0.1.14",
+			openSandboxEgress: openSandboxAliyunRegistry + "/egress:v1.1.2",
 		},
 		{
 			name: "direct", source: ImageSourceDirect,
-			forbidden: []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn", "codeberg.org"},
-			required:  []string{"ghcr.io", "docker.io"},
+			forbidden:         []string{"ghcr.nju.edu.cn", "docker.nju.edu.cn", "codeberg.org"},
+			required:          []string{"ghcr.io", "docker.io"},
+			openSandboxServer: "docker.io/opensandbox/server:v0.1.14",
+			openSandboxEgress: "docker.io/opensandbox/egress:v1.1.2",
 		},
 	}
 	for _, test := range tests {
@@ -49,6 +55,15 @@ func TestResolveImageReferencesUsesOnlySelectedPreset(t *testing.T) {
 			}
 			if !strings.Contains(refs.OpenViking, "v0.4.12@sha256:0d993") {
 				t.Fatalf("OpenViking reference lost its digest: %s", refs.OpenViking)
+			}
+			if refs.OpenSandboxServer != test.openSandboxServer {
+				t.Fatalf("OpenSandbox server reference = %q, want %q", refs.OpenSandboxServer, test.openSandboxServer)
+			}
+			if refs.OpenSandboxEgress != test.openSandboxEgress {
+				t.Fatalf("OpenSandbox egress reference = %q, want %q", refs.OpenSandboxEgress, test.openSandboxEgress)
+			}
+			if refs.OpenSandboxExecd != openSandboxAliyunRegistry+"/execd:v1.0.19" {
+				t.Fatalf("OpenSandbox execd reference unexpectedly changed: %s", refs.OpenSandboxExecd)
 			}
 		})
 	}
