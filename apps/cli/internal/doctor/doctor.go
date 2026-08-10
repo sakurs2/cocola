@@ -84,6 +84,11 @@ func Run(ctx context.Context, paths config.Paths) Report {
 	} else {
 		add("configuration schema", StatusPass, fmt.Sprintf("version %d", config.CurrentSchemaVersion))
 	}
+	if state.ImageSource.Valid() {
+		add("image source", StatusPass, state.ImageSource.DisplayName()+" ("+string(state.ImageSource)+")")
+	} else {
+		add("image source", StatusFail, "not configured; run cocola install to migrate the deployment configuration")
+	}
 	runner, err := compose.New(paths, nil, io.Discard, io.Discard)
 	if err != nil {
 		add("installation", StatusFail, err.Error())

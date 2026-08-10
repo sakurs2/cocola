@@ -86,7 +86,9 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.Version != "v0.1.0" || !state.ManagedOpenSandbox ||
-		state.SandboxImage != "ghcr.io/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
+		state.ImageSource != ImageSourceCNMirror ||
+		state.SandboxImage != "ghcr.nju.edu.cn/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
+		len(state.ManagedRuntimeImages) != 3 ||
 		state.ConfigSchemaVersion != CurrentSchemaVersion || state.DeploymentRevision == "" ||
 		state.LLMPort != 18091 || state.InternalSCM.HostPort != 3001 ||
 		state.InternalSCM.APIURL != "http://forgejo:3000" ||
@@ -228,7 +230,9 @@ func TestPrepareUpgradeMigratesLegacyStateAndCommitsAfterStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(migrated), `COCOLA_PG_PASSWORD="database-secret"`) ||
-		!strings.Contains(string(migrated), `COCOLA_BOOTSTRAP_ADMIN_PASSWORD="admin-secret"`) {
+		!strings.Contains(string(migrated), `COCOLA_BOOTSTRAP_ADMIN_PASSWORD="admin-secret"`) ||
+		!strings.Contains(string(migrated), `COCOLA_IMAGE_SOURCE="direct"`) ||
+		!strings.Contains(string(migrated), `COCOLA_IMAGE_REGISTRY="registry.example"`) {
 		t.Fatalf("legacy secrets changed: %s", migrated)
 	}
 	state, err := MarkStarted(paths)
@@ -236,8 +240,66 @@ func TestPrepareUpgradeMigratesLegacyStateAndCommitsAfterStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.PendingUpgrade != nil || state.LastSuccessfulVersion != "v0.2.0" ||
-		state.ConfigSchemaVersion != CurrentSchemaVersion {
+		state.ConfigSchemaVersion != CurrentSchemaVersion || state.ImageSource != ImageSourceDirect {
 		t.Fatalf("committed state = %+v", state)
+	}
+}
+
+func TestPrepareUpgradeSwitchesImageSourceAtSameVersionAndRollsBack(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Defaults("v0.1.0")
+	options.Home = home
+	options.AdminPassword = "strong-password"
+	if _, err := WriteInstallation(paths, options, []byte("services:\n  app: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+	originalEnvironment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := ImageSourceDirect
+	result, err := PrepareUpgradeWithOptions(paths, UpgradeOptions{
+		Version: "v0.1.0", ImageSource: &direct,
+	}, []byte("services:\n  app: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Updated || result.FromVersion != result.ToVersion ||
+		result.FromImageSource != ImageSourceCNMirror || result.ToImageSource != ImageSourceDirect {
+		t.Fatalf("source switch result = %+v", result)
+	}
+	state, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.PendingUpgrade == nil || state.ImageSource != ImageSourceDirect ||
+		!strings.HasPrefix(state.SandboxImage, "ghcr.io/sakurs2/") {
+		t.Fatalf("pending source switch = %+v", state)
+	}
+	migratedEnvironment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(migratedEnvironment), "ghcr.nju.edu.cn") ||
+		strings.Contains(string(migratedEnvironment), "docker.nju.edu.cn") {
+		t.Fatalf("direct environment still contains mirror references:\n%s", migratedEnvironment)
+	}
+	if _, err := RollbackUpgrade(paths); err != nil {
+		t.Fatal(err)
+	}
+	restoredEnvironment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restoredEnvironment) != string(originalEnvironment) {
+		t.Fatal("source switch rollback did not restore the original environment")
 	}
 }
 

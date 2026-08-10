@@ -105,6 +105,16 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if strings.Contains(string(environment), `COCOLA_PUBLIC_ORIGINS="*"`) {
 		t.Fatal("generated environment must not trust wildcard origins")
 	}
+	for _, expected := range []string{
+		`COCOLA_IMAGE_SOURCE="cn-mirror"`,
+		`COCOLA_IMAGE_REGISTRY="ghcr.nju.edu.cn/sakurs2"`,
+		`COCOLA_REDIS_IMAGE="docker.nju.edu.cn/library/redis:7.4.10-alpine3.21"`,
+		`COCOLA_FORGEJO_IMAGE="ghcr.nju.edu.cn/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
+	} {
+		if !strings.Contains(string(environment), expected) {
+			t.Fatalf("generated environment missing %q: %s", expected, environment)
+		}
+	}
 	if !strings.Contains(output.String(), "cocola start") {
 		t.Fatalf("install output must explain how to start Cocola: %q", output.String())
 	}
@@ -135,6 +145,35 @@ func TestInstallPersistsPublicURLAndReportsIt(t *testing.T) {
 	}
 }
 
+func TestInstallAcceptsDirectImageSource(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+		"--image-source", "direct",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatalf("install: %v, stderr=%s", err, stderr.String())
+	}
+	environment, err := os.ReadFile(filepath.Join(home, "config.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(environment)
+	for _, expected := range []string{
+		`COCOLA_IMAGE_SOURCE="direct"`,
+		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
+		`COCOLA_POSTGRES_IMAGE="docker.io/library/postgres:16.14-alpine3.23"`,
+		`COCOLA_FORGEJO_IMAGE="ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("direct environment missing %q: %s", expected, text)
+		}
+	}
+	if strings.Contains(text, "nju.edu.cn") {
+		t.Fatalf("direct environment contains mirror reference: %s", text)
+	}
+}
+
 func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "cocola")
 	var firstOutput, firstErrors bytes.Buffer
@@ -154,6 +193,10 @@ func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *tes
 		"install", "--home", home, "--version", "v0.2.0",
 	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &errors}); err != nil {
 		t.Fatalf("repeat install: %v, stderr=%s", err, errors.String())
+	}
+	if !strings.Contains(output.String(), "Before version") || !strings.Contains(output.String(), "New version") ||
+		strings.Contains(output.String(), "Target version") || strings.Contains(output.String(), "Current version") {
+		t.Fatalf("upgrade preparation uses misleading version copy: %q", output.String())
 	}
 	after, err := os.ReadFile(filepath.Join(home, "config.env"))
 	if err != nil {
@@ -180,10 +223,40 @@ func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *tes
 		state.PendingUpgrade.ToVersion != "v0.2.0" {
 		t.Fatalf("upgrade state = %+v", state)
 	}
-	for _, expected := range []string{"Cocola upgrade is ready", "Deployment backup", "$ cocola start"} {
+	for _, expected := range []string{"Cocola deployment update is ready", "Deployment backup", "$ cocola start"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("upgrade output missing %q: %q", expected, output.String())
 		}
+	}
+}
+
+func TestSameVersionImageSourceSwitchHasSourceOnlySummary(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0",
+		"--admin-password", "test-password",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	stderr.Reset()
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--version", "v0.1.0", "--image-source", "direct",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatalf("switch source: %v, stderr=%s", err, stderr.String())
+	}
+	text := output.String()
+	if !strings.Contains(text, "Before image source") || !strings.Contains(text, "New image source") ||
+		strings.Contains(text, "Before version") || strings.Contains(text, "New version") {
+		t.Fatalf("same-version source switch summary = %q", text)
 	}
 }
 

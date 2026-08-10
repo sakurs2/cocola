@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis:7.4.10-alpine3.21
+    image: "${COCOLA_REDIS_IMAGE}"
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -12,7 +12,7 @@ services:
       retries: 20
 
   postgres:
-    image: postgres:16.14-alpine3.23
+    image: "${COCOLA_POSTGRES_IMAGE}"
     restart: unless-stopped
     environment:
       POSTGRES_USER: cocola
@@ -31,7 +31,7 @@ services:
       retries: 20
 
   forgejo-db-init:
-    image: postgres:16.14-alpine3.23
+    image: "${COCOLA_POSTGRES_IMAGE}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
         psql -h postgres -U cocola -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='forgejo'" | grep -q 1 || psql -h postgres -U cocola -d postgres -c "CREATE DATABASE forgejo OWNER forgejo"
 
   forgejo:
-    image: codeberg.org/forgejo/forgejo:16.0.1
+    image: "${COCOLA_FORGEJO_IMAGE}"
     restart: unless-stopped
     depends_on:
       forgejo-db-init:
@@ -82,7 +82,7 @@ services:
       retries: 30
 
   forgejo-init:
-    image: codeberg.org/forgejo/forgejo:16.0.1
+    image: "${COCOLA_FORGEJO_IMAGE}"
     user: "1000:1000"
     depends_on:
       forgejo:
@@ -101,7 +101,7 @@ services:
         forgejo admin user change-password --config /data/gitea/conf/app.ini --username cocola --password "$$COCOLA_FORGEJO_PASSWORD" --must-change-password=false
 
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: "${COCOLA_MINIO_IMAGE}"
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -116,7 +116,7 @@ services:
       retries: 20
 
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: "${COCOLA_MINIO_MC_IMAGE}"
     depends_on:
       minio:
         condition: service_healthy
@@ -128,7 +128,7 @@ services:
       && (mc rm --recursive --force local/cocola/openviking-v3/ || true)"
 
   openviking:
-    image: ghcr.io/volcengine/openviking:v0.4.12@sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb
+    image: "${COCOLA_OPENVIKING_IMAGE}"
     restart: unless-stopped
     healthcheck:
       disable: true
@@ -164,7 +164,7 @@ services:
 
   opensandbox-server:
     profiles: ["managed"]
-    image: "${COCOLA_OPENSANDBOX_IMAGE:-opensandbox/server:v0.1.14}"
+    image: "${COCOLA_OPENSANDBOX_IMAGE}"
     restart: unless-stopped
     volumes:
       - "${COCOLA_DOCKER_SOCKET_SOURCE:-/var/run/docker.sock}:/var/run/docker.sock"
@@ -475,10 +475,10 @@ configs:
 
       [runtime]
       type = "docker"
-      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
+      execd_image = "${COCOLA_OPENSANDBOX_EXECD_IMAGE}"
 
       [egress]
-      image = "opensandbox/egress:v1.1.2"
+      image = "${COCOLA_OPENSANDBOX_EGRESS_IMAGE}"
 
       [storage]
       allowed_host_paths = ["${COCOLA_SANDBOX_ROOT}"]

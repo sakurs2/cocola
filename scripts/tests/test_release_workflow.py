@@ -18,7 +18,7 @@ def test_stable_aliases_are_promoted_only_after_images_succeed() -> None:
     assert "type=semver,pattern={{version}}" in promote_job
     assert "type=semver,pattern={{major}}.{{minor}}" in promote_job
     assert "type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}" in promote_job
-    assert "needs: promote-images" in cli_job
+    assert "needs: [promote-images, forgejo-image]" in cli_job
 
 
 def test_cli_release_waits_for_anonymous_images() -> None:
@@ -26,6 +26,27 @@ def test_cli_release_waits_for_anonymous_images() -> None:
     assert "docker logout ghcr.io" in WORKFLOW
     assert 'docker buildx imagetools inspect "$IMAGE"' in WORKFLOW
     assert "Set the GHCR package visibility to Public" in WORKFLOW
+
+
+def test_forgejo_mirror_is_immutable_multiarch_and_public() -> None:
+    forgejo_job, _ = WORKFLOW.split("\n  images:\n", 1)
+    assert "regclient/actions/regctl-installer@1b705e32" in forgejo_job
+    assert "release: v0.9.2" in forgejo_job
+    assert "sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07" in forgejo_job
+    assert "Refusing to overwrite" in forgejo_job
+    assert "regctl image copy --force-recursive" in forgejo_job
+    assert 'index("linux/amd64")' in forgejo_job
+    assert 'index("linux/arm64")' in forgejo_job
+    assert "Verify anonymous mirror access" in forgejo_job
+
+
+def test_forgejo_corresponding_source_is_attached_to_release() -> None:
+    assert "b3d7e4ac3cbccc220703097a51fa4c16bf302579" in WORKFLOW
+    assert "forgejo-${FORGEJO_VERSION}-source.tar.gz" in WORKFLOW
+    assert "License: GPL-3.0-or-later" in WORKFLOW
+    assert "actions/upload-artifact@ea165f8d" in WORKFLOW
+    assert "actions/download-artifact@d3f86a10" in WORKFLOW
+    assert 'gh release upload "$GITHUB_REF_NAME"' in WORKFLOW
 
 
 def test_unchanged_sandbox_runtime_reuses_the_previous_digest() -> None:

@@ -52,6 +52,103 @@ jobs:
               if (error.status !== 404) throw error;
             }
 
+  forgejo-image:
+    name: mirror Forgejo image and source
+    needs: [ci, validate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      FORGEJO_VERSION: 16.0.1
+      FORGEJO_COMMIT: b3d7e4ac3cbccc220703097a51fa4c16bf302579
+      FORGEJO_MANIFEST_DIGEST: sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07
+      SOURCE_IMAGE: codeberg.org/forgejo/forgejo:16.0.1
+      TARGET_IMAGE: ghcr.io/${{ github.repository_owner }}/cocola-forgejo:16.0.1
+    steps:
+      - uses: regclient/actions/regctl-installer@1b705e32d40851370799ea5814e83d0a5f6a70dc # v0.1.0
+        with:
+          release: v0.9.2
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify and mirror the immutable upstream image
+        run: |
+          set -euo pipefail
+          source_digest="$(regctl image digest "$SOURCE_IMAGE")"
+          if [[ "$source_digest" != "$FORGEJO_MANIFEST_DIGEST" ]]; then
+            echo "::error::Forgejo upstream digest changed: expected $FORGEJO_MANIFEST_DIGEST, got $source_digest"
+            exit 1
+          fi
+          if target_digest="$(regctl image digest "$TARGET_IMAGE" 2>/dev/null)"; then
+            if [[ "$target_digest" != "$FORGEJO_MANIFEST_DIGEST" ]]; then
+              echo "::error::Refusing to overwrite $TARGET_IMAGE at unexpected digest $target_digest"
+              exit 1
+            fi
+            echo "Forgejo mirror already exists at the expected digest."
+          else
+            regctl image copy --force-recursive \
+              "$SOURCE_IMAGE@$FORGEJO_MANIFEST_DIGEST" "$TARGET_IMAGE"
+          fi
+          target_digest="$(regctl image digest "$TARGET_IMAGE")"
+          if [[ "$target_digest" != "$FORGEJO_MANIFEST_DIGEST" ]]; then
+            echo "::error::Mirrored Forgejo digest mismatch: $target_digest"
+            exit 1
+          fi
+          regctl manifest get "$TARGET_IMAGE" --format raw-body > /tmp/forgejo-manifest.json
+          jq -e '[.manifests[].platform | (.os + "/" + .architecture)] | index("linux/amd64") != null and index("linux/arm64") != null' /tmp/forgejo-manifest.json
+      - name: Verify anonymous mirror access
+        run: |
+          set -euo pipefail
+          regctl registry logout ghcr.io || true
+          for attempt in {1..12}; do
+            if [[ "$(regctl image digest "$TARGET_IMAGE" 2>/dev/null || true)" == "$FORGEJO_MANIFEST_DIGEST" ]]; then
+              echo "Verified anonymous pull access for $TARGET_IMAGE"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::$TARGET_IMAGE is not anonymously readable. Mark the GHCR package Public, then rerun the failed workflow."
+          exit 1
+      - name: Archive the corresponding Forgejo source
+        run: |
+          set -euo pipefail
+          mkdir -p forgejo-source
+          observed_commit="$(git ls-remote https://code.forgejo.org/forgejo/forgejo.git "refs/tags/v${FORGEJO_VERSION}")"
+          observed_commit="${observed_commit%%[[:space:]]*}"
+          if [[ "$observed_commit" != "$FORGEJO_COMMIT" ]]; then
+            echo "::error::Forgejo tag commit changed: expected $FORGEJO_COMMIT, got $observed_commit"
+            exit 1
+          fi
+          archive="forgejo-source/forgejo-${FORGEJO_VERSION}-source.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://code.forgejo.org/forgejo/forgejo/archive/v${FORGEJO_VERSION}.tar.gz" \
+            --output "$archive"
+          tar -tzf "$archive" > /tmp/forgejo-source-files.txt
+          grep -Eq '/(LICENSE|COPYING)$' /tmp/forgejo-source-files.txt
+          archive_sha256="$(sha256sum "$archive" | cut -d' ' -f1)"
+          {
+            echo "Forgejo ${FORGEJO_VERSION} complete corresponding source"
+            echo "Upstream: https://codeberg.org/forgejo/forgejo"
+            echo "Tag: v${FORGEJO_VERSION}"
+            echo "Commit: ${FORGEJO_COMMIT}"
+            echo "License: GPL-3.0-or-later (included in the source archive)"
+            echo "Distributed image: ${TARGET_IMAGE}@${FORGEJO_MANIFEST_DIGEST}"
+            echo "Source SHA-256: ${archive_sha256}"
+          } > "forgejo-source/forgejo-${FORGEJO_VERSION}-source.txt"
+          {
+            echo "### Forgejo redistribution"
+            echo "Cocola mirrors the unmodified Forgejo ${FORGEJO_VERSION} image at ${FORGEJO_MANIFEST_DIGEST}."
+            echo "The complete corresponding source is attached to the Cocola release."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: forgejo-source
+          path: forgejo-source/
+          if-no-files-found: error
+
   images:
     name: image / ${{ matrix.name }}
     needs: [ci, validate]
@@ -243,7 +340,7 @@ jobs:
 
   cli:
     name: cli binaries
-    needs: promote-images
+    needs: [promote-images, forgejo-image]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -255,6 +352,10 @@ jobs:
         with:
           go-version: "1.24"
           cache-dependency-path: apps/cli/go.sum
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: forgejo-source
+          path: release-assets/forgejo-source
       - name: Test CLI
         working-directory: apps/cli
         run: go test ./...
@@ -265,3 +366,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Attach Forgejo corresponding source to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" release-assets/forgejo-source/*

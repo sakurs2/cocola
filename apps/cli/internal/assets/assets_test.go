@@ -8,7 +8,7 @@ import (
 func TestComposeDeploysInternalOpenVikingWithoutHostPort(t *testing.T) {
 	for _, required := range [][]byte{
 		[]byte("  openviking:"),
-		[]byte("ghcr.io/volcengine/openviking:v0.4.12@sha256:"),
+		[]byte("${COCOLA_OPENVIKING_IMAGE}"),
 		[]byte("COCOLA_OPENVIKING_ROOT_API_KEY"),
 		[]byte("COCOLA_MEMORY_LLM_SERVICE_TOKEN"),
 		[]byte(`"memory":{"version":"v2"}`),
@@ -41,6 +41,33 @@ func TestComposeDeploysInternalOpenVikingWithoutHostPort(t *testing.T) {
 	}
 	if !bytes.Contains(Compose, []byte("mc rm --recursive --force local/cocola/openviking-v2/")) {
 		t.Fatal("production upgrade must remove the incompatible Memory V2 preview prefix")
+	}
+}
+
+func TestComposeUsesOnlyExplicitCLIResolvedImageVariables(t *testing.T) {
+	for _, required := range [][]byte{
+		[]byte("${COCOLA_REDIS_IMAGE}"),
+		[]byte("${COCOLA_POSTGRES_IMAGE}"),
+		[]byte("${COCOLA_FORGEJO_IMAGE}"),
+		[]byte("${COCOLA_MINIO_IMAGE}"),
+		[]byte("${COCOLA_MINIO_MC_IMAGE}"),
+		[]byte("${COCOLA_OPENVIKING_IMAGE}"),
+		[]byte("${COCOLA_OPENSANDBOX_IMAGE}"),
+		[]byte("${COCOLA_OPENSANDBOX_EXECD_IMAGE}"),
+		[]byte("${COCOLA_OPENSANDBOX_EGRESS_IMAGE}"),
+	} {
+		if !bytes.Contains(Compose, required) {
+			t.Fatalf("production compose is missing image variable %q", required)
+		}
+	}
+	for _, forbidden := range [][]byte{
+		[]byte("image: redis:"), []byte("image: postgres:"), []byte("image: codeberg.org/"),
+		[]byte("image: minio/"), []byte("image: ghcr.io/volcengine/"),
+		[]byte("image: opensandbox/"),
+	} {
+		if bytes.Contains(Compose, forbidden) {
+			t.Fatalf("production compose still contains implicit or fixed pull reference %q", forbidden)
+		}
 	}
 }
 

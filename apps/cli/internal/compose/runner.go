@@ -26,7 +26,7 @@ const MinimumComposeVersion = "2.23.1"
 
 const (
 	managedOpenSandboxExecdImage  = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
-	managedOpenSandboxEgressImage = "opensandbox/egress:v1.1.2"
+	managedOpenSandboxEgressImage = "docker.io/opensandbox/egress:v1.1.2"
 )
 
 var ErrPostgresCredentialsMismatch = errors.New("the existing PostgreSQL volume does not match the current Cocola configuration")
@@ -331,6 +331,9 @@ func (r *Runner) MissingImages(ctx context.Context) ([]string, error) {
 func (r *Runner) runtimeImages() []string {
 	if !r.State.ManagedOpenSandbox {
 		return nil
+	}
+	if len(r.State.ManagedRuntimeImages) > 0 {
+		return append([]string(nil), r.State.ManagedRuntimeImages...)
 	}
 	return []string{
 		r.State.SandboxImage,

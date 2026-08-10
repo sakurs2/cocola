@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,10 +19,20 @@ const backupDirectoryName = "backups"
 var environmentKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type UpgradeResult struct {
-	Updated     bool   `json:"updated"`
-	FromVersion string `json:"from_version"`
-	ToVersion   string `json:"to_version"`
-	BackupDir   string `json:"backup_dir,omitempty"`
+	Updated           bool        `json:"updated"`
+	FromVersion       string      `json:"from_version"`
+	ToVersion         string      `json:"to_version"`
+	FromImageSource   ImageSource `json:"from_image_source"`
+	ToImageSource     ImageSource `json:"to_image_source"`
+	FromImageRegistry string      `json:"from_image_registry"`
+	ToImageRegistry   string      `json:"to_image_registry"`
+	BackupDir         string      `json:"backup_dir,omitempty"`
+}
+
+type UpgradeOptions struct {
+	Version     string
+	ImageSource *ImageSource
+	Registry    *string
 }
 
 type backupManifest struct {
@@ -35,13 +46,24 @@ type environmentDocument struct {
 }
 
 // PrepareUpgrade migrates CLI-owned deployment files without changing running
-// containers. It preserves every existing environment value except the target
-// Cocola image version, adds only newly required defaults, and records an exact
-// backup for start-time rollback.
+// containers. It preserves operator-owned values, replaces only CLI-managed
+// deployment and image values, and records an exact backup for start-time rollback.
 func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeResult, error) {
-	targetVersion = strings.TrimSpace(targetVersion)
+	return PrepareUpgradeWithOptions(paths, UpgradeOptions{Version: targetVersion}, compose)
+}
+
+func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []byte) (UpgradeResult, error) {
+	targetVersion := strings.TrimSpace(options.Version)
 	if !validImagePart(targetVersion) {
 		return UpgradeResult{}, errors.New("target version contains characters that are invalid in an image tag")
+	}
+	if options.ImageSource != nil && !options.ImageSource.Valid() {
+		return UpgradeResult{}, errors.New("image source must be cn-mirror or direct")
+	}
+	if options.Registry != nil {
+		if err := validateImageRegistry(*options.Registry); err != nil {
+			return UpgradeResult{}, err
+		}
 	}
 	state, err := Load(paths)
 	if err != nil {
@@ -50,10 +72,16 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	targetRevision := deploymentRevision(compose)
 	if state.PendingUpgrade != nil {
 		pending := state.PendingUpgrade
-		if pending.ToVersion == targetVersion && pending.ToRevision == targetRevision {
+		requestedSourceMatches := options.ImageSource == nil || pending.ToImageSource == *options.ImageSource
+		requestedRegistryMatches := options.Registry == nil || pending.ToImageRegistry == strings.TrimSuffix(strings.TrimSpace(*options.Registry), "/")
+		if state.ConfigSchemaVersion == CurrentSchemaVersion && pending.ToImageSource.Valid() &&
+			pending.ToImageRegistry != "" && pending.ToVersion == targetVersion && pending.ToRevision == targetRevision &&
+			requestedSourceMatches && requestedRegistryMatches {
 			return UpgradeResult{
 				Updated: true, FromVersion: pending.FromVersion,
-				ToVersion: pending.ToVersion, BackupDir: pending.BackupDir,
+				ToVersion: pending.ToVersion, FromImageSource: pending.FromImageSource,
+				ToImageSource: pending.ToImageSource, FromImageRegistry: pending.FromImageRegistry,
+				ToImageRegistry: pending.ToImageRegistry, BackupDir: pending.BackupDir,
 			}, nil
 		}
 		if _, err := RollbackUpgrade(paths); err != nil {
@@ -69,7 +97,7 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	if err != nil {
 		return UpgradeResult{}, fmt.Errorf("read deployment environment: %w", err)
 	}
-	migratedEnvironment, derived, err := migrateEnvironment(paths, state, targetVersion, environment)
+	migratedEnvironment, derived, err := migrateEnvironmentWithOptions(paths, state, targetVersion, options.ImageSource, options.Registry, environment)
 	if err != nil {
 		return UpgradeResult{}, err
 	}
@@ -93,9 +121,15 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 
 	needsUpdate := state.ConfigSchemaVersion != CurrentSchemaVersion ||
 		state.Version != targetVersion || state.DeploymentRevision != targetRevision ||
+		state.ImageSource != derived.imageSource || state.SandboxImage != derived.images.SandboxRuntime ||
+		!slices.Equal(state.ManagedRuntimeImages, derived.images.ManagedRuntimeImages()) ||
 		!bytes.Equal(environment, migratedEnvironment) || !fileEquals(paths.Compose, compose)
 	if !needsUpdate {
-		return UpgradeResult{FromVersion: fromVersion, ToVersion: targetVersion}, nil
+		return UpgradeResult{
+			FromVersion: fromVersion, ToVersion: targetVersion,
+			FromImageSource: derived.currentImageSource, ToImageSource: derived.imageSource,
+			FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
+		}, nil
 	}
 
 	backupDir, err := createBackup(paths, fromVersion, targetVersion)
@@ -108,7 +142,9 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	state.DeploymentRevision = targetRevision
 	state.LastSuccessfulRevision = fromRevision
 	state.ManagedOpenSandbox = derived.managedOpenSandbox
-	state.SandboxImage = derived.registry + "/cocola-sandbox-runtime:" + targetVersion
+	state.ImageSource = derived.imageSource
+	state.SandboxImage = derived.images.SandboxRuntime
+	state.ManagedRuntimeImages = derived.images.ManagedRuntimeImages()
 	state.PublicURL = derived.publicURL
 	state.WebPort = derived.webPort
 	state.GatewayPort = derived.gatewayPort
@@ -117,6 +153,8 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	state.PendingUpgrade = &PendingUpgrade{
 		FromVersion: fromVersion, ToVersion: targetVersion,
 		FromRevision: fromRevision, ToRevision: targetRevision,
+		FromImageSource: derived.currentImageSource, ToImageSource: derived.imageSource,
+		FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
 		BackupDir: backupDir, PreparedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -128,7 +166,10 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 		return UpgradeResult{}, writeErr
 	}
 	return UpgradeResult{
-		Updated: true, FromVersion: fromVersion, ToVersion: targetVersion, BackupDir: backupDir,
+		Updated: true, FromVersion: fromVersion, ToVersion: targetVersion,
+		FromImageSource: derived.currentImageSource, ToImageSource: derived.imageSource,
+		FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
+		BackupDir: backupDir,
 	}, nil
 }
 
@@ -324,7 +365,10 @@ func safePathPart(value string) string {
 
 type derivedEnvironment struct {
 	version            string
-	registry           string
+	currentImageSource ImageSource
+	currentRegistry    string
+	imageSource        ImageSource
+	images             ImageReferences
 	publicURL          string
 	webPort            int
 	gatewayPort        int
@@ -334,6 +378,17 @@ type derivedEnvironment struct {
 }
 
 func migrateEnvironment(paths Paths, state State, targetVersion string, data []byte) ([]byte, derivedEnvironment, error) {
+	return migrateEnvironmentWithOptions(paths, state, targetVersion, nil, nil, data)
+}
+
+func migrateEnvironmentWithOptions(
+	paths Paths,
+	state State,
+	targetVersion string,
+	requestedSource *ImageSource,
+	requestedRegistry *string,
+	data []byte,
+) ([]byte, derivedEnvironment, error) {
 	document, err := parseEnvironment(data)
 	if err != nil {
 		return nil, derivedEnvironment{}, err
@@ -358,9 +413,31 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 	if err != nil {
 		return nil, derivedEnvironment{}, err
 	}
-	registry := strings.TrimSuffix(environmentValue(document, "COCOLA_IMAGE_REGISTRY", DefaultRegistry), "/")
-	if registry == "" {
+	currentSource := state.ImageSource
+	if !currentSource.Valid() {
+		currentSource = LegacyImageSource
+	}
+	imageSource := currentSource
+	if requestedSource != nil {
+		if !requestedSource.Valid() {
+			return nil, derivedEnvironment{}, errors.New("image source must be cn-mirror or direct")
+		}
+		imageSource = *requestedSource
+	}
+	currentRegistry := strings.TrimSuffix(environmentValue(document, "COCOLA_IMAGE_REGISTRY", currentSource.Registry()), "/")
+	if currentRegistry == "" {
 		return nil, derivedEnvironment{}, errors.New("COCOLA_IMAGE_REGISTRY cannot be empty")
+	}
+	registry := currentRegistry
+	if requestedRegistry != nil {
+		registry = strings.TrimSuffix(strings.TrimSpace(*requestedRegistry), "/")
+	} else if imageSource != currentSource &&
+		(currentRegistry == DefaultRegistry || currentRegistry == CNMirrorRegistry) {
+		registry = imageSource.Registry()
+	}
+	images, err := ResolveImageReferences(imageSource, targetVersion, registry)
+	if err != nil {
+		return nil, derivedEnvironment{}, err
 	}
 	managed := state.ManagedOpenSandbox
 	if value, ok := document.values["COCOLA_OPENSANDBOX_MANAGED"]; ok {
@@ -418,7 +495,17 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 	}
 	values := [][2]string{
 		{"COCOLA_VERSION", targetVersion},
-		{"COCOLA_IMAGE_REGISTRY", registry},
+		{"COCOLA_IMAGE_SOURCE", string(imageSource)},
+		{"COCOLA_IMAGE_REGISTRY", images.Registry},
+		{"COCOLA_REDIS_IMAGE", images.Redis},
+		{"COCOLA_POSTGRES_IMAGE", images.Postgres},
+		{"COCOLA_FORGEJO_IMAGE", images.Forgejo},
+		{"COCOLA_MINIO_IMAGE", images.MinIO},
+		{"COCOLA_MINIO_MC_IMAGE", images.MinIOClient},
+		{"COCOLA_OPENVIKING_IMAGE", images.OpenViking},
+		{"COCOLA_OPENSANDBOX_IMAGE", images.OpenSandboxServer},
+		{"COCOLA_OPENSANDBOX_EXECD_IMAGE", images.OpenSandboxExecd},
+		{"COCOLA_OPENSANDBOX_EGRESS_IMAGE", images.OpenSandboxEgress},
 		{"COCOLA_HOME", paths.Home},
 		{"COCOLA_SANDBOX_ROOT", paths.SandboxRoot},
 		{"COCOLA_WEB_HOST", "0.0.0.0"},
@@ -468,18 +555,32 @@ func migrateEnvironment(paths Paths, state State, targetVersion string, data []b
 		{"COCOLA_BOOTSTRAP_ADMIN_RESET", "false"},
 	}
 	for _, item := range values {
-		if item[0] == "COCOLA_VERSION" || item[0] == "COCOLA_HOME" || item[0] == "COCOLA_SANDBOX_ROOT" {
+		if migrationReplacesValue(item[0]) {
 			document.set(item[0], item[1])
 		} else {
 			document.ensure(item[0], item[1])
 		}
 	}
 	return document.render(), derivedEnvironment{
-		version: targetVersion, registry: registry, publicURL: publicURL,
+		version: targetVersion, currentImageSource: currentSource, currentRegistry: currentRegistry,
+		imageSource: imageSource, images: images, publicURL: publicURL,
 		webPort: webPort, gatewayPort: gatewayPort, llmPort: llmPort,
 		internalSCM:        internalSCM,
 		managedOpenSandbox: managed,
 	}, nil
+}
+
+func migrationReplacesValue(key string) bool {
+	switch key {
+	case "COCOLA_VERSION", "COCOLA_HOME", "COCOLA_SANDBOX_ROOT",
+		"COCOLA_IMAGE_SOURCE", "COCOLA_IMAGE_REGISTRY", "COCOLA_REDIS_IMAGE",
+		"COCOLA_POSTGRES_IMAGE", "COCOLA_FORGEJO_IMAGE", "COCOLA_MINIO_IMAGE",
+		"COCOLA_MINIO_MC_IMAGE", "COCOLA_OPENVIKING_IMAGE", "COCOLA_OPENSANDBOX_IMAGE",
+		"COCOLA_OPENSANDBOX_EXECD_IMAGE", "COCOLA_OPENSANDBOX_EGRESS_IMAGE":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseEnvironment(data []byte) (*environmentDocument, error) {

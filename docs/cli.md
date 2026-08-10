@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
 脚本负责安装或更新 CLI：识别系统架构，从 GitHub Release 下载对应版本，校验
 `checksums.txt`，再原子写入 `~/.local/bin/cocola`。首次安装会启动默认的交互式配置向导；
 已有部署则跳过向导并准备配置迁移。首次向导会
-展示 Cocola 艺术字 Logo，并依次配置管理员账号和服务端口；安全密钥
+展示 Cocola 艺术字 Logo，并依次配置镜像下载源、管理员账号和服务端口；安全密钥
 会自动生成。所有项目都有默认值，标准安装可以直接逐步确认。首次使用前请确保
 `~/.local/bin` 在 `PATH` 中。
 
@@ -39,12 +39,23 @@ cocola doctor                  检查服务、磁盘、数据卷、镜像和安�
 cocola version                 查看 CLI 构建版本
 ```
 
-`install` 默认进入英文交互式向导，主要配置管理员账号和 Web/Gateway/LLM/Internal SCM 端口；内部认证、
+`install` 默认进入英文交互式向导，主要配置镜像下载源、管理员账号和 Web/Gateway/LLM/Internal SCM 端口；内部认证、
 加密、数据库、对象存储和 SCM 密钥会自动生成并写入仅当前用户可读的配置文件。Web 默认监听
 `0.0.0.0`，浏览器可直接使用 `http://<server-ip>:<web-port>`，Workspace WebSocket 会按当前
 请求 Host 做同源校验，不需要额外配置。`--public-url https://cocola.example.com` 保留给会改写
 Host 的反向代理，以及 GitHub/飞书等需要生成固定外部回调或跳转地址的集成。
-镜像 Registry/版本以及外部 OpenSandbox 等高级场景仍可使用命令行参数覆盖。使用外部
+新安装默认选中 `Mainland China acceleration`，也可以选择 `Direct download`。CLI 会为 Cocola、
+Forgejo、OpenViking 和 Docker Hub 依赖生成完整镜像引用，不修改 Docker daemon 配置，也不会在
+代理失败时静默切换供应链来源。可随时显式切换并通过下一次启动提交：
+
+```bash
+cocola install --image-source cn-mirror  # 中国大陆加速（新安装默认）
+cocola install --image-source direct     # 直连 GHCR 和 Docker Hub
+cocola start
+```
+
+已有安装首次迁移时保持 `direct`，避免未经同意改变镜像来源。`--registry` 继续作为只覆盖 Cocola
+自有镜像仓库的高级选项；第三方镜像仍由所选下载源确定。镜像版本以及外部 OpenSandbox 等高级场景仍可使用命令行参数覆盖。使用外部
 OpenSandbox 时，必须同时提供从远端 sandbox 可达的 LLM Gateway URL 和 Internal SCM URL
 （`--sandbox-internal-scm-url`），CLI 会拒绝
 会产生失联 sandbox 的不完整配置。
@@ -73,12 +84,14 @@ OpenSandbox 时，必须同时提供从远端 sandbox 可达的 LLM Gateway URL 
 
 `cocola start` 是唯一启动入口：它会检查 Docker、Compose、部署配置、首次启动端口和基本
 磁盘空间。首次启动或待应用升级时会拉取 Compose 服务镜像，以及 Managed OpenSandbox 使用的
-Sandbox Runtime、execd 和 egress 镜像；Registry 不可用但所有目标镜像已缓存时继续启动。普通
+Sandbox Runtime、execd 和 egress 镜像；拉取前会显示当前下载源。下载源不可用但所有目标镜像已缓存时继续启动；
+缓存不完整则明确失败，中国加速源会给出切换到 `direct` 的命令，不会自动回退。普通
 `stop` 后恢复不会强制访问 Registry。首次启动发现已有 PostgreSQL 数据卷时，会先验证当前配置
 能否通过密码认证：兼容的中途安装继续启动，不兼容的遗留卷会停止并给出保留或清理数据的明确
 指引，CLI 不会自动删除数据。随后通过 Compose `up --wait` 创建缺失容器、重建配置或镜像发生
 变化的服务、恢复已停止容器，并等待包含 Sandbox Manager、Agent Runtime 和 Web 在内的健康
-检查通过。成功页会显示 Web、Admin 和模型配置入口；失败页会展示当前容器状态及诊断命令。
+检查通过。成功页会显示当前版本、镜像下载源、Web、Admin 和模型配置入口；升级成功时同时显示
+`Before version` 与 `Current version`。失败页会展示当前容器状态及诊断命令。
 
 `install`、`start` 和 `stop` 在同一个安装目录上串行执行。如果另一个变更操作正在运行，CLI
 会显示其命令、PID 和开始时间并立即退出；`status`、`logs` 和只读的 `doctor` 仍可用于观察。
@@ -97,7 +110,9 @@ cocola start
 
 检测到已有 `config.env` 后，`install` 会跳过首次向导，根据独立的配置 Schema 执行迁移。
 管理员账号、端口、Secret、已知配置值和额外环境变量都会保留；CLI 管理的 Compose 和
-目标镜像版本会更新。修改前的文件保存在
+目标镜像版本会更新。同版本执行 `cocola install --image-source ...` 也会准备一次可回滚的下载源
+切换。准备升级只显示 `Before version` 与 `New version`，直到 `start` 健康检查成功后才将新版本
+称为 `Current version`。修改前的文件保存在
 `~/.cocola/backups/upgrade-<time>-<from>-to-<to>/`。
 
 应用升级时，如果当前安装已有 PostgreSQL 数据卷，`start` 会先生成 owner-only 的
@@ -126,7 +141,8 @@ cd apps/cli && go test ./...
 ```
 
 推送版本 tag 后，Release workflow 会先校验版本，再构建 linux/darwin、amd64/arm64
-CLI 以及同版本全套服务镜像；镜像成功后才发布 CLI Release。正式版本必须使用
+CLI 以及同版本全套服务镜像；同时将固定 digest 的未修改 Forgejo 多架构镜像同步到 Cocola GHCR，
+验证匿名读取，并把对应完整源码和许可证作为 Release 资产发布；这些步骤成功后才发布 CLI Release。正式版本必须使用
 `vMAJOR.MINOR.PATCH`（如 `v2.0.0`）并高于历史最新正式版本；预发布版本使用
 `vMAJOR.MINOR.PATCH-prerelease`（如 `v2.0.0-rc.1`）并按顺序递增。非法、回退或已经
 发布过的版本会在任何镜像构建前失败。正式版本同时更新 `latest` 镜像，源码构建的开发版

@@ -13,6 +13,7 @@ import (
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
+	"github.com/cocola-project/cocola/apps/cli/internal/ui"
 )
 
 func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
@@ -46,6 +47,40 @@ func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
 	if err == nil || !strings.Contains(errors.String(), "Docker Compose 2.22.0 is too old") ||
 		!strings.Contains(errors.String(), "Upgrade Docker Compose") {
 		t.Fatalf("start error = %v, stderr = %q", err, errors.String())
+	}
+}
+
+func TestStartSummaryUsesCommittedVersionAndSourceSemantics(t *testing.T) {
+	state := config.State{
+		Version: "v0.2.0", ImageSource: config.ImageSourceDirect,
+		PublicURL: "http://localhost:3000", WebPort: 3000,
+	}
+	pending := &config.PendingUpgrade{
+		FromVersion: "v0.1.0", ToVersion: "v0.2.0",
+		FromImageSource: config.ImageSourceCNMirror, ToImageSource: config.ImageSourceDirect,
+		FromImageRegistry: config.CNMirrorRegistry, ToImageRegistry: config.DefaultRegistry,
+	}
+	var output bytes.Buffer
+	printStartSummary(ui.Printer{Out: &output, Err: &output}, state, pending, "")
+	text := output.String()
+	for _, expected := range []string{
+		"Before version", "v0.1.0", "Current version", "v0.2.0",
+		"Before image source", "Mainland China acceleration", "Image source", "Direct download",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("start summary missing %q: %q", expected, text)
+		}
+	}
+	if strings.Contains(text, "Target version") || strings.Contains(text, "New version") {
+		t.Fatalf("successful start still uses preparation copy: %q", text)
+	}
+
+	output.Reset()
+	pending.FromVersion = state.Version
+	pending.ToVersion = state.Version
+	printStartSummary(ui.Printer{Out: &output, Err: &output}, state, pending, "")
+	if strings.Contains(output.String(), "Before version") {
+		t.Fatalf("same-version source switch duplicated the version: %q", output.String())
 	}
 }
 
@@ -100,7 +135,9 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 		t.Fatalf("missing cache fallback warning: %q", errors.String())
 	}
 	if !strings.Contains(output.String(), "Cocola is ready") ||
-		!strings.Contains(output.String(), "/admin/models") {
+		!strings.Contains(output.String(), "/admin/models") ||
+		!strings.Contains(output.String(), "Current version") ||
+		!strings.Contains(output.String(), "Mainland China acceleration") {
 		t.Fatalf("start summary = %q", output.String())
 	}
 	paths, err := config.ResolvePaths(home)
@@ -133,6 +170,61 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 	}
 	if strings.Contains(string(logged), " pull") {
 		t.Fatalf("resume unexpectedly pulled images: %s", logged)
+	}
+}
+
+func TestMirrorPullFailureDoesNotFallBackToDirectSource(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0",
+		"--admin-password", "test-password", "--web-port", "33401",
+		"--gateway-port", "33402", "--llm-port", "33403", "--internal-scm-port", "33404",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	logPath := filepath.Join(directory, "docker.log")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$DOCKER_ARGS_LOG"
+if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
+if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "image" ]; then exit 1; fi
+case "$*" in
+  *'config --images'*) printf '%s\n' 'docker.nju.edu.cn/library/redis:7.4.10-alpine3.21' 'ghcr.nju.edu.cn/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
+  *' config --quiet'*) exit 0 ;;
+  *' pull') exit 1 ;;
+  *' ps --format json'*) printf '[]\n'; exit 0 ;;
+  *' ps -aq'*) exit 0 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
+	t.Setenv("DOCKER_ARGS_LOG", logPath)
+	output.Reset()
+	stderr.Reset()
+	err := Execute(context.Background(), []string{"start", "--home", home}, IO{
+		In: &bytes.Buffer{}, Out: &output, Err: &stderr,
+	})
+	if err == nil {
+		t.Fatal("mirror pull failure unexpectedly succeeded")
+	}
+	combined := output.String() + stderr.String()
+	if !strings.Contains(combined, "cocola install --image-source direct") ||
+		!strings.Contains(combined, "cocola start") {
+		t.Fatalf("mirror failure is not actionable: %q", combined)
+	}
+	logged, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(logged), "docker.io") || strings.Contains(string(logged), "ghcr.io") {
+		t.Fatalf("mirror failure silently attempted the direct source:\n%s", logged)
 	}
 }
 
