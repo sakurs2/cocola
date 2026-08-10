@@ -13,7 +13,10 @@ const agentPageSource = readFileSync(
   "utf8",
 );
 const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
-const demoStylesSource = readFileSync(new URL("../app/cocola-web-demo.css", import.meta.url), "utf8");
+const demoStylesSource = readFileSync(
+  new URL("../app/cocola-web-demo.css", import.meta.url),
+  "utf8",
+);
 const chatPageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 const threadSource = readFileSync(
   new URL("../components/assistant-ui/thread.tsx", import.meta.url),
@@ -60,23 +63,24 @@ test("Agent Knowledge can select Cocola Wiki files without requiring a Skill", (
   assert.match(capabilitiesSource, /type: \"cocola_wiki\"/);
   assert.match(capabilitiesSource, /node_id: node\.id/);
   assert.match(capabilitiesSource, /cocola_wiki: \[\]/);
-  assert.match(
-    capabilitiesSource,
-    /Saved changes apply from the next[\s\S]*message/,
-  );
+  assert.match(capabilitiesSource, /Saved changes apply from the next[\s\S]*message/);
 });
 
 test("Agent Knowledge accepts Lark Office links and keeps feedback inside its section", () => {
   assert.match(capabilitiesSource, /"feishu\.cn", "larkoffice\.com", "larksuite\.com"/);
-  assert.match(capabilitiesSource, /className="cocola-web-page-primary-action" onPress=\{addKnowledge\}/);
+  assert.match(
+    capabilitiesSource,
+    /className="cocola-web-page-primary-action" onPress=\{addKnowledge\}/,
+  );
   assert.match(capabilitiesSource, /knowledgeNotice \? \(/);
   assert.doesNotMatch(capabilitiesSource, /capabilityMessage/);
   assert.doesNotMatch(capabilitiesSource, /Check access|Not checked/);
   assert.doesNotMatch(agentPageSource, /knowledge\/check|checkKnowledgeAccess/);
 });
 
-test("Agent selection hides global starters while global starters only fill the composer", () => {
-  assert.match(threadSource, /visiblePromptStarters = selectedAgent \? \[\] : PROMPT_STARTERS/);
+test("Agent selection keeps global starters available while starters only fill the composer", () => {
+  assert.match(threadSource, /\{PROMPT_STARTERS\.map\(\(starter\) => \{/);
+  assert.doesNotMatch(threadSource, /selectedAgent \? \[\] : PROMPT_STARTERS/);
   assert.doesNotMatch(threadSource, /suggested_prompts/);
   assert.match(threadSource, /composer\.setText\(starter\.prompt\)/);
   assert.doesNotMatch(threadSource, /<ThreadPrimitive\.Suggestion/);
@@ -103,7 +107,10 @@ test("Agent list, create dialog, and editor use a flat primary button color", ()
   const cyanTheme = globalsSource.match(/\.cocola-user-ui \.user-theme-cyan,[\s\S]*?\n\}/)?.[0];
   assert.ok(cyanTheme, "cyan user theme not found");
   assert.match(cyanTheme, /--accent:/);
-  assert.match(demoStylesSource, /\.cocola-web-page-primary-action,[\s\S]*?color: white !important/);
+  assert.match(
+    demoStylesSource,
+    /\.cocola-web-page-primary-action,[\s\S]*?color: white !important/,
+  );
   assert.match(agentListSource, /<WorkspacePageAction/);
   assert.match(agentPageSource, /className="cocola-web-page-primary-action"/);
 });

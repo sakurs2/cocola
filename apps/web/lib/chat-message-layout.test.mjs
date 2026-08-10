@@ -122,7 +122,7 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.doesNotMatch(threadSource, /Auto · choose for me/);
   assert.match(threadSource, /mt-7 w-full max-w-3xl/);
   assert.match(threadSource, /mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2/);
-  assert.match(threadSource, /\{visiblePromptStarters\.map\(\(starter\) => \{/);
+  assert.match(threadSource, /\{PROMPT_STARTERS\.map\(\(starter\) => \{/);
   assert.match(threadSource, /"cocola-web-composer w-full"/);
   assert.match(threadSource, /hasComposerHeader && "cocola-web-composer--with-header"/);
   assert.match(
