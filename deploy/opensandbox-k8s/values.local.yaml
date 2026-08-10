@@ -62,5 +62,5 @@ opensandbox-server:
     batchsandbox_template_file = "/etc/opensandbox/cocola.batchsandbox-template.yaml"
 
     [egress]
-    image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.1.2"
+    image = "ghcr.io/sakurs2/cocola-opensandbox-egress:v1.1.2@sha256:c3944a6dd060638c89ef9526ddea34f98192b987e13e3b7fe5e8b4606126b3cf"
     mode = "dns+nft"

@@ -24,11 +24,6 @@ import (
 // OpenSandbox configuration inside the Compose file.
 const MinimumComposeVersion = "2.23.1"
 
-const (
-	managedOpenSandboxExecdImage  = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19"
-	managedOpenSandboxEgressImage = "docker.io/opensandbox/egress:v1.1.2"
-)
-
 var ErrPostgresCredentialsMismatch = errors.New("the existing PostgreSQL volume does not match the current Cocola configuration")
 
 var composeVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
@@ -335,11 +330,7 @@ func (r *Runner) runtimeImages() []string {
 	if len(r.State.ManagedRuntimeImages) > 0 {
 		return append([]string(nil), r.State.ManagedRuntimeImages...)
 	}
-	return []string{
-		r.State.SandboxImage,
-		managedOpenSandboxExecdImage,
-		managedOpenSandboxEgressImage,
-	}
+	return []string{r.State.SandboxImage}
 }
 
 func (r *Runner) ServiceRunning(ctx context.Context, service string) (bool, error) {

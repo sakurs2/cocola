@@ -67,8 +67,8 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
-镜像默认从 Cocola 发布仓库及依赖项目的上游 Registry 直接下载。Cocola 不会修改 Docker daemon
-配置，也不会在下载失败时静默切换到公共代理。
+除 OpenSandbox Execd 的阿里云官方镜像外，冷启动镜像统一通过 `ghcr.io` 下载。Cocola 不会修改
+Docker daemon 配置，也不会在下载失败时静默切换公共代理。
 
 安装器会下载对应平台的 CLI、校验 SHA-256，并把部署配置写入 `~/.cocola`。Web 默认监听
 所有网卡，可直接通过 `http://<server-ip>:3000` 访问，无需额外填写访问地址。请保存安装器
@@ -79,6 +79,15 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
 ```bash
 cocola start
 ```
+
+中国大陆网络可在首次启动时显式使用兼容的 GHCR 代理；成功健康启动后会记住该端点：
+
+```bash
+cocola start --ghcr-endpoint ghcr.nju.edu.cn
+```
+
+切回官方端点使用 `cocola start --ghcr-endpoint ghcr.io`。代理失败会恢复原部署配置，不会隐式
+回退或改变自定义 Cocola Registry。
 
 首次启动会检查 Docker、Compose、端口和磁盘空间，提前拉取服务与沙箱运行时的固定版本镜像，
 并等待 Sandbox Manager、Agent Runtime 和 Web 等服务健康。正常停止后恢复会直接复用本地

@@ -27,12 +27,15 @@ type UpgradeResult struct {
 	ToVersion         string `json:"to_version"`
 	FromImageRegistry string `json:"from_image_registry"`
 	ToImageRegistry   string `json:"to_image_registry"`
+	FromGHCREndpoint  string `json:"from_ghcr_endpoint"`
+	ToGHCREndpoint    string `json:"to_ghcr_endpoint"`
 	BackupDir         string `json:"backup_dir,omitempty"`
 }
 
 type UpgradeOptions struct {
-	Version  string
-	Registry *string
+	Version      string
+	Registry     *string
+	GHCREndpoint *string
 }
 
 type backupManifest struct {
@@ -52,6 +55,61 @@ func PrepareUpgrade(paths Paths, targetVersion string, compose []byte) (UpgradeR
 	return PrepareUpgradeWithOptions(paths, UpgradeOptions{Version: targetVersion}, compose)
 }
 
+// PrepareGHCREndpointChange reuses the deployment update transaction without
+// changing the installed version or Compose topology. If a version upgrade is
+// already pending, its target registry and Compose file remain part of the same
+// candidate deployment.
+func PrepareGHCREndpointChange(paths Paths, requestedEndpoint string) (UpgradeResult, error) {
+	endpoint, err := NormalizeGHCREndpoint(requestedEndpoint)
+	if err != nil {
+		return UpgradeResult{}, err
+	}
+	state, err := Load(paths)
+	if err != nil {
+		return UpgradeResult{}, err
+	}
+	compose, err := os.ReadFile(paths.Compose)
+	if err != nil {
+		return UpgradeResult{}, fmt.Errorf("read deployment Compose file: %w", err)
+	}
+	options := UpgradeOptions{Version: state.Version, GHCREndpoint: &endpoint}
+	if pending := state.PendingUpgrade; pending != nil && pending.ToImageRegistry != "" {
+		pendingEndpoint, normalizeErr := NormalizeGHCREndpoint(pending.ToGHCREndpoint)
+		if normalizeErr != nil || pending.ToImageRegistry != defaultCocolaRegistry(pendingEndpoint) {
+			registry := pending.ToImageRegistry
+			options.Registry = &registry
+		}
+	}
+	return PrepareUpgradeWithOptions(paths, options, compose)
+}
+
+// PrepareLastSuccessfulGHCREndpoint removes an interrupted endpoint change
+// from the candidate deployment while preserving any pending version or
+// Compose update. A start without --ghcr-endpoint therefore always uses the
+// last endpoint that completed health checks.
+func PrepareLastSuccessfulGHCREndpoint(paths Paths) (UpgradeResult, error) {
+	state, err := Load(paths)
+	if err != nil {
+		return UpgradeResult{}, err
+	}
+	pending := state.PendingUpgrade
+	if pending == nil {
+		return UpgradeResult{}, nil
+	}
+	committedEndpoint, err := NormalizeGHCREndpoint(state.GHCREndpoint)
+	if err != nil {
+		return UpgradeResult{}, fmt.Errorf("stored GHCR endpoint: %w", err)
+	}
+	candidateEndpoint, err := NormalizeGHCREndpoint(pending.ToGHCREndpoint)
+	if err != nil {
+		return UpgradeResult{}, fmt.Errorf("pending GHCR endpoint: %w", err)
+	}
+	if candidateEndpoint == committedEndpoint {
+		return UpgradeResult{}, nil
+	}
+	return PrepareGHCREndpointChange(paths, committedEndpoint)
+}
+
 func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []byte) (UpgradeResult, error) {
 	targetVersion := strings.TrimSpace(options.Version)
 	if !validImagePart(targetVersion) {
@@ -59,6 +117,14 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	}
 	if options.Registry != nil {
 		if err := validateImageRegistry(*options.Registry); err != nil {
+			return UpgradeResult{}, err
+		}
+	}
+	requestedEndpoint := ""
+	if options.GHCREndpoint != nil {
+		var err error
+		requestedEndpoint, err = NormalizeGHCREndpoint(*options.GHCREndpoint)
+		if err != nil {
 			return UpgradeResult{}, err
 		}
 	}
@@ -70,12 +136,16 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	if state.PendingUpgrade != nil {
 		pending := state.PendingUpgrade
 		requestedRegistryMatches := options.Registry == nil || pending.ToImageRegistry == strings.TrimSuffix(strings.TrimSpace(*options.Registry), "/")
+		requestedEndpointMatches := options.GHCREndpoint == nil || pending.ToGHCREndpoint == requestedEndpoint
 		if state.ConfigSchemaVersion == CurrentSchemaVersion && pending.ToImageRegistry != "" &&
-			pending.ToVersion == targetVersion && pending.ToRevision == targetRevision && requestedRegistryMatches {
+			pending.ToGHCREndpoint != "" && pending.ToVersion == targetVersion &&
+			pending.ToRevision == targetRevision && requestedRegistryMatches && requestedEndpointMatches {
 			return UpgradeResult{
 				Updated: true, FromVersion: pending.FromVersion,
 				ToVersion: pending.ToVersion, FromImageRegistry: pending.FromImageRegistry,
-				ToImageRegistry: pending.ToImageRegistry, BackupDir: pending.BackupDir,
+				ToImageRegistry:  pending.ToImageRegistry,
+				FromGHCREndpoint: pending.FromGHCREndpoint,
+				ToGHCREndpoint:   pending.ToGHCREndpoint, BackupDir: pending.BackupDir,
 			}, nil
 		}
 		if _, err := RollbackUpgrade(paths); err != nil {
@@ -91,7 +161,9 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	if err != nil {
 		return UpgradeResult{}, fmt.Errorf("read deployment environment: %w", err)
 	}
-	migratedEnvironment, derived, err := migrateEnvironmentWithOptions(paths, state, targetVersion, options.Registry, environment)
+	migratedEnvironment, derived, err := migrateEnvironmentWithOptions(
+		paths, state, targetVersion, options.Registry, options.GHCREndpoint, environment,
+	)
 	if err != nil {
 		return UpgradeResult{}, err
 	}
@@ -115,6 +187,7 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 
 	needsUpdate := state.ConfigSchemaVersion != CurrentSchemaVersion ||
 		state.Version != targetVersion || state.DeploymentRevision != targetRevision ||
+		state.GHCREndpoint != derived.ghcrEndpoint ||
 		state.SandboxImage != derived.images.SandboxRuntime ||
 		!slices.Equal(state.ManagedRuntimeImages, derived.images.ManagedRuntimeImages()) ||
 		!bytes.Equal(environment, migratedEnvironment) || !fileEquals(paths.Compose, compose)
@@ -122,6 +195,7 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 		return UpgradeResult{
 			FromVersion: fromVersion, ToVersion: targetVersion,
 			FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
+			FromGHCREndpoint: derived.currentGHCREndpoint, ToGHCREndpoint: derived.ghcrEndpoint,
 		}, nil
 	}
 
@@ -146,6 +220,7 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 		FromVersion: fromVersion, ToVersion: targetVersion,
 		FromRevision: fromRevision, ToRevision: targetRevision,
 		FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
+		FromGHCREndpoint: derived.currentGHCREndpoint, ToGHCREndpoint: derived.ghcrEndpoint,
 		BackupDir: backupDir, PreparedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -159,6 +234,7 @@ func PrepareUpgradeWithOptions(paths Paths, options UpgradeOptions, compose []by
 	return UpgradeResult{
 		Updated: true, FromVersion: fromVersion, ToVersion: targetVersion,
 		FromImageRegistry: derived.currentRegistry, ToImageRegistry: derived.images.Registry,
+		FromGHCREndpoint: derived.currentGHCREndpoint, ToGHCREndpoint: derived.ghcrEndpoint,
 		BackupDir: backupDir,
 	}, nil
 }
@@ -174,9 +250,14 @@ func MarkStarted(paths Paths) (State, error) {
 	if state.ConfigSchemaVersion != CurrentSchemaVersion {
 		return State{}, errors.New("deployment configuration must be migrated with cocola install before it can be started")
 	}
+	endpoint, err := EffectiveGHCREndpoint(state)
+	if err != nil {
+		return State{}, fmt.Errorf("commit GHCR endpoint: %w", err)
+	}
 	state.ConfigSchemaVersion = CurrentSchemaVersion
 	state.LastSuccessfulVersion = state.Version
 	state.LastSuccessfulRevision = state.DeploymentRevision
+	state.GHCREndpoint = endpoint
 	state.PendingUpgrade = nil
 	if err := writeState(paths, state); err != nil {
 		return State{}, err
@@ -354,19 +435,21 @@ func safePathPart(value string) string {
 }
 
 type derivedEnvironment struct {
-	version            string
-	currentRegistry    string
-	images             ImageReferences
-	publicURL          string
-	webPort            int
-	gatewayPort        int
-	llmPort            int
-	internalSCM        InternalSCMEndpoint
-	managedOpenSandbox bool
+	version             string
+	currentRegistry     string
+	currentGHCREndpoint string
+	ghcrEndpoint        string
+	images              ImageReferences
+	publicURL           string
+	webPort             int
+	gatewayPort         int
+	llmPort             int
+	internalSCM         InternalSCMEndpoint
+	managedOpenSandbox  bool
 }
 
 func migrateEnvironment(paths Paths, state State, targetVersion string, data []byte) ([]byte, derivedEnvironment, error) {
-	return migrateEnvironmentWithOptions(paths, state, targetVersion, nil, data)
+	return migrateEnvironmentWithOptions(paths, state, targetVersion, nil, nil, data)
 }
 
 func migrateEnvironmentWithOptions(
@@ -374,6 +457,7 @@ func migrateEnvironmentWithOptions(
 	state State,
 	targetVersion string,
 	requestedRegistry *string,
+	requestedGHCREndpoint *string,
 	data []byte,
 ) ([]byte, derivedEnvironment, error) {
 	document, err := parseEnvironment(data)
@@ -400,6 +484,17 @@ func migrateEnvironmentWithOptions(
 	if err != nil {
 		return nil, derivedEnvironment{}, err
 	}
+	currentGHCREndpoint, err := NormalizeGHCREndpoint(state.GHCREndpoint)
+	if err != nil {
+		return nil, derivedEnvironment{}, fmt.Errorf("stored GHCR endpoint: %w", err)
+	}
+	ghcrEndpoint := currentGHCREndpoint
+	if requestedGHCREndpoint != nil {
+		ghcrEndpoint, err = NormalizeGHCREndpoint(*requestedGHCREndpoint)
+		if err != nil {
+			return nil, derivedEnvironment{}, err
+		}
+	}
 	currentRegistry := strings.TrimSuffix(environmentValue(document, "COCOLA_IMAGE_REGISTRY", DefaultRegistry), "/")
 	if currentRegistry == "" {
 		return nil, derivedEnvironment{}, errors.New("COCOLA_IMAGE_REGISTRY cannot be empty")
@@ -407,10 +502,13 @@ func migrateEnvironmentWithOptions(
 	registry := currentRegistry
 	if requestedRegistry != nil {
 		registry = strings.TrimSuffix(strings.TrimSpace(*requestedRegistry), "/")
-	} else if currentRegistry == legacyCNMirrorRegistry {
-		registry = DefaultRegistry
+	} else if currentRegistry == defaultCocolaRegistry(currentGHCREndpoint) ||
+		currentRegistry == DefaultRegistry || currentRegistry == legacyCNMirrorRegistry {
+		registry = ""
 	}
-	images, err := ResolveImageReferences(targetVersion, registry)
+	images, err := ResolveImageReferences(ImageResolutionOptions{
+		Version: targetVersion, CocolaRegistry: registry, GHCREndpoint: ghcrEndpoint,
+	})
 	if err != nil {
 		return nil, derivedEnvironment{}, err
 	}
@@ -538,6 +636,7 @@ func migrateEnvironmentWithOptions(
 	document.remove("COCOLA_IMAGE_SOURCE")
 	return document.render(), derivedEnvironment{
 		version: targetVersion, currentRegistry: currentRegistry,
+		currentGHCREndpoint: currentGHCREndpoint, ghcrEndpoint: ghcrEndpoint,
 		images: images, publicURL: publicURL,
 		webPort: webPort, gatewayPort: gatewayPort, llmPort: llmPort,
 		internalSCM:        internalSCM,

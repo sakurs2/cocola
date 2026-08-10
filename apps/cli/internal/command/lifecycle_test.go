@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -52,19 +53,20 @@ func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
 
 func TestStartSummaryUsesCommittedVersionAndRegistrySemantics(t *testing.T) {
 	state := config.State{
-		Version:   "v0.2.0",
+		Version: "v0.2.0", GHCREndpoint: config.DefaultGHCREndpoint,
 		PublicURL: "http://localhost:3000", WebPort: 3000,
 	}
 	pending := &config.PendingUpgrade{
 		FromVersion: "v0.1.0", ToVersion: "v0.2.0",
 		FromImageRegistry: "ghcr.nju.edu.cn/sakurs2", ToImageRegistry: config.DefaultRegistry,
+		FromGHCREndpoint: "ghcr.nju.edu.cn", ToGHCREndpoint: config.DefaultGHCREndpoint,
 	}
 	var output bytes.Buffer
 	printStartSummary(ui.Printer{Out: &output, Err: &output}, state, pending, "")
 	text := output.String()
 	for _, expected := range []string{
 		"Before version", "v0.1.0", "Current version", "v0.2.0",
-		"Before image registry", "ghcr.nju.edu.cn/sakurs2", "Current image registry", config.DefaultRegistry,
+		"Before GHCR endpoint", "ghcr.nju.edu.cn", "Current GHCR endpoint", config.DefaultGHCREndpoint,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("start summary missing %q: %q", expected, text)
@@ -78,6 +80,8 @@ func TestStartSummaryUsesCommittedVersionAndRegistrySemantics(t *testing.T) {
 	output.Reset()
 	pending.FromVersion = state.Version
 	pending.ToVersion = state.Version
+	pending.FromGHCREndpoint = state.GHCREndpoint
+	pending.ToGHCREndpoint = state.GHCREndpoint
 	printStartSummary(ui.Printer{Out: &output, Err: &output}, state, pending, "")
 	if strings.Contains(output.String(), "Before version") {
 		t.Fatalf("same-version registry migration duplicated the version: %q", output.String())
@@ -170,6 +174,258 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 	}
 	if strings.Contains(string(logged), " pull") {
 		t.Fatalf("resume unexpectedly pulled images: %s", logged)
+	}
+}
+
+func TestStartGHCREndpointSuccessPersistsAndReturnsJSON(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0", "--admin-password", "test-password",
+		"--web-port", "33501", "--gateway-port", "33502", "--llm-port", "33503", "--internal-scm-port", "33504",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
+if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "ps" ]; then printf 'container-id\n'; exit 0; fi
+if [ "$1 $2" = "image inspect" ]; then exit 0; fi
+case "$*" in
+  *' config --quiet') exit 0 ;;
+  *' config --images') printf '%s\n' 'ghcr.nju.edu.cn/sakurs2/cocola-redis:7.4.10-alpine3.21' 'ghcr.nju.edu.cn/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
+  *' pull') exit 0 ;;
+  *' ps -aq') printf 'container-id\n'; exit 0 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
+	output.Reset()
+	stderr.Reset()
+	if err := Execute(context.Background(), []string{
+		"start", "--json", "--home", home, "--ghcr-endpoint", "ghcr.nju.edu.cn",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatalf("start endpoint: %v, stdout=%s stderr=%s", err, output.String(), stderr.String())
+	}
+	var result lifecycleResult
+	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+		t.Fatalf("decode start JSON: %v, output=%s", err, output.String())
+	}
+	if result.GHCREndpoint != "ghcr.nju.edu.cn" || result.PreviousGHCREndpoint != config.DefaultGHCREndpoint {
+		t.Fatalf("start JSON = %+v", result)
+	}
+	state, err := config.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.GHCREndpoint != "ghcr.nju.edu.cn" || state.PendingUpgrade != nil {
+		t.Fatalf("committed endpoint state = %+v", state)
+	}
+}
+
+func TestStartWithoutEndpointDiscardsInterruptedEndpointCandidate(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0", "--admin-password", "test-password",
+		"--web-port", "33801", "--gateway-port", "33802", "--llm-port", "33803", "--internal-scm-port", "33804",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.PrepareGHCREndpointChange(paths, "ghcr.nju.edu.cn"); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	logPath := filepath.Join(directory, "docker.log")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$DOCKER_ARGS_LOG"
+if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
+if [ "$1" = "info" ]; then exit 0; fi
+case "$*" in
+  *' config --quiet') exit 0 ;;
+  *' config --images') printf '%s\n' 'ghcr.io/sakurs2/cocola-redis:7.4.10-alpine3.21' 'ghcr.io/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
+  *' ps -aq') printf 'container-id\n'; exit 0 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
+	t.Setenv("DOCKER_ARGS_LOG", logPath)
+	output.Reset()
+	stderr.Reset()
+	if err := Execute(context.Background(), []string{"start", "--home", home}, IO{
+		In: &bytes.Buffer{}, Out: &output, Err: &stderr,
+	}); err != nil {
+		t.Fatalf("resume without endpoint: %v, stdout=%s stderr=%s", err, output.String(), stderr.String())
+	}
+	state, err := config.Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.GHCREndpoint != config.DefaultGHCREndpoint || state.PendingUpgrade != nil {
+		t.Fatalf("interrupted endpoint was committed: %+v", state)
+	}
+	environment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(environment), "ghcr.nju.edu.cn") {
+		t.Fatalf("interrupted endpoint remains in config.env:\n%s", environment)
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logged), " pull") {
+		t.Fatalf("plain start retried candidate endpoint: %s", logged)
+	}
+}
+
+func TestStartGHCREndpointPullFailureRollsBackAndPrintsRetry(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0", "--admin-password", "test-password",
+		"--web-port", "33601", "--gateway-port", "33602", "--llm-port", "33603", "--internal-scm-port", "33604",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := `#!/bin/sh
+if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
+if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1 $2" = "image inspect" ]; then exit 1; fi
+case "$*" in
+  *' config --quiet') exit 0 ;;
+  *' config --images') printf '%s\n' 'ghcr.nju.edu.cn/sakurs2/cocola-redis:7.4.10-alpine3.21'; exit 0 ;;
+  *' pull') exit 1 ;;
+  *' ps --format json') printf '[]\n'; exit 0 ;;
+  *' ps -aq') exit 0 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
+	output.Reset()
+	stderr.Reset()
+	err = Execute(context.Background(), []string{
+		"start", "--home", home, "--ghcr-endpoint", "ghcr.nju.edu.cn",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr})
+	if err == nil {
+		t.Fatal("failed endpoint pull unexpectedly succeeded")
+	}
+	state, loadErr := config.Load(paths)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if state.GHCREndpoint != config.DefaultGHCREndpoint || state.PendingUpgrade != nil {
+		t.Fatalf("endpoint rollback state = %+v", state)
+	}
+	environment, readErr := os.ReadFile(paths.Environment)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(environment), "ghcr.nju.edu.cn") {
+		t.Fatalf("endpoint rollback left proxy references:\n%s", environment)
+	}
+	combined := output.String() + stderr.String()
+	if !strings.Contains(combined, "cocola start --ghcr-endpoint ghcr.nju.edu.cn") ||
+		strings.Contains(combined, "cocola install --version") {
+		t.Fatalf("endpoint retry instructions = %q", combined)
+	}
+}
+
+func TestStartGHCREndpointPreflightFailureRollsBack(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--version", "v0.1.0", "--admin-password", "test-password",
+		"--web-port", "33701", "--gateway-port", "33702", "--llm-port", "33703", "--internal-scm-port", "33704",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := config.ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+
+	dockerPath := filepath.Join(t.TempDir(), "docker")
+	script := `#!/bin/sh
+if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
+if [ "$1" = "info" ]; then exit 0; fi
+case "$*" in
+  *' config --quiet') printf 'invalid candidate compose\n' >&2; exit 1 ;;
+  *' ps --format json') printf '[]\n'; exit 0 ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
+	output.Reset()
+	stderr.Reset()
+	err = Execute(context.Background(), []string{
+		"start", "--home", home, "--ghcr-endpoint", "ghcr.nju.edu.cn",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr})
+	if err == nil {
+		t.Fatal("invalid candidate preflight unexpectedly succeeded")
+	}
+	state, loadErr := config.Load(paths)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if state.GHCREndpoint != config.DefaultGHCREndpoint || state.PendingUpgrade != nil {
+		t.Fatalf("preflight rollback state = %+v", state)
+	}
+	environment, readErr := os.ReadFile(paths.Environment)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(environment), "ghcr.nju.edu.cn") {
+		t.Fatalf("preflight rollback left proxy references:\n%s", environment)
 	}
 }
 

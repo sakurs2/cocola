@@ -19,7 +19,7 @@ func TestRunChecksHealthyServicesVolumesImagesAndPostgres(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"service sandbox-manager", "service forgejo", "service minio-init",
-		"internal SCM endpoint", "postgres credentials", "required images",
+		"internal SCM endpoint", "postgres credentials", "required images", "GHCR endpoint",
 	} {
 		check, ok := findCheck(report, expected)
 		if !ok || check.Status != StatusPass {

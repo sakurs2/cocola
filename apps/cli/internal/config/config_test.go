@@ -86,6 +86,7 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.Version != "v0.1.0" || !state.ManagedOpenSandbox ||
+		state.GHCREndpoint != DefaultGHCREndpoint ||
 		state.SandboxImage != "ghcr.io/sakurs2/cocola-sandbox-runtime:v0.1.0" ||
 		len(state.ManagedRuntimeImages) != 3 ||
 		state.ConfigSchemaVersion != CurrentSchemaVersion || state.DeploymentRevision == "" ||
@@ -149,7 +150,7 @@ func TestPrepareUpgradePreservesConfigurationAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.PendingUpgrade == nil || state.Version != "v0.2.0" || state.WebPort != 3200 ||
-		state.LastSuccessfulVersion != "v0.1.0" {
+		state.LastSuccessfulVersion != "v0.1.0" || state.GHCREndpoint != DefaultGHCREndpoint {
 		t.Fatalf("pending state = %+v", state)
 	}
 	if _, err := os.Stat(filepath.Join(result.BackupDir, "manifest.json")); err != nil {
@@ -176,6 +177,198 @@ func TestPrepareUpgradePreservesConfigurationAndRollsBack(t *testing.T) {
 	}
 	if string(restoredCompose) != "services:\n  old: {}\n" {
 		t.Fatalf("compose was not restored: %s", restoredCompose)
+	}
+}
+
+func TestPrepareGHCREndpointChangeIsTransactionalAndIdempotent(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Defaults("v0.1.0")
+	options.Home = home
+	options.AdminPassword = "strong-password"
+	if _, err := WriteInstallation(paths, options, []byte("services:\n  app: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+	originalEnvironment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := PrepareGHCREndpointChange(paths, " GHCR.NJU.EDU.CN ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Updated || result.FromVersion != result.ToVersion ||
+		result.FromGHCREndpoint != DefaultGHCREndpoint || result.ToGHCREndpoint != "ghcr.nju.edu.cn" ||
+		result.BackupDir == "" {
+		t.Fatalf("endpoint change result = %+v", result)
+	}
+	state, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.GHCREndpoint != DefaultGHCREndpoint || state.PendingUpgrade == nil ||
+		state.PendingUpgrade.FromGHCREndpoint != DefaultGHCREndpoint ||
+		state.PendingUpgrade.ToGHCREndpoint != "ghcr.nju.edu.cn" {
+		t.Fatalf("pending endpoint state = %+v", state)
+	}
+	effectiveEndpoint, err := EffectiveGHCREndpoint(state)
+	if err != nil || effectiveEndpoint != "ghcr.nju.edu.cn" {
+		t.Fatalf("effective pending endpoint = %q, %v", effectiveEndpoint, err)
+	}
+	environment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(environment)
+	for _, expected := range []string{
+		`COCOLA_IMAGE_REGISTRY="ghcr.nju.edu.cn/sakurs2"`,
+		`COCOLA_REDIS_IMAGE="ghcr.nju.edu.cn/sakurs2/cocola-redis:`,
+		`COCOLA_OPENVIKING_IMAGE="ghcr.nju.edu.cn/volcengine/openviking:`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("endpoint environment missing %q:\n%s", expected, text)
+		}
+	}
+	if strings.Contains(text, "docker.io") || strings.Contains(text, "codeberg.org") ||
+		!strings.Contains(text, openSandboxAliyunRegistry+"/execd:v1.0.19") {
+		t.Fatalf("endpoint environment contains an unexpected registry:\n%s", text)
+	}
+
+	repeated, err := PrepareGHCREndpointChange(paths, "ghcr.nju.edu.cn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repeated.BackupDir != result.BackupDir {
+		t.Fatalf("idempotent endpoint change created a new backup: %+v", repeated)
+	}
+	if _, err := RollbackUpgrade(paths); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restored) != string(originalEnvironment) {
+		t.Fatal("endpoint rollback did not restore config.env exactly")
+	}
+}
+
+func TestPrepareLastSuccessfulGHCREndpointPreservesPendingVersionUpgrade(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Defaults("v0.1.0")
+	options.Home = home
+	options.AdminPassword = "strong-password"
+	if _, err := WriteInstallation(paths, options, []byte("services:\n  old: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MarkStarted(paths); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareUpgrade(paths, "v0.2.0", []byte("services:\n  new: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareGHCREndpointChange(paths, "ghcr.nju.edu.cn"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := PrepareLastSuccessfulGHCREndpoint(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Updated || result.ToVersion != "v0.2.0" ||
+		result.FromGHCREndpoint != DefaultGHCREndpoint ||
+		result.ToGHCREndpoint != DefaultGHCREndpoint {
+		t.Fatalf("restored endpoint candidate = %+v", result)
+	}
+	state, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.GHCREndpoint != DefaultGHCREndpoint || state.Version != "v0.2.0" ||
+		state.PendingUpgrade == nil || state.PendingUpgrade.ToGHCREndpoint != DefaultGHCREndpoint {
+		t.Fatalf("pending version candidate = %+v", state)
+	}
+	environment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(environment), "ghcr.nju.edu.cn") ||
+		!strings.Contains(string(environment), `COCOLA_REDIS_IMAGE="ghcr.io/sakurs2/cocola-redis:`) {
+		t.Fatalf("version candidate did not return to committed endpoint:\n%s", environment)
+	}
+}
+
+func TestPrepareGHCREndpointChangePreservesCustomCocolaRegistry(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Defaults("v0.1.0")
+	options.Home = home
+	options.AdminPassword = "strong-password"
+	options.Registry = "registry.example/team"
+	options.RegistryExplicit = true
+	if _, err := WriteInstallation(paths, options, []byte("services: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareGHCREndpointChange(paths, "ghcr.nju.edu.cn"); err != nil {
+		t.Fatal(err)
+	}
+	environment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(environment)
+	if !strings.Contains(text, `COCOLA_IMAGE_REGISTRY="registry.example/team"`) ||
+		!strings.Contains(text, `COCOLA_REDIS_IMAGE="ghcr.nju.edu.cn/sakurs2/cocola-redis:`) {
+		t.Fatalf("custom registry or third-party endpoint was not preserved:\n%s", text)
+	}
+}
+
+func TestValidateConfiguredImagesDetectsEnvironmentDrift(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	paths, err := ResolvePaths(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Defaults("v0.1.0")
+	options.Home = home
+	options.AdminPassword = "strong-password"
+	if _, err := WriteInstallation(paths, options, []byte("services: {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	state, err := Load(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateConfiguredImages(paths, state); err != nil {
+		t.Fatalf("valid image configuration: %v", err)
+	}
+	environment, err := os.ReadFile(paths.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drifted := strings.Replace(
+		string(environment), "ghcr.io/sakurs2/cocola-redis", "docker.io/library/redis", 1,
+	)
+	if err := os.WriteFile(paths.Environment, []byte(drifted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateConfiguredImages(paths, state); err == nil ||
+		!strings.Contains(err.Error(), "COCOLA_REDIS_IMAGE") {
+		t.Fatalf("image drift error = %v", err)
 	}
 }
 
@@ -238,7 +431,7 @@ func TestPrepareUpgradeMigratesLegacyStateAndCommitsAfterStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.PendingUpgrade != nil || state.LastSuccessfulVersion != "v0.2.0" ||
-		state.ConfigSchemaVersion != CurrentSchemaVersion {
+		state.ConfigSchemaVersion != CurrentSchemaVersion || state.GHCREndpoint != DefaultGHCREndpoint {
 		t.Fatalf("committed state = %+v", state)
 	}
 }
@@ -310,7 +503,7 @@ func TestPrepareUpgradeMigratesRemovedCNMirrorAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state.PendingUpgrade == nil || state.ConfigSchemaVersion != CurrentSchemaVersion ||
-		!strings.HasPrefix(state.SandboxImage, "ghcr.io/sakurs2/") {
+		state.GHCREndpoint != DefaultGHCREndpoint || !strings.HasPrefix(state.SandboxImage, "ghcr.io/sakurs2/") {
 		t.Fatalf("pending mirror migration = %+v", state)
 	}
 	migratedState, err := os.ReadFile(paths.State)

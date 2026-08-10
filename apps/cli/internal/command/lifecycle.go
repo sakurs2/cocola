@@ -20,7 +20,8 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 		"start": "Create, update, or start Cocola",
 		"stop":  "Stop Cocola and preserve its containers",
 	}
-	return &cobra.Command{
+	var ghcrEndpoint string
+	command := &cobra.Command{
 		Use:   action,
 		Short: short[action],
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -29,14 +30,30 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 				return err
 			}
 			return withOperationLock(paths, "cocola "+action, func() error {
-				runner, err := a.runnerAt(paths, false)
-				if err != nil {
-					return err
-				}
+				endpointChangePrepared := false
 				if action == "start" {
 					if err := compose.CheckDocker(command.Context()); err != nil {
 						return err
 					}
+					if command.Flags().Changed("ghcr-endpoint") {
+						result, prepareErr := config.PrepareGHCREndpointChange(paths, ghcrEndpoint)
+						if prepareErr != nil {
+							return prepareErr
+						}
+						endpointChangePrepared = result.Updated &&
+							result.FromGHCREndpoint != result.ToGHCREndpoint
+					} else if _, prepareErr := config.PrepareLastSuccessfulGHCREndpoint(paths); prepareErr != nil {
+						return prepareErr
+					}
+				}
+				runner, err := a.runnerAt(paths, false)
+				if err != nil {
+					if endpointChangePrepared {
+						if _, rollbackErr := config.RollbackUpgrade(paths); rollbackErr != nil {
+							return errors.Join(err, fmt.Errorf("restore previous deployment: %w", rollbackErr))
+						}
+					}
+					return err
 				}
 				printer := a.printer()
 				switch action {
@@ -59,16 +76,25 @@ func (a *application) lifecycleCommand(action string) *cobra.Command {
 			})
 		},
 	}
+	if action == "start" {
+		command.Flags().StringVar(
+			&ghcrEndpoint, "ghcr-endpoint", "",
+			"GHCR hostname used for public image downloads (for example ghcr.nju.edu.cn)",
+		)
+	}
+	return command
 }
 
 type lifecycleResult struct {
-	Status          string `json:"status"`
-	Version         string `json:"version"`
-	PreviousVersion string `json:"previous_version,omitempty"`
-	WebURL          string `json:"web_url"`
-	AdminURL        string `json:"admin_url"`
-	ModelSetupURL   string `json:"model_setup_url"`
-	BackupDir       string `json:"backup_dir,omitempty"`
+	Status               string `json:"status"`
+	Version              string `json:"version"`
+	PreviousVersion      string `json:"previous_version,omitempty"`
+	GHCREndpoint         string `json:"ghcr_endpoint"`
+	PreviousGHCREndpoint string `json:"previous_ghcr_endpoint,omitempty"`
+	WebURL               string `json:"web_url"`
+	AdminURL             string `json:"admin_url"`
+	ModelSetupURL        string `json:"model_setup_url"`
+	BackupDir            string `json:"backup_dir,omitempty"`
 }
 
 func (a *application) start(ctx context.Context, runner *compose.Runner) error {
@@ -76,10 +102,17 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 	printer.Info("Checking the Cocola host and deployment configuration")
 	warnings, err := runStartPreflight(ctx, runner)
 	if err != nil {
+		if pending := runner.State.PendingUpgrade; pending != nil {
+			return a.restoreFailedUpgrade(ctx, runner.Paths, pending, err)
+		}
 		return err
 	}
 	for _, warning := range warnings {
 		printer.Warn(warning)
+	}
+	pullEndpoint, err := config.EffectiveGHCREndpoint(runner.State)
+	if err != nil {
+		return err
 	}
 
 	pending := runner.State.PendingUpgrade
@@ -96,7 +129,7 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 
 	needsPull := pending != nil || runner.State.LastSuccessfulVersion == ""
 	if needsPull {
-		printer.Info("Pulling required Cocola images")
+		printer.Info("Pulling required images through " + pullEndpoint)
 		if pullErr := runner.Pull(ctx); pullErr != nil {
 			cached, inspectErr := runner.ImagesPresent(ctx)
 			if inspectErr != nil {
@@ -144,17 +177,30 @@ func (a *application) start(ctx context.Context, runner *compose.Runner) error {
 	}
 	state, err := config.MarkStarted(runner.Paths)
 	if err != nil {
+		if pending != nil {
+			cleanupContext, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			cleanupErr := runner.RemoveFailedStart(cleanupContext)
+			cancelCleanup()
+			return a.restoreFailedUpgrade(
+				ctx, runner.Paths, pending,
+				errors.Join(fmt.Errorf("commit healthy deployment state: %w", err), cleanupErr),
+			)
+		}
 		return fmt.Errorf("services are healthy but the deployment state could not be committed: %w", err)
 	}
 	webURL := stateWebURL(state)
 	result := lifecycleResult{
 		Status: "ready", Version: state.Version, WebURL: webURL,
+		GHCREndpoint:  state.GHCREndpoint,
 		AdminURL:      strings.TrimRight(webURL, "/") + "/admin",
 		ModelSetupURL: strings.TrimRight(webURL, "/") + "/admin/models",
 		BackupDir:     backupDir,
 	}
 	if pending != nil {
 		result.PreviousVersion = pending.FromVersion
+		if pending.FromGHCREndpoint != pending.ToGHCREndpoint {
+			result.PreviousGHCREndpoint = pending.FromGHCREndpoint
+		}
 	}
 	if a.json {
 		return printer.Encode(result)
@@ -290,13 +336,28 @@ func (a *application) restoreFailedUpgrade(
 	printer.Warn("The previous deployment configuration was restored. Cocola was not restarted automatically.")
 	printer.Info("Recover the previous deployment with:")
 	printer.Command("cocola start")
-	printer.Info("Retry the deployment update after resolving the error with:")
-	retry := "cocola install --version " + pending.ToVersion
-	if pending.ToImageRegistry != "" && pending.ToImageRegistry != config.DefaultRegistry {
-		retry += " --registry " + pending.ToImageRegistry
+	endpointChanged := pending.ToGHCREndpoint != "" && pending.FromGHCREndpoint != pending.ToGHCREndpoint
+	automaticRegistryChange := endpointChanged &&
+		pending.FromImageRegistry == pending.FromGHCREndpoint+"/sakurs2" &&
+		pending.ToImageRegistry == pending.ToGHCREndpoint+"/sakurs2"
+	deploymentChanged := pending.FromVersion != pending.ToVersion ||
+		(pending.FromImageRegistry != pending.ToImageRegistry && !automaticRegistryChange)
+	if deploymentChanged {
+		printer.Info("Retry the deployment update after resolving the error with:")
+		retry := "cocola install --version " + pending.ToVersion
+		if pending.ToImageRegistry != "" && pending.ToImageRegistry != config.DefaultRegistry {
+			retry += " --registry " + pending.ToImageRegistry
+		}
+		printer.Command(retry)
+		start := "cocola start"
+		if endpointChanged {
+			start += " --ghcr-endpoint " + pending.ToGHCREndpoint
+		}
+		printer.Command(start)
+	} else if endpointChanged {
+		printer.Info("Retry the GHCR endpoint after resolving the error with:")
+		printer.Command("cocola start --ghcr-endpoint " + pending.ToGHCREndpoint)
 	}
-	printer.Command(retry)
-	printer.Command("cocola start")
 	if pending.FromVersion != pending.ToVersion {
 		printer.Info("Deployment and PostgreSQL backups are retained for manual recovery. The database dump is never restored automatically.")
 	} else {
@@ -345,11 +406,22 @@ func printStartSummary(printer ui.Printer, state config.State, pending *config.P
 		values = append(values, [2]string{"Before version", pending.FromVersion})
 	}
 	values = append(values, [2]string{"Current version", state.Version})
-	if pending != nil && pending.FromImageRegistry != pending.ToImageRegistry {
+	automaticRegistryChange := pending != nil && pending.FromGHCREndpoint != pending.ToGHCREndpoint &&
+		pending.FromImageRegistry == pending.FromGHCREndpoint+"/sakurs2" &&
+		pending.ToImageRegistry == pending.ToGHCREndpoint+"/sakurs2"
+	if pending != nil && pending.FromImageRegistry != pending.ToImageRegistry && !automaticRegistryChange {
 		values = append(values,
 			[2]string{"Before image registry", pending.FromImageRegistry},
 			[2]string{"Current image registry", pending.ToImageRegistry},
 		)
+	}
+	if pending != nil && pending.FromGHCREndpoint != pending.ToGHCREndpoint {
+		values = append(values,
+			[2]string{"Before GHCR endpoint", pending.FromGHCREndpoint},
+			[2]string{"Current GHCR endpoint", state.GHCREndpoint},
+		)
+	} else {
+		values = append(values, [2]string{"GHCR endpoint", state.GHCREndpoint})
 	}
 	printer.KeyValues(values)
 	printer.Section("Access Cocola")

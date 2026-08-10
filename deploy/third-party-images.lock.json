@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "revision": "20260811.1",
+  "images": [
+    {
+      "id": "redis",
+      "mirror": true,
+      "upstream_image": "docker.io/library/redis",
+      "tag": "7.4.10-alpine3.21",
+      "manifest_digest": "sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2",
+      "target_image": "ghcr.io/sakurs2/cocola-redis",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/redis/redis",
+      "source_ref": "7.4.10",
+      "source_commit": "f103d127b9747965e28f20615ef790332661fc68",
+      "image_source_repository": "https://github.com/redis/docker-library-redis",
+      "image_source_commit": "31c68732e7311d95e4c833b8fa50aa561ced577f",
+      "licenses": ["RSAL-2.0", "SSPL-1.0"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/redis/redis/f103d127b9747965e28f20615ef790332661fc68/LICENSE.txt"
+      ],
+      "source_archives": [
+        {
+          "name": "redis-7.4.10-source.tar.gz",
+          "url": "https://github.com/redis/redis/archive/f103d127b9747965e28f20615ef790332661fc68.tar.gz",
+          "sha256": "3efe030b70acb325b5c6da19e2af5ee5c55a21975c62710d360a7b051cec5cf9"
+        },
+        {
+          "name": "redis-7.4.10-image-source.tar.gz",
+          "url": "https://github.com/redis/docker-library-redis/archive/31c68732e7311d95e4c833b8fa50aa561ced577f.tar.gz",
+          "sha256": "099d0e176ed35bb6e2a88b060728403234441dc99890c48f5a1622e1fc3ab108"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "mirror": true,
+      "upstream_image": "docker.io/library/postgres",
+      "tag": "16.14-alpine3.23",
+      "manifest_digest": "sha256:42b8b8b29c8a4e933d88943e5b03001a78794905cf786e6e7634e9f2abd5a0d3",
+      "target_image": "ghcr.io/sakurs2/cocola-postgres",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/postgres/postgres",
+      "source_ref": "REL_16_14",
+      "source_commit": "0d1c00c624fa7367d4a895f44381887757289682",
+      "image_source_repository": "https://github.com/docker-library/postgres",
+      "image_source_commit": "4f9ced003ba58a854656ba150d146243d27ae3ac",
+      "licenses": ["PostgreSQL"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/postgres/postgres/0d1c00c624fa7367d4a895f44381887757289682/COPYRIGHT"
+      ],
+      "source_archives": [
+        {
+          "name": "postgres-16.14-source.tar.gz",
+          "url": "https://github.com/postgres/postgres/archive/0d1c00c624fa7367d4a895f44381887757289682.tar.gz",
+          "sha256": "80ccf198a7a2bf17f6b4f7603d937effe29eb51a6bc68e0b99d3b6a7e95e879e"
+        },
+        {
+          "name": "postgres-16.14-image-source.tar.gz",
+          "url": "https://github.com/docker-library/postgres/archive/4f9ced003ba58a854656ba150d146243d27ae3ac.tar.gz",
+          "sha256": "41e1bd1b040c3c57921360430e894431c307a9888df592efb9ab7d7b9823b8ef"
+        }
+      ]
+    },
+    {
+      "id": "forgejo",
+      "mirror": true,
+      "upstream_image": "codeberg.org/forgejo/forgejo",
+      "tag": "16.0.1",
+      "manifest_digest": "sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07",
+      "target_image": "ghcr.io/sakurs2/cocola-forgejo",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://codeberg.org/forgejo/forgejo",
+      "source_ref": "v16.0.1",
+      "source_commit": "b3d7e4ac3cbccc220703097a51fa4c16bf302579",
+      "image_source_repository": "https://codeberg.org/forgejo/forgejo",
+      "image_source_commit": "b3d7e4ac3cbccc220703097a51fa4c16bf302579",
+      "licenses": ["GPL-3.0-or-later"],
+      "license_urls": [
+        "https://codeberg.org/forgejo/forgejo/raw/commit/b3d7e4ac3cbccc220703097a51fa4c16bf302579/LICENSE"
+      ],
+      "source_archives": [
+        {
+          "name": "forgejo-16.0.1-source.tar.gz",
+          "url": "https://codeberg.org/forgejo/forgejo/archive/b3d7e4ac3cbccc220703097a51fa4c16bf302579.tar.gz",
+          "sha256": "ef5270dfdd6d30552c72d0756d9617aa33669522ba2e92729f470bf1eab01fe8"
+        }
+      ]
+    },
+    {
+      "id": "minio",
+      "mirror": true,
+      "upstream_image": "docker.io/minio/minio",
+      "tag": "RELEASE.2025-09-07T16-13-09Z",
+      "manifest_digest": "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      "target_image": "ghcr.io/sakurs2/cocola-minio",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/minio/minio",
+      "source_ref": "RELEASE.2025-09-07T16-13-09Z",
+      "source_commit": "07c3a429bfed433e49018cb0f78a52145d4bedeb",
+      "image_source_repository": "https://github.com/minio/minio",
+      "image_source_commit": "07c3a429bfed433e49018cb0f78a52145d4bedeb",
+      "licenses": ["AGPL-3.0"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/minio/minio/07c3a429bfed433e49018cb0f78a52145d4bedeb/LICENSE"
+      ],
+      "source_archives": [
+        {
+          "name": "minio-RELEASE.2025-09-07T16-13-09Z-source.tar.gz",
+          "url": "https://github.com/minio/minio/archive/07c3a429bfed433e49018cb0f78a52145d4bedeb.tar.gz",
+          "sha256": "8819e3e7817e46b7b3798f8f200ead208562e571563c2e040352378031abe9f2"
+        }
+      ]
+    },
+    {
+      "id": "minio-mc",
+      "mirror": true,
+      "upstream_image": "docker.io/minio/mc",
+      "tag": "RELEASE.2025-08-13T08-35-41Z",
+      "manifest_digest": "sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727",
+      "target_image": "ghcr.io/sakurs2/cocola-minio-mc",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/minio/mc",
+      "source_ref": "RELEASE.2025-08-13T08-35-41Z",
+      "source_commit": "7394ce0dd2a80935aded936b09fa12cbb3cb8096",
+      "image_source_repository": "https://github.com/minio/mc",
+      "image_source_commit": "7394ce0dd2a80935aded936b09fa12cbb3cb8096",
+      "licenses": ["AGPL-3.0"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/minio/mc/7394ce0dd2a80935aded936b09fa12cbb3cb8096/LICENSE"
+      ],
+      "source_archives": [
+        {
+          "name": "minio-mc-RELEASE.2025-08-13T08-35-41Z-source.tar.gz",
+          "url": "https://github.com/minio/mc/archive/7394ce0dd2a80935aded936b09fa12cbb3cb8096.tar.gz",
+          "sha256": "95cd293c7119f16921a6dc515a1fb74a2227f19fd994b9c8b770a154e802ac44"
+        }
+      ]
+    },
+    {
+      "id": "openviking",
+      "mirror": false,
+      "upstream_image": "ghcr.io/volcengine/openviking",
+      "tag": "v0.4.12",
+      "manifest_digest": "sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb",
+      "target_image": "ghcr.io/volcengine/openviking",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/volcengine/OpenViking",
+      "source_ref": "v0.4.12",
+      "source_commit": "c1d38eb47ff2ebf9ff4cee46756728893fd8caf3",
+      "image_source_repository": "https://github.com/volcengine/OpenViking",
+      "image_source_commit": "c1d38eb47ff2ebf9ff4cee46756728893fd8caf3",
+      "licenses": ["Apache-2.0"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/volcengine/OpenViking/c1d38eb47ff2ebf9ff4cee46756728893fd8caf3/LICENSE"
+      ],
+      "source_archives": [
+        {
+          "name": "openviking-v0.4.12-source.tar.gz",
+          "url": "https://github.com/volcengine/OpenViking/archive/c1d38eb47ff2ebf9ff4cee46756728893fd8caf3.tar.gz",
+          "sha256": "ea9bb7971c2eda0793ebdf58fdab94d645bcfa25dd772f72d5ba950cd02c5420"
+        }
+      ]
+    },
+    {
+      "id": "opensandbox-server",
+      "mirror": true,
+      "upstream_image": "docker.io/opensandbox/server",
+      "tag": "v0.1.14",
+      "manifest_digest": "sha256:a177a0fd149dcf4035d884590cabd78021b7baa63782830647a8eb9c663d176a",
+      "target_image": "ghcr.io/sakurs2/cocola-opensandbox-server",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/alibaba/OpenSandbox",
+      "source_ref": "server/v0.1.14",
+      "source_commit": "ef13d88f8479089ab6773556d7782b5d92fea53f",
+      "image_source_repository": "https://github.com/alibaba/OpenSandbox",
+      "image_source_commit": "ef13d88f8479089ab6773556d7782b5d92fea53f",
+      "licenses": ["Apache-2.0"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/alibaba/OpenSandbox/ef13d88f8479089ab6773556d7782b5d92fea53f/LICENSE"
+      ],
+      "source_archives": [
+        {
+          "name": "opensandbox-server-v0.1.14-source.tar.gz",
+          "url": "https://github.com/alibaba/OpenSandbox/archive/ef13d88f8479089ab6773556d7782b5d92fea53f.tar.gz",
+          "sha256": "97514f42482e86bceb3b1d793965ce643830459231ab6064c57359df2b535990"
+        }
+      ]
+    },
+    {
+      "id": "opensandbox-egress",
+      "mirror": true,
+      "upstream_image": "docker.io/opensandbox/egress",
+      "tag": "v1.1.2",
+      "manifest_digest": "sha256:c3944a6dd060638c89ef9526ddea34f98192b987e13e3b7fe5e8b4606126b3cf",
+      "target_image": "ghcr.io/sakurs2/cocola-opensandbox-egress",
+      "platforms": ["linux/amd64", "linux/arm64"],
+      "source_repository": "https://github.com/alibaba/OpenSandbox",
+      "source_ref": "docker/egress/v1.1.2",
+      "source_commit": "ada8659adeff273084797f6797f316db492fc017",
+      "image_source_repository": "https://github.com/alibaba/OpenSandbox",
+      "image_source_commit": "ada8659adeff273084797f6797f316db492fc017",
+      "licenses": ["Apache-2.0"],
+      "license_urls": [
+        "https://raw.githubusercontent.com/alibaba/OpenSandbox/ada8659adeff273084797f6797f316db492fc017/LICENSE"
+      ],
+      "source_archives": [
+        {
+          "name": "opensandbox-egress-v1.1.2-source.tar.gz",
+          "url": "https://github.com/alibaba/OpenSandbox/archive/ada8659adeff273084797f6797f316db492fc017.tar.gz",
+          "sha256": "24e299fe133abc4e7263d0fd59961b426b09eea6333a5eaf8b5b096f957313d8"
+        }
+      ]
+    }
+  ]
+}

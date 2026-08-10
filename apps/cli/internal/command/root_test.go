@@ -108,17 +108,19 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	}
 	for _, expected := range []string{
 		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
-		`COCOLA_REDIS_IMAGE="docker.io/library/redis:7.4.10-alpine3.21"`,
-		`COCOLA_FORGEJO_IMAGE="codeberg.org/forgejo/forgejo:16.0.1@sha256:3eb3107`,
+		`COCOLA_REDIS_IMAGE="ghcr.io/sakurs2/cocola-redis:7.4.10-alpine3.21@sha256:e7723`,
+		`COCOLA_FORGEJO_IMAGE="ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
 	} {
 		if !strings.Contains(string(environment), expected) {
 			t.Fatalf("generated environment missing %q: %s", expected, environment)
 		}
 	}
-	if strings.Contains(string(environment), "COCOLA_IMAGE_SOURCE") || strings.Contains(string(environment), "nju.edu.cn") {
+	if strings.Contains(string(environment), "COCOLA_IMAGE_SOURCE") || strings.Contains(string(environment), "nju.edu.cn") ||
+		strings.Contains(string(environment), "docker.io") || strings.Contains(string(environment), "codeberg.org") {
 		t.Fatalf("generated environment contains removed image-source configuration: %s", environment)
 	}
-	if !strings.Contains(output.String(), "cocola start") {
+	if !strings.Contains(output.String(), "cocola start") ||
+		!strings.Contains(output.String(), "cocola start --ghcr-endpoint ghcr.nju.edu.cn") {
 		t.Fatalf("install output must explain how to start Cocola: %q", output.String())
 	}
 	if !strings.Contains(output.String(), filepath.Join(home, "config.env")) {
@@ -157,6 +159,24 @@ func TestInstallRejectsRemovedImageSourceFlag(t *testing.T) {
 	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr})
 	if err == nil || !strings.Contains(err.Error(), "unknown flag: --image-source") {
 		t.Fatalf("removed image-source flag error = %v, stderr=%s", err, stderr.String())
+	}
+}
+
+func TestGHCREndpointFlagIsStartOnly(t *testing.T) {
+	app := &application{io: IO{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}}
+	start, _, err := app.rootCommand().Find([]string{"start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.Flags().Lookup("ghcr-endpoint") == nil {
+		t.Fatal("start is missing --ghcr-endpoint")
+	}
+	install, _, err := app.rootCommand().Find([]string{"install"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if install.Flags().Lookup("ghcr-endpoint") != nil {
+		t.Fatal("install unexpectedly exposes --ghcr-endpoint")
 	}
 }
 

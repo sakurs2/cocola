@@ -214,8 +214,8 @@ func TestPullIncludesManagedSandboxRuntimeImages(t *testing.T) {
 	assertRecordedCommands(t, logPath, []string{
 		prefix + "pull",
 		"image pull ghcr.io/sakurs2/cocola-sandbox-runtime:v1",
-		"image pull " + managedOpenSandboxExecdImage,
-		"image pull " + managedOpenSandboxEgressImage,
+		"image pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19",
+		"image pull ghcr.io/sakurs2/cocola-opensandbox-egress:v1.1.2@sha256:c3944a6dd060638c89ef9526ddea34f98192b987e13e3b7fe5e8b4606126b3cf",
 	})
 }
 
@@ -577,7 +577,7 @@ func writeRunnerState(t *testing.T, directory string, managed bool) config.Paths
 	}
 	state := `{"version":"v1","managed_opensandbox":false,"sandbox_image":"ghcr.io/sakurs2/cocola-sandbox-runtime:v1"}`
 	if managed {
-		state = `{"version":"v1","managed_opensandbox":true,"sandbox_image":"ghcr.io/sakurs2/cocola-sandbox-runtime:v1"}`
+		state = `{"version":"v1","managed_opensandbox":true,"sandbox_image":"ghcr.io/sakurs2/cocola-sandbox-runtime:v1","managed_runtime_images":["ghcr.io/sakurs2/cocola-sandbox-runtime:v1","sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.19","ghcr.io/sakurs2/cocola-opensandbox-egress:v1.1.2@sha256:c3944a6dd060638c89ef9526ddea34f98192b987e13e3b7fe5e8b4606126b3cf"]}`
 	}
 	if err := os.WriteFile(paths.State, []byte(state), 0o600); err != nil {
 		t.Fatal(err)

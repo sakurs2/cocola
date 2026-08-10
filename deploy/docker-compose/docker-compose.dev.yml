@@ -10,7 +10,7 @@ name: cocola-dev
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ghcr.io/sakurs2/cocola-postgres:16.14-alpine3.23@sha256:42b8b8b29c8a4e933d88943e5b03001a78794905cf786e6e7634e9f2abd5a0d3
     container_name: cocola-postgres
     restart: unless-stopped
     environment:
@@ -28,7 +28,7 @@ services:
       retries: 10
 
   forgejo-db-init:
-    image: postgres:16-alpine
+    image: ghcr.io/sakurs2/cocola-postgres:16.14-alpine3.23@sha256:42b8b8b29c8a4e933d88943e5b03001a78794905cf786e6e7634e9f2abd5a0d3
     container_name: cocola-forgejo-db-init
     depends_on:
       postgres:
@@ -45,7 +45,7 @@ services:
         psql -h postgres -U cocola -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='forgejo'" | grep -q 1 || psql -h postgres -U cocola -d postgres -c "CREATE DATABASE forgejo OWNER forgejo"
 
   forgejo:
-    image: codeberg.org/forgejo/forgejo:16.0.1
+    image: ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07
     container_name: cocola-forgejo
     restart: unless-stopped
     depends_on:
@@ -81,7 +81,7 @@ services:
       retries: 30
 
   forgejo-init:
-    image: codeberg.org/forgejo/forgejo:16.0.1
+    image: ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07
     container_name: cocola-forgejo-init
     user: "1000:1000"
     depends_on:
@@ -101,7 +101,7 @@ services:
         forgejo admin user change-password --config /data/gitea/conf/app.ini --username cocola --password "$$COCOLA_FORGEJO_PASSWORD" --must-change-password=false
 
   redis:
-    image: redis:7-alpine
+    image: ghcr.io/sakurs2/cocola-redis:7.4.10-alpine3.21@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     container_name: cocola-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
@@ -116,7 +116,7 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    image: ghcr.io/sakurs2/cocola-minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: cocola-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -136,7 +136,7 @@ services:
 
   # MinIO bucket bootstrap — runs once, creates the default bucket.
   minio-init:
-    image: minio/mc:latest
+    image: ghcr.io/sakurs2/cocola-minio-mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: cocola-minio-init
     depends_on:
       minio:

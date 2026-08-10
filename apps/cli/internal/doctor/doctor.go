@@ -83,6 +83,18 @@ func Run(ctx context.Context, paths config.Paths) Report {
 		add("configuration schema", StatusFail, "outdated; run cocola install to migrate the deployment configuration")
 	} else {
 		add("configuration schema", StatusPass, fmt.Sprintf("version %d", config.CurrentSchemaVersion))
+		endpoint, endpointErr := config.EffectiveGHCREndpoint(state)
+		if endpointErr != nil {
+			add("GHCR endpoint", StatusFail, endpointErr.Error())
+		} else if imageErr := config.ValidateConfiguredImages(paths, state); imageErr != nil {
+			add("GHCR endpoint", StatusFail, endpoint+": "+imageErr.Error())
+		} else {
+			message := endpoint
+			if pending := state.PendingUpgrade; pending != nil && endpoint != state.GHCREndpoint {
+				message += " pending; current " + state.GHCREndpoint
+			}
+			add("GHCR endpoint", StatusPass, message)
+		}
 	}
 	runner, err := compose.New(paths, nil, io.Discard, io.Discard)
 	if err != nil {

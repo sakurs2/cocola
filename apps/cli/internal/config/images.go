@@ -2,16 +2,23 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"strconv"
 	"strings"
 )
 
 const (
-	DefaultRegistry           = "ghcr.io/sakurs2"
+	DefaultGHCREndpoint       = "ghcr.io"
+	DefaultRegistry           = DefaultGHCREndpoint + "/sakurs2"
 	openSandboxAliyunRegistry = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
-	forgejoVersion            = "16.0.1"
-	forgejoManifestDigest     = "sha256:3eb3107bc9de4e9d6d9e539044e6c802dc0b7be351919a145540d4cb5422bf07"
-	openVikingDigest          = "sha256:0d99361a0029ce5221fd11588d9f0f374c6e5f8f1eacbcf1d76de6a0f6cd82cb"
 )
+
+type ImageResolutionOptions struct {
+	Version        string
+	CocolaRegistry string
+	GHCREndpoint   string
+}
 
 type ImageReferences struct {
 	Registry          string
@@ -27,31 +34,92 @@ type ImageReferences struct {
 	SandboxRuntime    string
 }
 
-func ResolveImageReferences(version, customRegistry string) (ImageReferences, error) {
-	if !validImagePart(version) {
+func ResolveImageReferences(options ImageResolutionOptions) (ImageReferences, error) {
+	if !validImagePart(options.Version) {
 		return ImageReferences{}, errors.New("version contains characters that are invalid in an image tag")
 	}
-	registry := customRegistry
+	endpoint, err := NormalizeGHCREndpoint(options.GHCREndpoint)
+	if err != nil {
+		return ImageReferences{}, err
+	}
+	registry := strings.TrimSuffix(strings.TrimSpace(options.CocolaRegistry), "/")
 	if registry == "" {
-		registry = DefaultRegistry
+		registry = defaultCocolaRegistry(endpoint)
 	}
 	if err := validateImageRegistry(registry); err != nil {
 		return ImageReferences{}, err
 	}
 	refs := ImageReferences{
-		Registry:         registry,
-		OpenSandboxExecd: openSandboxAliyunRegistry + "/execd:v1.0.19",
-		SandboxRuntime:   registry + "/cocola-sandbox-runtime:" + version,
+		Registry:          registry,
+		Redis:             pinnedImage(rewriteGHCRImageHost(endpoint, redisTargetImage), redisVersion, redisManifestDigest),
+		Postgres:          pinnedImage(rewriteGHCRImageHost(endpoint, postgresTargetImage), postgresVersion, postgresManifestDigest),
+		Forgejo:           pinnedImage(rewriteGHCRImageHost(endpoint, forgejoTargetImage), forgejoVersion, forgejoManifestDigest),
+		MinIO:             pinnedImage(rewriteGHCRImageHost(endpoint, minioTargetImage), minioVersion, minioManifestDigest),
+		MinIOClient:       pinnedImage(rewriteGHCRImageHost(endpoint, minioClientTargetImage), minioClientVersion, minioClientManifestDigest),
+		OpenViking:        pinnedImage(rewriteGHCRImageHost(endpoint, openVikingTargetImage), openVikingVersion, openVikingDigest),
+		OpenSandboxServer: pinnedImage(rewriteGHCRImageHost(endpoint, openSandboxServerTargetImage), openSandboxServerVersion, openSandboxServerDigest),
+		OpenSandboxExecd:  openSandboxAliyunRegistry + "/execd:v1.0.19",
+		OpenSandboxEgress: pinnedImage(rewriteGHCRImageHost(endpoint, openSandboxEgressTargetImage), openSandboxEgressVersion, openSandboxEgressDigest),
+		SandboxRuntime:    registry + "/cocola-sandbox-runtime:" + options.Version,
 	}
-	refs.Redis = "docker.io/library/redis:7.4.10-alpine3.21"
-	refs.Postgres = "docker.io/library/postgres:16.14-alpine3.23"
-	refs.Forgejo = "codeberg.org/forgejo/forgejo:" + forgejoVersion + "@" + forgejoManifestDigest
-	refs.MinIO = "docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
-	refs.MinIOClient = "docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"
-	refs.OpenViking = "ghcr.io/volcengine/openviking:v0.4.12@" + openVikingDigest
-	refs.OpenSandboxServer = "docker.io/opensandbox/server:v0.1.14"
-	refs.OpenSandboxEgress = "docker.io/opensandbox/egress:v1.1.2"
 	return refs, nil
+}
+
+func NormalizeGHCREndpoint(value string) (string, error) {
+	endpoint := strings.ToLower(strings.TrimSpace(value))
+	if endpoint == "" {
+		endpoint = DefaultGHCREndpoint
+	}
+	if strings.ContainsAny(endpoint, " /\\@?#\t\r\n") || strings.Contains(endpoint, "://") {
+		return "", errors.New("GHCR endpoint must be a registry hostname with an optional port, without a scheme or path")
+	}
+	host := endpoint
+	port := ""
+	if strings.Count(endpoint, ":") > 1 {
+		return "", errors.New("GHCR endpoint does not support raw IPv6 addresses")
+	}
+	if strings.Contains(endpoint, ":") {
+		var err error
+		host, port, err = net.SplitHostPort(endpoint)
+		if err != nil {
+			return "", errors.New("GHCR endpoint port must be a number between 1 and 65535")
+		}
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return "", errors.New("GHCR endpoint port must be a number between 1 and 65535")
+		}
+		port = strconv.Itoa(portNumber)
+	}
+	if host == "" || len(host) > 253 || strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+		return "", errors.New("GHCR endpoint must contain a valid registry hostname")
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", errors.New("GHCR endpoint must contain a valid registry hostname")
+		}
+		for _, char := range label {
+			if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
+				continue
+			}
+			return "", fmt.Errorf("GHCR endpoint contains invalid hostname character %q", char)
+		}
+	}
+	if port != "" {
+		return net.JoinHostPort(host, port), nil
+	}
+	return host, nil
+}
+
+func defaultCocolaRegistry(endpoint string) string {
+	return endpoint + "/sakurs2"
+}
+
+func rewriteGHCRImageHost(endpoint, canonicalImage string) string {
+	return endpoint + "/" + strings.TrimPrefix(canonicalImage, DefaultGHCREndpoint+"/")
+}
+
+func pinnedImage(repository, version, digest string) string {
+	return repository + ":" + version + "@" + digest
 }
 
 func validateImageRegistry(registry string) error {

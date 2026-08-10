@@ -32,6 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/insta
 ```text
 cocola install                 首次交互配置；已有安装则准备升级
 cocola start                   校验环境并创建、更新或恢复服务
+cocola start --ghcr-endpoint <host>  使用并在成功后记住指定 GHCR 端点
 cocola stop                    停止服务但保留容器和网络
 cocola status                  查看容器状态
 cocola logs [-f] [service]     查看全部或单个服务日志
@@ -44,8 +45,12 @@ cocola version                 查看 CLI 构建版本
 `0.0.0.0`，浏览器可直接使用 `http://<server-ip>:<web-port>`，Workspace WebSocket 会按当前
 请求 Host 做同源校验，不需要额外配置。`--public-url https://cocola.example.com` 保留给会改写
 Host 的反向代理，以及 GitHub/飞书等需要生成固定外部回调或跳转地址的集成。
-CLI 使用 Cocola 发布仓库及依赖项目的上游 Registry 下载镜像，不提供内置公共代理选择，也不修改 Docker daemon 配置。
-`--registry` 继续作为只覆盖 Cocola 自有镜像仓库的高级选项；第三方镜像保持预设的直接来源。镜像版本以及外部 OpenSandbox 等高级场景仍可使用命令行参数覆盖。使用外部
+除 OpenSandbox Execd 的阿里云官方镜像外，CLI 将冷启动依赖统一解析为完整的 GHCR 引用，默认
+端点为 `ghcr.io`，且不修改 Docker daemon 配置。中国大陆用户可在 `start` 时使用
+`--ghcr-endpoint ghcr.nju.edu.cn`；参数只接受 hostname 或 hostname:port，不接受 URL、路径或
+凭据。端点只有在镜像拉取、启动和健康检查全部成功后才会记住，失败会恢复原配置且不会静默
+回退。后续不带参数的 `start` 会复用最后一次成功的端点。`install --registry` 继续只覆盖 Cocola
+自有镜像；固定第三方镜像和 OpenViking 仍随 GHCR endpoint 解析。使用外部
 OpenSandbox 时，必须同时提供从远端 sandbox 可达的 LLM Gateway URL 和 Internal SCM URL
 （`--sandbox-internal-scm-url`），CLI 会拒绝
 会产生失联 sandbox 的不完整配置。
@@ -73,7 +78,8 @@ OpenSandbox 时，必须同时提供从远端 sandbox 可达的 LLM Gateway URL 
 继续使用同一个 `--home`，或设置 `COCOLA_HOME`。
 
 `cocola start` 是唯一启动入口：它会检查 Docker、Compose、部署配置、首次启动端口和基本
-磁盘空间。首次启动或待应用升级时会拉取 Compose 服务镜像，以及 Managed OpenSandbox 使用的
+磁盘空间，并校验 `state.json` 中的 GHCR endpoint 与 `config.env` 的完整镜像引用一致。首次启动、
+端点切换或待应用升级时会拉取 Compose 服务镜像，以及 Managed OpenSandbox 使用的
 Sandbox Runtime、execd 和 egress 镜像。Registry 不可用但所有目标镜像已缓存时继续启动；
 缓存不完整则明确失败，不会自动切换到其他 Registry。普通
 `stop` 后恢复不会强制访问 Registry。首次启动发现已有 PostgreSQL 数据卷时，会先验证当前配置
@@ -81,13 +87,15 @@ Sandbox Runtime、execd 和 egress 镜像。Registry 不可用但所有目标镜
 指引，CLI 不会自动删除数据。随后通过 Compose `up --wait` 创建缺失容器、重建配置或镜像发生
 变化的服务、恢复已停止容器，并等待包含 Sandbox Manager、Agent Runtime 和 Web 在内的健康
 检查通过。成功页会显示当前版本、Web、Admin 和模型配置入口；升级成功时同时显示
-`Before version` 与 `Current version`。失败页会展示当前容器状态及诊断命令。
+`Before version` 与 `Current version`。端点切换成功时显示 `Before GHCR endpoint` 与
+`Current GHCR endpoint`；JSON 结果增加 `ghcr_endpoint`，并仅在切换时增加
+`previous_ghcr_endpoint`。失败页会展示当前容器状态及诊断命令。
 
 `install`、`start` 和 `stop` 在同一个安装目录上串行执行。如果另一个变更操作正在运行，CLI
 会显示其命令、PID 和开始时间并立即退出；`status`、`logs` 和只读的 `doctor` 仍可用于观察。
-`doctor` 会检查容器状态、数据卷、当前 PostgreSQL 凭据、本地镜像缓存、安装目录磁盘、可见的
-Docker Root Dir，以及 Internal SCM 配置端口是否确实由 Forgejo 容器持有，不会启动容器、拉取镜像
-或删除资源。
+`doctor` 会检查容器状态、数据卷、当前 PostgreSQL 凭据、本地镜像缓存、GHCR endpoint 格式与
+镜像配置一致性、安装目录磁盘、可见的 Docker Root Dir，以及 Internal SCM 配置端口是否确实
+由 Forgejo 容器持有，不会启动容器、拉取镜像或删除资源。
 
 ## 升级
 
@@ -130,8 +138,9 @@ cd apps/cli && go test ./...
 ```
 
 推送版本 tag 后，Release workflow 会先校验版本，再构建 linux/darwin、amd64/arm64
-CLI 以及同版本全套服务镜像。Forgejo 直接使用 Codeberg 上游固定版本和 digest 的多架构镜像，
-不再由 Cocola Release 重复同步；Cocola 自有镜像构建、匿名读取和推广成功后才发布 CLI Release。正式版本必须使用
+CLI 以及同版本全套服务镜像。固定第三方依赖仅在版本变化时通过独立的手动工作流复制到 Cocola
+GHCR，并发布对应锁版本的源码和许可证归档；普通 Cocola Release 不复制第三方镜像或下载第三方
+源码。Cocola 自有镜像构建、匿名读取和推广成功后才发布 CLI Release。正式版本必须使用
 `vMAJOR.MINOR.PATCH`（如 `v2.0.0`）并高于历史最新正式版本；预发布版本使用
 `vMAJOR.MINOR.PATCH-prerelease`（如 `v2.0.0-rc.1`）并按顺序递增。非法、回退或已经
 发布过的版本会在任何镜像构建前失败。正式版本同时更新 `latest` 镜像，源码构建的开发版

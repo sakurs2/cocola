@@ -31,6 +31,9 @@ func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, e
 	if len(runner.State.ManagedRuntimeImages) == 0 {
 		return nil, errors.New("deployment image configuration is incomplete; run cocola install to repair it before starting Cocola")
 	}
+	if err := config.ValidateConfiguredImages(runner.Paths, runner.State); err != nil {
+		return nil, fmt.Errorf("deployment image configuration is inconsistent: %w", err)
+	}
 	if err := prepareSandboxRoot(runner.Paths.SandboxRoot); err != nil {
 		return nil, err
 	}

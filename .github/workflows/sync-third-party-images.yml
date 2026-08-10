@@ -1,0 +1,161 @@
+name: sync third-party images
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-third-party-images
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: mirror pinned OCI images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate dependency lock and generated CLI constants
+        run: python3 scripts/generate_third_party_images.py --check
+      - name: Install the pinned regctl binary
+        env:
+          REGCTL_SHA256: c93aa7638749f5aaac1a8e01787321889c78f0101809bb2880343478d0ba0467
+          REGCTL_VERSION: v0.11.5
+        run: |
+          curl --fail --location --silent --show-error \
+            "https://github.com/regclient/regclient/releases/download/${REGCTL_VERSION}/regctl-linux-amd64" \
+            --output /tmp/regctl
+          printf '%s  %s\n' "$REGCTL_SHA256" /tmp/regctl | sha256sum --check --strict
+          install -d "$RUNNER_TEMP/bin"
+          install -m 0755 /tmp/regctl "$RUNNER_TEMP/bin/regctl"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Copy and verify immutable multi-platform images
+        env:
+          LOCK_FILE: deploy/third-party-images.lock.json
+        run: |
+          set -euo pipefail
+          while IFS= read -r image; do
+            id="$(jq -r '.id' <<<"$image")"
+            mirror="$(jq -r '.mirror' <<<"$image")"
+            source="$(jq -r '.upstream_image + ":" + .tag' <<<"$image")"
+            digest="$(jq -r '.manifest_digest' <<<"$image")"
+            target="$(jq -r '.target_image + ":" + .tag' <<<"$image")"
+
+            actual_source_digest="$(regctl manifest head "$source")"
+            if [[ "$actual_source_digest" != "$digest" ]]; then
+              echo "::error title=Upstream digest drift::$id expected $digest but upstream returned $actual_source_digest"
+              exit 1
+            fi
+            manifest="$(regctl manifest get "$source@$digest" --format raw-body)"
+            while IFS= read -r platform; do
+              if ! jq -e --arg platform "$platform" \
+                '.manifests[]? | select((.platform.os + "/" + .platform.architecture) == $platform)' \
+                <<<"$manifest" >/dev/null; then
+                echo "::error title=Missing image platform::$source@$digest does not contain $platform"
+                exit 1
+              fi
+            done < <(jq -r '.platforms[]' <<<"$image")
+
+            if [[ "$mirror" == "true" ]]; then
+              if existing_digest="$(regctl manifest head "$target" 2>/dev/null)"; then
+                if [[ "$existing_digest" != "$digest" ]]; then
+                  echo "::error title=Immutable target conflict::$target already points to $existing_digest instead of $digest"
+                  exit 1
+                fi
+                echo "$target already matches $digest; skipping copy"
+              else
+                regctl image copy "$source@$digest" "$target"
+              fi
+              copied_digest="$(regctl manifest head "$target")"
+              if [[ "$copied_digest" != "$digest" ]]; then
+                echo "::error title=Copy verification failed::$target points to $copied_digest instead of $digest"
+                exit 1
+              fi
+            else
+              echo "$target remains an upstream GHCR dependency; no copy required"
+            fi
+            printf '| `%s` | `%s` | `%s` |\n' "$source" "$target" "$digest" >> /tmp/image-summary.md
+          done < <(jq -c '.images[]' "$LOCK_FILE")
+      - name: Verify anonymous GHCR and proxy manifest access
+        env:
+          LOCK_FILE: deploy/third-party-images.lock.json
+        run: |
+          set -euo pipefail
+          regctl registry logout ghcr.io >/dev/null 2>&1 || true
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          while IFS= read -r image; do
+            target="$(jq -r '.target_image + ":" + .tag' <<<"$image")"
+            digest="$(jq -r '.manifest_digest' <<<"$image")"
+            anonymous_digest="$(regctl manifest head "$target" 2>/dev/null || true)"
+            if [[ "$anonymous_digest" != "$digest" ]]; then
+              echo "::error title=GHCR package is not public::$target is not anonymously readable. Set the package to Public and rerun this workflow."
+              exit 1
+            fi
+            proxy="ghcr.nju.edu.cn/${target#ghcr.io/}"
+            proxy_digest=""
+            for attempt in {1..12}; do
+              proxy_digest="$(regctl manifest head "$proxy" 2>/dev/null || true)"
+              [[ "$proxy_digest" == "$digest" ]] && break
+              sleep 10
+            done
+            if [[ "$proxy_digest" != "$digest" ]]; then
+              echo "::error title=GHCR proxy verification failed::$proxy did not resolve to $digest"
+              exit 1
+            fi
+          done < <(jq -c '.images[]' "$LOCK_FILE")
+      - name: Publish synchronization summary
+        if: always()
+        run: |
+          {
+            echo '## Third-party image synchronization'
+            echo
+            echo '| Upstream | GHCR target | Manifest digest |'
+            echo '| --- | --- | --- |'
+            if [[ -f /tmp/image-summary.md ]]; then cat /tmp/image-summary.md; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sources:
+    name: publish corresponding sources
+    needs: mirror
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build verified source and license bundle
+        run: python3 scripts/archive_third_party_sources.py --output /tmp/third-party-sources
+      - name: Create or verify immutable source release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          revision="$(jq -r '.revision' deploy/third-party-images.lock.json)"
+          tag="third-party-images-${revision}"
+          if ! gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$REPOSITORY" \
+              --title "Third-party container image sources ${revision}" \
+              --notes-file /tmp/third-party-sources/THIRD_PARTY_SOURCES.md
+          fi
+          mkdir -p /tmp/existing-assets
+          for asset in /tmp/third-party-sources/*; do
+            name="$(basename "$asset")"
+            if gh release download "$tag" --repo "$REPOSITORY" --pattern "$name" \
+              --dir /tmp/existing-assets >/dev/null 2>&1; then
+              if ! cmp --silent "$asset" "/tmp/existing-assets/$name"; then
+                echo "::error title=Immutable source asset conflict::$name already exists with different content"
+                exit 1
+              fi
+              echo "$name already exists with identical content; skipping upload"
+            else
+              gh release upload "$tag" "$asset" --repo "$REPOSITORY"
+            fi
+          done

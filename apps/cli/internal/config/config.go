@@ -21,7 +21,7 @@ import (
 // CurrentSchemaVersion versions the CLI-owned deployment files independently
 // from the Cocola release. Every incompatible config change must add an
 // explicit migration before this value is incremented.
-const CurrentSchemaVersion = 4
+const CurrentSchemaVersion = 5
 
 const (
 	defaultAgentRuntimeID       = "claude-code"
@@ -79,6 +79,7 @@ type State struct {
 	LastSuccessfulVersion  string              `json:"last_successful_version,omitempty"`
 	DeploymentRevision     string              `json:"deployment_revision"`
 	LastSuccessfulRevision string              `json:"last_successful_revision,omitempty"`
+	GHCREndpoint           string              `json:"ghcr_endpoint"`
 	ManagedOpenSandbox     bool                `json:"managed_opensandbox"`
 	SandboxImage           string              `json:"sandbox_image"`
 	ManagedRuntimeImages   []string            `json:"managed_runtime_images"`
@@ -97,6 +98,8 @@ type PendingUpgrade struct {
 	ToRevision        string `json:"to_revision"`
 	FromImageRegistry string `json:"from_image_registry,omitempty"`
 	ToImageRegistry   string `json:"to_image_registry"`
+	FromGHCREndpoint  string `json:"from_ghcr_endpoint,omitempty"`
+	ToGHCREndpoint    string `json:"to_ghcr_endpoint"`
 	BackupDir         string `json:"backup_dir"`
 	PreparedAt        string `json:"prepared_at"`
 }
@@ -364,13 +367,17 @@ func WriteInstallation(paths Paths, options Options, compose []byte) (Credential
 		return Credentials{}, fmt.Errorf("create sandbox directory: %w", err)
 	}
 
-	images, err := ResolveImageReferences(options.Version, options.resolvedImageRegistry())
+	images, err := ResolveImageReferences(ImageResolutionOptions{
+		Version: options.Version, CocolaRegistry: options.resolvedImageRegistry(),
+		GHCREndpoint: DefaultGHCREndpoint,
+	})
 	if err != nil {
 		return Credentials{}, err
 	}
 	state := State{
 		ConfigSchemaVersion: CurrentSchemaVersion,
 		Version:             options.Version, ManagedOpenSandbox: options.ManagedOpenSandbox,
+		GHCREndpoint:         DefaultGHCREndpoint,
 		SandboxImage:         images.SandboxRuntime,
 		ManagedRuntimeImages: images.ManagedRuntimeImages(),
 		PublicURL:            publicURLOrDefault(options),
@@ -456,7 +463,10 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 	}
 	publicOrigin, _ := o.PublicOrigin()
 	internalSCM := o.resolvedInternalSCM()
-	images, _ := ResolveImageReferences(o.Version, o.resolvedImageRegistry())
+	images, _ := ResolveImageReferences(ImageResolutionOptions{
+		Version: o.Version, CocolaRegistry: o.resolvedImageRegistry(),
+		GHCREndpoint: DefaultGHCREndpoint,
+	})
 	publicOrigins := []string{
 		fmt.Sprintf("http://127.0.0.1:%d", o.WebPort),
 		fmt.Sprintf("http://localhost:%d", o.WebPort),

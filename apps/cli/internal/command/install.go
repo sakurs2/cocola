@@ -266,6 +266,8 @@ func printInstallSummary(printer ui.Printer, result installResult) {
 	printer.Path(result.ConfigFile)
 	printer.Info("When you are ready, start all services with:")
 	printer.Command("cocola start")
+	printer.Info("Mainland China users can accelerate GHCR downloads with:")
+	printer.Command("cocola start --ghcr-endpoint ghcr.nju.edu.cn")
 }
 
 func validatePort(value string) error {

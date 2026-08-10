@@ -44,7 +44,7 @@ proto-gen-py: ## Generate Python stubs (containerized; corporate-TLS safe)
 	scripts/proto-gen-py.sh
 
 # -------------------------------------------------------------------- go
-.PHONY: go-tidy go-build go-test go-lint
+.PHONY: go-tidy go-build go-test go-lint third-party-images-check
 go-tidy: ## go mod tidy for all Go modules
 	@for a in $(GO_APPS); do (cd apps/$$a && GOWORK=off go mod tidy); done
 	@cd apps/$(SANDBOX_APP) && GOWORK=off go mod tidy
@@ -68,7 +68,10 @@ go-lint: ## Run golangci-lint
 go-format: ## Format Go code (gofmt -w -s)
 	@gofmt -w -s $$(git ls-files '*.go' | grep -v -E '(/gen/|\.pb\.go$$)')
 
-go-format-check: ## Check gofmt formatting (lists offenders, non-zero if any)
+third-party-images-check: ## Validate third-party image lock and generated Go constants
+	@python3 scripts/generate_third_party_images.py --check
+
+go-format-check: third-party-images-check ## Check generated image constants and gofmt formatting
 	@out=$$(gofmt -l -s $$(git ls-files '*.go' | grep -v -E '(/gen/|\.pb\.go$$)')); \
 		if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
