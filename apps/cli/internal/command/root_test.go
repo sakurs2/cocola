@@ -109,7 +109,7 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	for _, expected := range []string{
 		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
 		`COCOLA_REDIS_IMAGE="docker.io/library/redis:7.4.10-alpine3.21"`,
-		`COCOLA_FORGEJO_IMAGE="ghcr.io/sakurs2/cocola-forgejo:16.0.1@sha256:3eb3107`,
+		`COCOLA_FORGEJO_IMAGE="codeberg.org/forgejo/forgejo:16.0.1@sha256:3eb3107`,
 	} {
 		if !strings.Contains(string(environment), expected) {
 			t.Fatalf("generated environment missing %q: %s", expected, environment)

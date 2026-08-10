@@ -45,7 +45,7 @@ func ResolveImageReferences(version, customRegistry string) (ImageReferences, er
 	}
 	refs.Redis = "docker.io/library/redis:7.4.10-alpine3.21"
 	refs.Postgres = "docker.io/library/postgres:16.14-alpine3.23"
-	refs.Forgejo = "ghcr.io/sakurs2/cocola-forgejo:" + forgejoVersion + "@" + forgejoManifestDigest
+	refs.Forgejo = "codeberg.org/forgejo/forgejo:" + forgejoVersion + "@" + forgejoManifestDigest
 	refs.MinIO = "docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 	refs.MinIOClient = "docker.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"
 	refs.OpenViking = "ghcr.io/volcengine/openviking:v0.4.12@" + openVikingDigest

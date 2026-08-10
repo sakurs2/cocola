@@ -130,8 +130,8 @@ cd apps/cli && go test ./...
 ```
 
 推送版本 tag 后，Release workflow 会先校验版本，再构建 linux/darwin、amd64/arm64
-CLI 以及同版本全套服务镜像；同时将固定 digest 的未修改 Forgejo 多架构镜像同步到 Cocola GHCR，
-验证匿名读取，并把对应完整源码和许可证作为 Release 资产发布；这些步骤成功后才发布 CLI Release。正式版本必须使用
+CLI 以及同版本全套服务镜像。Forgejo 直接使用 Codeberg 上游固定版本和 digest 的多架构镜像，
+不再由 Cocola Release 重复同步；Cocola 自有镜像构建、匿名读取和推广成功后才发布 CLI Release。正式版本必须使用
 `vMAJOR.MINOR.PATCH`（如 `v2.0.0`）并高于历史最新正式版本；预发布版本使用
 `vMAJOR.MINOR.PATCH-prerelease`（如 `v2.0.0-rc.1`）并按顺序递增。非法、回退或已经
 发布过的版本会在任何镜像构建前失败。正式版本同时更新 `latest` 镜像，源码构建的开发版
