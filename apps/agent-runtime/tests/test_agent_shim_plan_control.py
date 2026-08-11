@@ -1173,8 +1173,47 @@ def test_execute_options_merge_control_with_user_mcps(monkeypatch):
     assert "env" not in options
     assert "extra_args" not in options
     assert "can_use_tool" not in options
-    assert len(options["hooks"]["PreToolUse"]) == 2
+    assert len(options["hooks"]["PreToolUse"]) == 3
     assert len(options["hooks"]["PostToolUse"]) == 2
+
+
+async def test_artifact_read_guard_blocks_output_and_large_binary_files(tmp_path):
+    module = _load_shim("cocola_agent_shim_artifact_read_guard")
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    generated = outputs / "owl.png"
+    generated.write_bytes(b"\x89PNG\r\n\x1a\n")
+    large = tmp_path / "large.jpg"
+    large.write_bytes(b"x" * (module._ArtifactReadGuard._MAX_INLINE_BINARY_BYTES + 1))
+    guard = module._ArtifactReadGuard(tmp_path, outputs)
+
+    for path in (generated, large):
+        decision = await guard.pre_tool_use(
+            {"tool_name": "Read", "tool_input": {"file_path": str(path)}},
+            "read-1",
+            None,
+        )
+        assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "artifact list --json" in decision["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+async def test_artifact_read_guard_allows_text_and_small_input_images(tmp_path):
+    module = _load_shim("cocola_agent_shim_artifact_read_guard_safe_reads")
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    text_file = tmp_path / "large.txt"
+    text_file.write_text("x" * 300_000, encoding="utf-8")
+    uploaded_image = tmp_path / "uploaded.png"
+    uploaded_image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    guard = module._ArtifactReadGuard(tmp_path, outputs)
+
+    for path in (text_file, uploaded_image):
+        decision = await guard.pre_tool_use(
+            {"tool_name": "Read", "tool_input": {"file_path": str(path)}},
+            "read-1",
+            None,
+        )
+        assert decision == {}
 
 
 async def test_live_command_output_preserves_shell_streams_and_emits_deltas(monkeypatch):

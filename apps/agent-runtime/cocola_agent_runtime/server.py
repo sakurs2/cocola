@@ -88,11 +88,17 @@ from cocola_agent_runtime.skill_reconciler import (
 log = get_logger("cocola.agent-runtime.server")
 
 ARTIFACT_SYSTEM_PROMPT = (
-    "When you create files that the user should download or preview, save them "
+    "When you create files that the user should download or preview, save every final deliverable "
     "under /workspace/outputs/. Only changed regular files in /workspace/outputs/ are published "
-    "to the user after the turn; symbolic links are ignored. Use "
-    "`cocola-sandbox artifact status --json` and "
-    "`cocola-sandbox artifact list --json` to inspect the contract."
+    "to the user after the turn; symbolic links are ignored. Never call Read on a generated "
+    "binary deliverable such as an image, audio/video file, PDF, archive, office document, or "
+    "executable merely to preview or attach it: inline binary tool results can exceed the Agent "
+    "transport limit. Verify the final file with bounded metadata commands instead. If visual "
+    "inspection is essential, create and Read a small temporary preview outside outputs while "
+    "keeping the original deliverable in outputs. Before responding, run "
+    "`cocola-sandbox artifact status --json` and `cocola-sandbox artifact list --json`, then "
+    "mention the resulting filenames. Cocola publishes the files after the turn, so do not invent "
+    "download URLs."
 )
 PREVIEW_SYSTEM_PROMPT = (
     "When a local HTTP server must remain available to the user through the Workspace Preview "

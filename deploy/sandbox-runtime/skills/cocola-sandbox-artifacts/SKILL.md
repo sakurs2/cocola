@@ -20,16 +20,24 @@ Workspace.
    allowed. Use clear filenames and avoid symbolic links; links and other
    non-regular files are not published.
 
-3. HTML Artifacts may use inline JavaScript and external CDN resources. Keep
+3. Do not call `Read` on a generated binary deliverable merely to preview or
+   attach it. Inline image, audio/video, PDF, archive, office-document, and
+   executable content can exceed the Agent transport limit. Verify final files
+   with bounded metadata commands such as `file`, dimensions, page count, or a
+   checksum. If visual inspection is essential, create and `Read` a small
+   temporary preview outside `outputs`; keep the original deliverable in
+   `outputs`.
+
+4. HTML Artifacts may use inline JavaScript and external CDN resources. Keep
    relative assets together under `/workspace/outputs` when the document needs
    them, and prefer versioned dependency URLs for reproducible previews.
 
-4. For interactive behavior or rendered-page verification, serve the HTML
+5. For interactive behavior or rendered-page verification, serve the HTML
    temporarily over loopback HTTP and use the separate `cocola-sandbox browser`
    capability. Do not place a long-running preview server or its logs under
    `outputs`.
 
-5. Confirm the final inventory before responding:
+6. Confirm the final inventory before responding:
 
    ```bash
    cocola-sandbox artifact list --json

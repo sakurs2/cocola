@@ -202,6 +202,8 @@ def _build_options(
     hook_groups: list[dict[str, list[Any]]] = []
     if control is not None:
         hook_groups.append(control.sdk_hooks(claude_agent_sdk))
+    if not plan_mode:
+        hook_groups.append(_ArtifactReadGuard(cwd).sdk_hooks(claude_agent_sdk))
     if live_command_output is not None:
         hook_groups.append(live_command_output.sdk_hooks(claude_agent_sdk))
     if hook_groups:
@@ -291,6 +293,131 @@ _TERMINAL_CONTROL_TOOL_NAMES = frozenset(
 _MCP_STATUS_TIMEOUT_SECONDS = 8.0
 _MCP_STATUS_POLL_SECONDS = (0.5, 1.0, 2.0)
 _MCP_TERMINAL_STATUSES = {"connected", "failed", "needs-auth", "disabled"}
+
+
+class _ArtifactReadGuard:
+    """Keep generated binary files out of Claude Code's inline JSON channel."""
+
+    _MAX_INLINE_BINARY_BYTES = 256 * 1024
+    _BINARY_SUFFIXES = frozenset(
+        {
+            ".7z",
+            ".avif",
+            ".avi",
+            ".bmp",
+            ".doc",
+            ".docx",
+            ".dylib",
+            ".exe",
+            ".gif",
+            ".gz",
+            ".ico",
+            ".jpeg",
+            ".jpg",
+            ".m4a",
+            ".mkv",
+            ".mov",
+            ".mp3",
+            ".mp4",
+            ".odp",
+            ".ods",
+            ".odt",
+            ".pdf",
+            ".png",
+            ".ppt",
+            ".pptx",
+            ".rar",
+            ".so",
+            ".tar",
+            ".tif",
+            ".tiff",
+            ".wav",
+            ".webm",
+            ".webp",
+            ".xls",
+            ".xlsb",
+            ".xlsx",
+            ".xz",
+            ".zip",
+        }
+    )
+
+    def __init__(self, cwd: str | Path, outputs_root: str | Path = "/workspace/outputs") -> None:
+        self._cwd = Path(cwd)
+        self._outputs_root = Path(outputs_root)
+
+    @staticmethod
+    def _decision(reason: str) -> dict[str, Any]:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    @staticmethod
+    def _resolved(path: Path) -> Path | None:
+        try:
+            resolved = path.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+        return resolved if resolved.is_file() else None
+
+    @classmethod
+    def _is_binary(cls, path: Path) -> bool:
+        if path.suffix.lower() in cls._BINARY_SUFFIXES:
+            return True
+        try:
+            with path.open("rb") as handle:
+                return b"\x00" in handle.read(8192)
+        except OSError:
+            return False
+
+    def _is_output(self, path: Path) -> bool:
+        try:
+            output_root = self._outputs_root.resolve(strict=True)
+            path.relative_to(output_root)
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return True
+
+    async def pre_tool_use(
+        self,
+        hook_input: dict[str, Any],
+        _tool_use_id: str | None,
+        _context: Any,
+    ) -> dict[str, Any]:
+        if str(hook_input.get("tool_name") or "") != "Read":
+            return {}
+        tool_input = hook_input.get("tool_input")
+        raw_path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return {}
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = self._cwd / candidate
+        path = self._resolved(candidate)
+        if path is None or not self._is_binary(path):
+            return {}
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return {}
+        if not self._is_output(path) and size <= self._MAX_INLINE_BINARY_BYTES:
+            return {}
+        return self._decision(
+            "Cocola blocked inline reading of this generated or large binary file because it can "
+            "exceed the Agent transport limit. Inspect it with bounded metadata commands instead. "
+            "If visual inspection is essential, create a temporary preview smaller than 256 KiB "
+            "outside /workspace/outputs and Read that preview. Keep the final file under "
+            "/workspace/outputs and run `cocola-sandbox artifact list --json` before responding."
+        )
+
+    def sdk_hooks(self, sdk: Any) -> dict[str, list[Any]]:
+        return {
+            "PreToolUse": [sdk.HookMatcher(matcher="Read", hooks=[self.pre_tool_use])],
+        }
 
 
 class _LiveCommandOutput:

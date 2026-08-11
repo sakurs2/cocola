@@ -2071,6 +2071,8 @@ async def test_query_publishes_outputs_artifacts():
     assert store.puts[key] == (b"hello world", "text/plain")
     assert "Only changed regular files in /workspace/outputs/" in prov.seen_options.system_prompt
     assert "cocola-sandbox artifact list --json" in prov.seen_options.system_prompt
+    assert "Never call Read on a generated binary deliverable" in prov.seen_options.system_prompt
+    assert "small temporary preview outside outputs" in prov.seen_options.system_prompt
     assert "self-contained file" not in prov.seen_options.system_prompt
 
 
