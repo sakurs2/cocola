@@ -26,7 +26,16 @@ def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    fake_sdk = types.SimpleNamespace(ClaudeAgentOptions=FakeClaudeAgentOptions)
+    class FakeHookMatcher:
+        def __init__(self, *, matcher=None, hooks=None, timeout=None):
+            self.matcher = matcher
+            self.hooks = hooks or []
+            self.timeout = timeout
+
+    fake_sdk = types.SimpleNamespace(
+        ClaudeAgentOptions=FakeClaudeAgentOptions,
+        HookMatcher=FakeHookMatcher,
+    )
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake_sdk)
 
     module = _load_shim("cocola_agent_shim_test")
@@ -49,6 +58,10 @@ def test_agent_shim_passes_mcp_servers_to_claude_options(monkeypatch):
     assert captured["strict_mcp_config"] is True
     assert captured["setting_sources"] == ["user", "project"]
     assert captured["skills"] == []
+    assert len(captured["hooks"]["PreToolUse"]) == 1
+    read_guard = captured["hooks"]["PreToolUse"][0]
+    assert read_guard.matcher == "Read"
+    assert len(read_guard.hooks) == 1
 
 
 async def test_agent_shim_streams_mcp_status_without_blocking_query(monkeypatch):
