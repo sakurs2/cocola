@@ -178,6 +178,18 @@ func TestComposeRoutesSandboxDependenciesOverDedicatedNetwork(t *testing.T) {
 	}
 }
 
+func TestComposeRoutesWebUsageRequestsToLLMGateway(t *testing.T) {
+	webStart := bytes.Index(Compose, []byte("  web:\n"))
+	networksStart := bytes.Index(Compose, []byte("\nnetworks:\n"))
+	if webStart < 0 || networksStart <= webStart {
+		t.Fatal("production compose web service block is missing")
+	}
+	web := Compose[webStart:networksStart]
+	if !bytes.Contains(web, []byte("COCOLA_LLM_GATEWAY_URL: http://llm-gateway:8080")) {
+		t.Fatal("web must route Usage and quota requests to the Compose llm-gateway service")
+	}
+}
+
 func TestComposeAuthenticatesPostgreSQLHealthChecks(t *testing.T) {
 	for _, required := range [][]byte{
 		[]byte("PGPASSWORD=$$POSTGRES_PASSWORD"),

@@ -466,6 +466,7 @@ services:
       COCOLA_WEB_HOST: "${COCOLA_WEB_HOST:-0.0.0.0}"
       NEXT_PUBLIC_GATEWAY_URL: "http://localhost:${COCOLA_GATEWAY_HOST_PORT}"
       COCOLA_GATEWAY_URL: http://gateway:8080
+      COCOLA_LLM_GATEWAY_URL: http://llm-gateway:8080
       COCOLA_ADMIN_URL: http://admin-api:8090
       COCOLA_ADMIN_KEY: "${COCOLA_ADMIN_KEY}"
       COCOLA_HOST_AGENT_URL: http://host-agent:8095
