@@ -1218,7 +1218,7 @@ async def test_skill_sync_uses_runtime_id_as_native_directory():
         assert manifest["skills"][0]["kind"] == "markdown"
 
 
-async def test_claude_and_codex_share_compatible_skill_set():
+async def test_claude_uses_the_reconciled_skill_set():
     executor = StaticSandboxExecutor(
         exec_handler=lambda _sandbox_id, cmd: (
             ExecOutcome(stdout="{}") if cmd[2] == _SKILLS_INSPECT_SCRIPT else ExecOutcome()
@@ -1229,12 +1229,11 @@ async def test_claude_and_codex_share_compatible_skill_set():
     await servicer._sync_skills_into_sandbox(
         "box-1",
         [Skill(id="review", name="Review", skill_md="# Review")],
-        runtime_id="codex",
+        runtime_id="claude-code",
     )
 
     assert executor.exec_calls[0]["cmd"][2] == _SKILLS_INSPECT_SCRIPT
     assert "/home/cocola/.claude/skills" in _SKILLS_INSPECT_SCRIPT
-    assert "/home/cocola/.agents/skills" in _SKILLS_INSPECT_SCRIPT
 
 
 async def test_skill_digest_hit_skips_minio_and_archive_write():
@@ -1408,7 +1407,7 @@ async def test_skill_batch_installer_persists_shared_and_local_payloads(tmp_path
     assert not archive.exists()
 
 
-async def test_platform_and_configured_skills_share_claude_and_codex_set(tmp_path):
+async def test_platform_and_configured_skills_share_claude_set(tmp_path):
     home = tmp_path / "home" / "cocola"
     platform_root = tmp_path / "platform-skills"
     write_platform_browser_skill(platform_root)
@@ -1458,7 +1457,6 @@ async def test_platform_and_configured_skills_share_claude_and_codex_set(tmp_pat
         platform_root / "cocola-sandbox-browser"
     ).resolve()
     assert (home / ".claude" / "skills").resolve() == current.resolve()
-    assert (home / ".agents" / "skills").resolve() == current.resolve()
 
     inspected_after = subprocess.run(
         [sys.executable, "-c", inspect_script],
@@ -1843,7 +1841,6 @@ async def test_project_query_uses_isolated_project_worktree():
 
 async def test_runtime_catalog_and_provider_dispatch():
     claude = ListProvider([AgentEvent(kind="done", data={})])
-    codex = ListProvider([AgentEvent(kind="done", data={})])
     contract = {
         "version": 1,
         "renderer": "summary",
@@ -1861,14 +1858,6 @@ async def test_runtime_catalog_and_provider_dispatch():
                 ),
                 claude,
             ),
-            RuntimeEntry(
-                RuntimeDescriptor(
-                    id="codex",
-                    label="Codex",
-                    model_protocol="openai-responses",
-                ),
-                codex,
-            ),
         ]
     )
     servicer = AgentRuntimeServicer(
@@ -1883,19 +1872,17 @@ async def test_runtime_catalog_and_provider_dispatch():
     catalog = await servicer.ListRuntimes(None, FakeContext())
     assert [(item.id, item.model_protocol, item.is_default) for item in catalog.runtimes] == [
         ("claude-code", "anthropic-messages", True),
-        ("codex", "openai-responses", False),
     ]
 
     await servicer.Query(
-        FakeRequest(runtime_id="codex", skill_id="report", sandbox_id="box-1"),
+        FakeRequest(runtime_id="claude-code", skill_id="report", sandbox_id="box-1"),
         FakeContext(),
     )
 
-    assert claude.seen_options is None
-    assert codex.seen_options is not None
-    assert codex.seen_options.runtime_id == "codex"
-    assert codex.seen_options.selected_skill_result_contract == contract
-    assert codex.seen_options.structured_result_policy == "none"
+    assert claude.seen_options is not None
+    assert claude.seen_options.runtime_id == "claude-code"
+    assert claude.seen_options.selected_skill_result_contract == contract
+    assert claude.seen_options.structured_result_policy == "required"
 
 
 async def test_query_rejects_unsupported_runtime_before_provider_call():
@@ -1908,42 +1895,6 @@ async def test_query_rejects_unsupported_runtime_before_provider_call():
     assert len(context.written) == 1
     assert context.written[0].kind == "error"
     assert context.written[0].data["code"] == "UNSUPPORTED_RUNTIME"
-
-
-async def test_query_rejects_plan_for_non_claude_runtime():
-    claude = ListProvider([])
-    codex = ListProvider([])
-    runtimes = RuntimeRegistry(
-        [
-            RuntimeEntry(
-                RuntimeDescriptor(
-                    id="claude-code",
-                    label="Claude Code",
-                    model_protocol="anthropic-messages",
-                    is_default=True,
-                ),
-                claude,
-            ),
-            RuntimeEntry(
-                RuntimeDescriptor(
-                    id="codex",
-                    label="Codex",
-                    model_protocol="openai-responses",
-                ),
-                codex,
-            ),
-        ]
-    )
-    context = FakeContext()
-
-    await AgentRuntimeServicer(claude, runtimes=runtimes).Query(
-        FakeRequest(runtime_id="codex", interaction_mode=pb.INTERACTION_MODE_PLAN),
-        context,
-    )
-
-    assert codex.seen_options is None
-    assert context.written[-1].kind == "error"
-    assert context.written[-1].data["code"] == "PLAN_RUNTIME_UNSUPPORTED"
 
 
 async def test_release_session_calls_binder_and_session_map():

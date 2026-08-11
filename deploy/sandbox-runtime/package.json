@@ -1,8 +1,0 @@
-{
-  "name": "cocola-sandbox-runtime",
-  "private": true,
-  "dependencies": {
-    "@openai/codex": "0.144.1",
-    "@openai/codex-sdk": "0.144.1"
-  }
-}

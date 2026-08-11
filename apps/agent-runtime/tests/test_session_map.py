@@ -47,7 +47,7 @@ async def _contract(store):
     await store.put("S1", "", user_id="U1", runtime_id=runtime_id)
     assert await store.get("S1", user_id="U1", runtime_id=runtime_id) == "claude-bbb"
     assert await store.get("S1", user_id="U2", runtime_id=runtime_id) is None
-    assert await store.get("S1", user_id="U1", runtime_id="codex") is None
+    assert await store.get("S1", user_id="U1", runtime_id="other-runtime") is None
     # delete forgets a binding (used to drop a dangling/stale resume id).
     await store.delete("S1", user_id="U1", runtime_id=runtime_id)
     assert await store.get("S1", user_id="U1", runtime_id=runtime_id) is None
@@ -82,13 +82,13 @@ async def test_memory_session_map_rejects_cross_owner_overwrite_and_delete():
     with pytest.raises(PermissionError, match="runtime mismatch"):
         await store.put(
             "shared",
-            "codex-u1",
+            "other-u1",
             user_id="U1",
-            sandbox_id="box-codex",
-            runtime_id="codex",
+            sandbox_id="box-other",
+            runtime_id="other-runtime",
         )
     await store.delete("shared", user_id="U2", runtime_id="claude-code")
-    await store.delete("shared", user_id="U1", runtime_id="codex")
+    await store.delete("shared", user_id="U1", runtime_id="other-runtime")
     assert await store.get("shared", user_id="U1", runtime_id="claude-code") == "claude-u1"
     assert await store.get("shared", user_id="U2", runtime_id="claude-code") is None
 

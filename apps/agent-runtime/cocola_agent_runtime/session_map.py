@@ -3,9 +3,9 @@
 Continuation needs the native session ID emitted by the selected runtime.
 Two facts shape this module:
 
-  1. The sufficient condition for a real resume is the selected runtime's
-     on-disk session state in the session volume (``~/.claude`` or
-     ``~/.codex``), which is remounted when a sandbox is replaced.
+  1. The sufficient condition for a real resume is Claude Code's on-disk
+     session state in the session volume (``~/.claude``), which is remounted
+     when a sandbox is replaced.
   2. This table is therefore a pure *INDEX*: cocola's session_id -> the
      runtime_session_id to pass as ``resume``. It survives an agent-runtime
      restart so a follow-up turn still knows which on-disk session to reopen;

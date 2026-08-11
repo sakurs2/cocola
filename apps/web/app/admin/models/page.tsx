@@ -3,7 +3,6 @@
 import { Cpu as ModelsPageIcon } from "lucide-react";
 import {
   Binary,
-  Bot,
   Boxes,
   Check,
   ChevronDown,
@@ -46,9 +45,8 @@ import {
 } from "@/lib/model-icons";
 import { cn } from "@/lib/utils";
 
-type ProviderType = "anthropic" | "openai_responses" | "openai_embeddings";
-type ConfigurableProviderType = Exclude<ProviderType, "openai_embeddings">;
-type ModelProtocol = "anthropic-messages" | "openai-responses" | "openai-embeddings";
+type ProviderType = "anthropic" | "openai_embeddings";
+type ModelProtocol = "anthropic-messages" | "openai-embeddings";
 type View = "models" | "providers";
 type ModelKind = "chat" | "embedding";
 type ModelIconType = "simple-icons" | "image";
@@ -89,7 +87,7 @@ type LLMModel = {
 type ProviderForm = {
   id: string;
   name: string;
-  type: ConfigurableProviderType;
+  type: "anthropic";
   base_url: string;
   api_key: string;
   icon_type: ModelIconType;
@@ -173,32 +171,6 @@ const EMPTY_EMBEDDING: EmbeddingForm = {
   base_url: "https://api.openai.com/v1",
   api_key: "",
 };
-
-const PROVIDER_TYPES: Array<{
-  value: ConfigurableProviderType;
-  label: string;
-  shortLabel: string;
-  description: string;
-  defaultBaseURL: string;
-  defaultIconSlug: string;
-}> = [
-  {
-    value: "anthropic",
-    label: "Anthropic Messages API",
-    shortLabel: "Anthropic Messages",
-    description: "Native Anthropic messages and tool events for Claude Code.",
-    defaultBaseURL: "https://api.anthropic.com",
-    defaultIconSlug: "anthropic",
-  },
-  {
-    value: "openai_responses",
-    label: "OpenAI Responses API",
-    shortLabel: "Responses API",
-    description: "Structured /responses requests and events required by Codex.",
-    defaultBaseURL: "https://api.openai.com/v1",
-    defaultIconSlug: "openai",
-  },
-];
 
 const inputClass =
   "h-10 w-full min-w-0 rounded-xl border border-separator bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-surface-secondary/50 disabled:text-muted";
@@ -558,10 +530,6 @@ export default function AdminModelsPage() {
     embeddingForm.model.trim() !== "" &&
     embeddingForm.base_url.trim() !== "" &&
     (embeddingForm.api_key.trim() !== "" || Boolean(embeddingProvider?.api_key_hint));
-  const editingProviderHasRoutes = editingProvider
-    ? (routeCountByProvider.get(editingProvider) ?? 0) > 0
-    : false;
-
   return (
     <AdminPage>
       <AdminPageHeader
@@ -660,7 +628,7 @@ export default function AdminModelsPage() {
         open={providerDrawerOpen}
         onOpenChange={(open) => !saving && setProviderDrawerOpen(open)}
         title={editingProvider ? "Edit provider" : "Add provider"}
-        description="Choose the wire protocol the upstream actually implements."
+        description="Connect an Anthropic Messages-compatible provider."
         size="lg"
         footer={
           <DrawerFooter
@@ -673,58 +641,6 @@ export default function AdminModelsPage() {
       >
         <div className="grid gap-5">
           {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
-          <FormGroup
-            label="Protocol"
-            hint={
-              editingProviderHasRoutes
-                ? "Remove its model routes before changing protocol."
-                : undefined
-            }
-          >
-            <div className="grid gap-2">
-              {PROVIDER_TYPES.map((type) => (
-                <Button
-                  key={type.value}
-                  variant="ghost"
-                  isDisabled={editingProviderHasRoutes}
-                  onPress={() =>
-                    setProviderForm((current) => ({
-                      ...current,
-                      type: type.value,
-                      base_url:
-                        !current.base_url ||
-                        PROVIDER_TYPES.some((item) => item.defaultBaseURL === current.base_url)
-                          ? type.defaultBaseURL
-                          : current.base_url,
-                      icon_slug:
-                        current.icon_type === "simple-icons" &&
-                        (!current.icon_slug ||
-                          PROVIDER_TYPES.some((item) => item.defaultIconSlug === current.icon_slug))
-                          ? type.defaultIconSlug
-                          : current.icon_slug,
-                    }))
-                  }
-                  className={cn(
-                    "rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30 disabled:cursor-not-allowed disabled:opacity-65",
-                    providerForm.type === type.value
-                      ? "border-accent/45 bg-accent/5 shadow-sm"
-                      : "border-border bg-background hover:border-accent/25 hover:bg-surface-secondary/25",
-                  )}
-                >
-                  <span className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold">{type.label}</span>
-                    {providerForm.type === type.value ? (
-                      <Check className="size-4 text-accent" />
-                    ) : null}
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted">
-                    {type.description}
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </FormGroup>
-
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name">
               <Input
@@ -783,9 +699,7 @@ export default function AdminModelsPage() {
               {providerEndpoint(providerForm.base_url, providerForm.type)}
             </code>
             <p className="mt-2 text-xs leading-5 text-muted">
-              {providerForm.type === "openai_responses"
-                ? "The upstream must implement POST /responses with Codex-compatible tool events."
-                : "This route uses the native Anthropic Messages API."}
+              This route uses the native Anthropic Messages API.
             </p>
           </div>
 
@@ -1346,7 +1260,7 @@ function IconPicker({
 function protoChipLabel(type: ProviderType | undefined, protocol: ModelProtocol) {
   if (type) return providerTypeMeta(type).shortLabel;
   if (protocol === "openai-embeddings") return "Embeddings";
-  return protocol === "openai-responses" ? "Responses API" : "Anthropic Messages";
+  return "Anthropic Messages";
 }
 
 function ModelsList({
@@ -1731,7 +1645,6 @@ function DrawerFooter({
 
 function ProviderProtocolBadge({ type }: { type: ProviderType }) {
   const meta = providerTypeMeta(type);
-  const responses = type === "openai_responses";
   const embeddings = type === "openai_embeddings";
   return (
     <span
@@ -1739,19 +1652,11 @@ function ProviderProtocolBadge({ type }: { type: ProviderType }) {
         "inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
         embeddings
           ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700"
-          : responses
-            ? "border-violet-500/25 bg-violet-500/10 text-violet-700"
-            : "border-blue-500/25 bg-blue-500/10 text-blue-700",
+          : "border-blue-500/25 bg-blue-500/10 text-blue-700",
       )}
       title={meta.label}
     >
-      {embeddings ? (
-        <Binary className="size-3.5" />
-      ) : responses ? (
-        <Bot className="size-3.5" />
-      ) : (
-        <Route className="size-3.5" />
-      )}
+      {embeddings ? <Binary className="size-3.5" /> : <Route className="size-3.5" />}
       {meta.shortLabel}
     </span>
   );
@@ -1768,22 +1673,27 @@ function providerTypeMeta(type: ProviderType) {
       defaultIconSlug: "openai",
     };
   }
-  return PROVIDER_TYPES.find((item) => item.value === type) ?? PROVIDER_TYPES[0]!;
+  return {
+    value: type,
+    label: "Anthropic Messages API",
+    shortLabel: "Anthropic Messages",
+    description: "Native Anthropic messages and tool events for Claude Code.",
+    defaultBaseURL: "https://api.anthropic.com",
+    defaultIconSlug: "anthropic",
+  };
 }
 
 function protocolForType(type: ProviderType): ModelProtocol {
-  if (type === "openai_responses") return "openai-responses";
   if (type === "openai_embeddings") return "openai-embeddings";
   return "anthropic-messages";
 }
 
 function runtimeForProtocol(protocol: ModelProtocol) {
   if (protocol === "openai-embeddings") return "Platform services";
-  return protocol === "openai-responses" ? "Codex" : "Claude Code";
+  return "Claude Code";
 }
 
 function runtimeCompatibilityForType(type: ProviderType) {
-  if (type === "openai_responses") return "Codex";
   if (type === "openai_embeddings") return "Platform services";
   return "Claude Code";
 }
@@ -1791,8 +1701,7 @@ function runtimeCompatibilityForType(type: ProviderType) {
 function providerEndpoint(baseURL: string, type: ProviderType) {
   const base = baseURL.trim().replace(/\/$/, "") || providerTypeMeta(type).defaultBaseURL;
   if (type === "anthropic") return `${base}/v1/messages`;
-  if (type === "openai_embeddings") return `${base}/embeddings`;
-  return `${base}/responses`;
+  return `${base}/embeddings`;
 }
 
 function embeddingEndpoint(baseURL: string) {

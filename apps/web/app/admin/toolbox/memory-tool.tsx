@@ -41,7 +41,7 @@ type ModelRoute = {
   id: string;
   label: string;
   alias: string;
-  protocol: "anthropic-messages" | "openai-responses" | "openai-embeddings";
+  protocol: "anthropic-messages" | "openai-embeddings";
   enabled: boolean;
   embedding_dimension?: number;
 };
@@ -112,12 +112,7 @@ export function MemoryTool({
   }, [load]);
 
   const extractionModels = useMemo(
-    () =>
-      models.filter(
-        (model) =>
-          model.enabled &&
-          (model.protocol === "anthropic-messages" || model.protocol === "openai-responses"),
-      ),
+    () => models.filter((model) => model.enabled && model.protocol === "anthropic-messages"),
     [models],
   );
   const embeddingModels = useMemo(

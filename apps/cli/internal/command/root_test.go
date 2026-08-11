@@ -88,12 +88,12 @@ func TestNonInteractiveInstallWritesEmbeddedRelease(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "opensandbox.toml")); !os.IsNotExist(err) {
 		t.Fatalf("install generated an unnecessary OpenSandbox config file: %v", err)
 	}
-	for _, expected := range []string{
-		`COCOLA_AGENT_RUNTIME_DEFAULT_ID: "${COCOLA_AGENT_RUNTIME_DEFAULT_ID:-claude-code}"`,
-		`COCOLA_AGENT_RUNTIME_PICKER_ENABLED: "${COCOLA_AGENT_RUNTIME_PICKER_ENABLED:-false}"`,
+	for _, retired := range []string{
+		"COCOLA_AGENT_RUNTIME_DEFAULT_ID",
+		"COCOLA_AGENT_RUNTIME_PICKER_ENABLED",
 	} {
-		if !strings.Contains(string(compose), expected) {
-			t.Fatalf("embedded release compose missing %q", expected)
+		if strings.Contains(string(compose), retired) {
+			t.Fatalf("embedded release compose retains retired runtime option %q", retired)
 		}
 	}
 	environment, err := os.ReadFile(filepath.Join(home, "config.env"))

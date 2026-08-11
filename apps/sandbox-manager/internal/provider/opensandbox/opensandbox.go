@@ -122,8 +122,6 @@ const (
 	guestRuntimeEntrypoint = "/opt/cocola/runtime-entrypoint.sh"
 	// guestClaudeConfig is the hidden session-local Claude Code config root.
 	guestClaudeConfig = "/home/cocola/.claude"
-	// guestCodexConfig is the hidden session-local Codex config and session root.
-	guestCodexConfig  = "/home/cocola/.codex"
 	volumeBackendPVC  = "pvc"
 	volumeBackendHost = "host"
 	// Profile resource defaults are applied when a SandboxSpec carries no
@@ -1122,14 +1120,13 @@ func shellJoin(argv []string) string {
 }
 
 // sessionEntrypoint initializes the mounted session volume and exposes its
-// directories at the paths expected by Claude, Codex and user tooling. The
+// directories at the paths expected by Claude Code and user tooling. The
 // container entry process runs as root, while subsequent Exec calls drop to
 // execUser, so ownership is fixed here once per sandbox creation.
 func sessionEntrypoint(execUser string) []string {
 	dirs := []string{
 		guestSession + "/workspace",
 		guestSession + "/runtime/claude",
-		guestSession + "/runtime/codex",
 		guestSession + "/runtime/cocola",
 		guestSession + "/runtime/browser",
 		guestSession + "/home/local",
@@ -1147,7 +1144,6 @@ func sessionEntrypoint(execUser string) []string {
 	}
 	script += symlinkCommand(guestWorkspace, guestSession+"/workspace")
 	script += symlinkCommand(guestClaudeConfig, guestSession+"/runtime/claude")
-	script += symlinkCommand(guestCodexConfig, guestSession+"/runtime/codex")
 	script += symlinkCommand("/home/cocola/.cocola", guestSession+"/runtime/cocola")
 	script += symlinkCommand("/home/cocola/.local", guestSession+"/home/local")
 	// A Running sandbox must imply that every persistent path is ready. Keeping

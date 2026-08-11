@@ -27,7 +27,6 @@ from cocola_common import CocolaError, ErrorCode
 
 from cocola_llm_gateway.upstream.base import UpstreamProvider
 from cocola_llm_gateway.upstream.embeddings_base import EmbeddingsProvider
-from cocola_llm_gateway.upstream.responses_base import ResponsesProvider
 
 
 @dataclass(frozen=True)
@@ -68,7 +67,6 @@ class Registry:
         providers: dict[str, UpstreamProvider],
         routes: dict[str, ModelRoute],
         default_alias: str,
-        responses_providers: dict[str, ResponsesProvider] | None = None,
         embeddings_providers: dict[str, EmbeddingsProvider] | None = None,
         memory_enabled: bool = False,
         memory_extraction_route_id: str = "",
@@ -83,22 +81,16 @@ class Registry:
                 ErrorCode.INVALID_ARGUMENT,
                 f"default_alias '{default_alias}' has no route",
             )
-        responses_providers = responses_providers or {}
         embeddings_providers = embeddings_providers or {}
         # Validate every route points at a registered provider of its protocol.
         for r in routes.values():
-            known = (
-                r.provider_name in providers
-                or r.provider_name in responses_providers
-                or r.provider_name in embeddings_providers
-            )
+            known = r.provider_name in providers or r.provider_name in embeddings_providers
             if not known:
                 raise CocolaError(
                     ErrorCode.INVALID_ARGUMENT,
                     f"route '{r.alias}' references unknown provider '{r.provider_name}'",
                 )
         self._providers = providers
-        self._responses_providers = responses_providers
         self._embeddings_providers = embeddings_providers
         self._routes = routes
         self._default_alias = default_alias
@@ -162,17 +154,6 @@ class Registry:
             )
         return route, provider
 
-    def resolve_responses(
-        self, requested_route_id: str | None
-    ) -> tuple[ModelRoute, ResponsesProvider]:
-        route = self._route(requested_route_id, "openai-responses")
-        provider = self._responses_providers.get(route.provider_name)
-        if provider is None or "openai-responses" not in route.protocols:
-            raise CocolaError(
-                ErrorCode.NOT_FOUND, f"model alias '{route.alias}' is not Responses compatible"
-            )
-        return route, provider
-
     def resolve_embeddings(
         self, requested_route_id: str | None
     ) -> tuple[ModelRoute, EmbeddingsProvider]:
@@ -189,8 +170,6 @@ class Registry:
 
     async def aclose(self) -> None:
         for p in self._providers.values():
-            await p.aclose()
-        for p in self._responses_providers.values():
             await p.aclose()
         for p in self._embeddings_providers.values():
             await p.aclose()

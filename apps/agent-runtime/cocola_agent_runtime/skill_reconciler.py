@@ -86,7 +86,6 @@ def platform_skills():
 
 os.makedirs(state_root, exist_ok=True)
 replace_link("/home/cocola/.claude/skills", current)
-replace_link("/home/cocola/.agents/skills", current)
 manifest = {}
 try:
     with open(os.path.join(current, "manifest.json"), encoding="utf-8") as src:

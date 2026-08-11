@@ -9,13 +9,11 @@ import {
 
 test("reasoning presets map to model-native effort values", () => {
   const claudeEfforts = ["low", "high", "max"];
-  const codexEfforts = ["minimal", "low", "medium", "high", "xhigh"];
 
   assert.equal(resolveReasoningEffort("auto", claudeEfforts), "");
   assert.equal(resolveReasoningEffort("fast", claudeEfforts), "low");
   assert.equal(resolveReasoningEffort("deep", claudeEfforts), "high");
   assert.equal(resolveReasoningEffort("max", claudeEfforts), "max");
-  assert.equal(resolveReasoningEffort("max", codexEfforts), "xhigh");
 });
 
 test("unsupported presets stay unavailable instead of guessing", () => {
@@ -30,7 +28,6 @@ test("unsupported presets stay unavailable instead of guessing", () => {
 
 test("persisted native efforts restore the matching product preset", () => {
   assert.equal(reasoningPresetForEffort(""), "auto");
-  assert.equal(reasoningPresetForEffort("minimal"), "fast");
   assert.equal(reasoningPresetForEffort("low"), "fast");
   assert.equal(reasoningPresetForEffort("medium"), "deep");
   assert.equal(reasoningPresetForEffort("high"), "deep");

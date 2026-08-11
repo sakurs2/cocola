@@ -304,7 +304,7 @@ class InSandboxShimProvider:
     `SessionMap`. With a Postgres-backed map it survives an agent-runtime
     restart, so a follow-up turn resumes the on-disk native session (restored
     from the remounted Session Volume when the sandbox was replaced). The map is a pure
-    index: the on-disk `~/.claude` or `~/.codex` state is the source of truth;
+    index: the on-disk `~/.claude` state is the source of truth;
     the map only records which ID to reopen. Production injects Postgres; the
     in-process default exists only for isolated provider tests.
     """
@@ -356,7 +356,7 @@ class InSandboxShimProvider:
         """Per-turn exec env for the shim.
 
         Carries the model route id and, when the gateway minted a per-user token,
-        the selected runtime's auth variable. This exec env is applied on every
+        the Claude auth variable. This exec env is applied on every
         turn's `exec_stream`, so cold, warm and reused sandboxes authenticate to
         the llm-gateway AS THE USER without a static provisioning credential --
         the per-turn injection point (ADR-0009 keeps creds in env, never
@@ -368,18 +368,14 @@ class InSandboxShimProvider:
         # aid; the execution stream remains language-agnostic.
         env: dict[str, str] = {"PYTHONUNBUFFERED": "1"}
         route_id = (options.model_route_id or "").strip()
-        if route_id and options.runtime_id == "codex":
-            env["CODEX_MODEL"] = route_id
-        elif route_id:
+        if route_id:
             env["ANTHROPIC_MODEL"] = route_id
             env["ANTHROPIC_SMALL_FAST_MODEL"] = route_id
         token = (options.auth_token or "").strip()
-        if token and options.runtime_id == "codex":
-            env["CODEX_API_KEY"] = token
-        elif token:
+        if token:
             env["ANTHROPIC_AUTH_TOKEN"] = token
         traceparent = (options.traceparent or "").strip()
-        if traceparent and options.runtime_id != "codex":
+        if traceparent:
             # Claude/Anthropic parses this variable as newline-separated
             # ``Header-Name: value`` entries, not as JSON.
             env["ANTHROPIC_CUSTOM_HEADERS"] = f"traceparent: {traceparent}"

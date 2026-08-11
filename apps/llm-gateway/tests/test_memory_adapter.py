@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-
 import httpx
 import pytest
 from cocola_llm_gateway.billing.memory import MemoryLedger
@@ -90,26 +88,6 @@ class FakeEmbeddingsProvider:
             "model": payload["model"],
             "usage": {"prompt_tokens": len(values), "total_tokens": len(values)},
         }
-
-    async def aclose(self) -> None:
-        return None
-
-
-class FakeResponsesProvider:
-    def __init__(self):
-        self.payloads: list[dict] = []
-
-    async def create_response(self, payload: dict) -> dict:
-        self.payloads.append(payload)
-        return {
-            "id": "resp_memory",
-            "output_text": '{"memory":true}',
-            "usage": {"input_tokens": 4, "output_tokens": 2},
-        }
-
-    async def stream_response(self, payload: dict) -> AsyncIterator[bytes]:
-        if False:  # pragma: no cover - protocol shape only
-            yield b""
 
     async def aclose(self) -> None:
         return None
@@ -308,37 +286,3 @@ async def test_embedding_dimension_mismatch_is_sanitized():
 
     assert response.status_code == 503
     assert "dimension" not in response.text.lower()
-
-
-async def test_responses_route_is_adapted_without_becoming_public_chat_completions():
-    provider = FakeResponsesProvider()
-    route = ModelRoute(
-        alias="responses-extract",
-        provider_name="responses",
-        real_model="gpt-real",
-        protocols=("openai-responses",),
-    )
-    registry = Registry(
-        providers={},
-        responses_providers={"responses": provider},
-        routes={"responses-extract": route},
-        default_alias="responses-extract",
-        memory_extraction_route_id="responses-extract",
-    )
-    service = GatewayService(registry, MemoryLedger())
-    async with _client(service) as client:
-        response = await client.post(
-            "/internal/memory/v1/chat/completions",
-            json=_chat_request(
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {"name": "memory", "schema": {"type": "object"}},
-                }
-            ),
-            headers={"authorization": "Bearer memory-secret"},
-        )
-
-    assert response.status_code == 200
-    assert provider.payloads[0]["model"] == "gpt-real"
-    assert provider.payloads[0]["stream"] is False
-    assert provider.payloads[0]["text"]["format"]["type"] == "json_schema"

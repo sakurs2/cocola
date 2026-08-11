@@ -62,7 +62,7 @@ type SystemSetting struct {
 // enable. The admin-api owns the catalog; the runtime consumes Enabled entries.
 type Skill struct {
 	ID              string          `json:"id"`         // internal catalog and object-storage identity
-	RuntimeID       string          `json:"runtime_id"` // native Claude/Codex skill identity
+	RuntimeID       string          `json:"runtime_id"` // native Claude Code skill identity
 	Name            string          `json:"name"`       // display name
 	Description     string          `json:"description"`
 	Version         string          `json:"version"`
@@ -162,7 +162,7 @@ type AgentPrompt struct {
 type LLMProvider struct {
 	ID               string    `json:"id"`
 	Name             string    `json:"name"`
-	Type             string    `json:"type"` // anthropic | openai_responses | openai_embeddings
+	Type             string    `json:"type"` // anthropic | openai_embeddings
 	BaseURL          string    `json:"base_url"`
 	APIKeyCiphertext string    `json:"-"`
 	APIKeyHint       string    `json:"api_key_hint"`

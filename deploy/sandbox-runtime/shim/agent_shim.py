@@ -20,7 +20,7 @@ a sandbox must not bind a network port):
 
 Request schema:
   {
-    "runtime_id":    str,             # claude-code | codex
+    "runtime_id":    str,             # claude-code
     "prompt":        str,             # required, the user turn
     "skill_id":      str | null,      # optional effective skill selected for this turn
     "system_prompt": str | null,      # optional
@@ -57,7 +57,6 @@ import json
 import os
 import re
 import shlex
-import signal
 import sys
 import time
 from pathlib import Path
@@ -2256,104 +2255,9 @@ async def _run_claude(req: dict[str, Any]) -> int:
     return 0
 
 
-async def _run_codex(req: dict[str, Any]) -> int:
-    """Run the Node Codex adapter while preserving the shim's NDJSON stream."""
-    report_environment = not req.get("resume")
-    mcp_configs = _mcp_configs(req)
-    connected_mcp_servers: set[str] = set()
-    if report_environment:
-        _emit(_environment_status_event(req, default_status="configured"))
-
-    process = await asyncio.create_subprocess_exec(
-        "node",
-        "/opt/cocola/shim/codex_adapter.mjs",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
-    assert process.stdin is not None
-    assert process.stdout is not None
-    assert process.stderr is not None
-    stderr_tail = ""
-
-    async def drain_stderr() -> None:
-        nonlocal stderr_tail
-        while chunk := await process.stderr.read(1024):
-            stderr_tail = (stderr_tail + chunk.decode(errors="replace"))[-4000:]
-
-    stderr_task = asyncio.create_task(drain_stderr())
-    loop = asyncio.get_running_loop()
-    current_task = asyncio.current_task()
-    installed_signals: list[signal.Signals] = []
-    if current_task is not None:
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            with contextlib.suppress(NotImplementedError, RuntimeError):
-                loop.add_signal_handler(sig, current_task.cancel)
-                installed_signals.append(sig)
-
-    async def terminate() -> None:
-        if process.returncode is not None:
-            return
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGTERM)
-        try:
-            await asyncio.wait_for(process.wait(), timeout=3)
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            await process.wait()
-
-    emitted_error = False
-    try:
-        process.stdin.write(json.dumps(req, ensure_ascii=False).encode())
-        await process.stdin.drain()
-        process.stdin.close()
-        while line := await process.stdout.readline():
-            event = json.loads(line)
-            mcp_server = str(event.pop("_cocola_mcp_server", ""))
-            if (
-                report_environment
-                and mcp_server in mcp_configs
-                and mcp_server not in connected_mcp_servers
-            ):
-                connected_mcp_servers.add(mcp_server)
-                _emit(
-                    _environment_status_event(
-                        req,
-                        default_status="configured",
-                        status_overrides={name: "connected" for name in connected_mcp_servers},
-                    )
-                )
-            emitted_error = emitted_error or event.get("type") == "error"
-            _emit(event)
-        code = await process.wait()
-        await stderr_task
-    except asyncio.CancelledError:
-        await terminate()
-        raise
-    except BaseException:
-        await terminate()
-        raise
-    finally:
-        for sig in installed_signals:
-            loop.remove_signal_handler(sig)
-        if not stderr_task.done():
-            stderr_task.cancel()
-        await asyncio.gather(stderr_task, return_exceptions=True)
-    if code != 0 and not emitted_error:
-        _emit({"type": "error", "stage": "run", "error": stderr_tail[:500] or "Codex failed"})
-    return code
-
-
 async def _run(req: dict[str, Any]) -> int:
     runtime_id = str(req.get("runtime_id") or "claude-code")
-    adapters = {
-        "claude-code": _run_claude,
-        "codex": _run_codex,
-    }
-    adapter = adapters.get(runtime_id)
-    if adapter is None:
+    if runtime_id != "claude-code":
         _emit(
             {
                 "type": "error",
@@ -2363,7 +2267,7 @@ async def _run(req: dict[str, Any]) -> int:
             }
         )
         return 2
-    return await adapter(req)
+    return await _run_claude(req)
 
 
 def _safe_remote_url(raw_url: str) -> str:
@@ -2492,8 +2396,6 @@ def _selfcheck() -> int:
         "node": None,
         "claude_cli": None,
         "claude_agent_sdk": None,
-        "codex_cli": cmd_version("codex", "--version"),
-        "codex_sdk": None,
         "openpyxl": None,
         "gh": cmd_version("gh", "--version"),
         "github_skill": Path("/opt/cocola/skills/cocola-github/SKILL.md").is_file(),
@@ -2516,12 +2418,9 @@ def _selfcheck() -> int:
         "shfmt": cmd_version("shfmt", "--version"),
         "java": cmd_version("java", "-version"),
         "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
-        "codex_home": os.environ.get("CODEX_HOME"),
         "workspace": os.environ.get("COCOLA_WORKSPACE"),
         "base_url_set": bool(os.environ.get("ANTHROPIC_BASE_URL")),
-        "responses_base_url_set": bool(os.environ.get("COCOLA_LLM_BASE_URL")),
         "auth_token_set": bool(os.environ.get("ANTHROPIC_AUTH_TOKEN")),
-        "codex_auth_token_set": bool(os.environ.get("CODEX_API_KEY")),
     }
     if shutil.which("node"):
         try:
@@ -2545,12 +2444,6 @@ def _selfcheck() -> int:
         info["openpyxl"] = openpyxl.__version__
     except Exception as e:  # noqa: BLE001
         info["openpyxl"] = f"missing: {e}"
-    try:
-        package = Path("/opt/cocola/node_modules/@openai/codex-sdk/package.json")
-        info["codex_sdk"] = str(json.loads(package.read_text())["version"])
-    except Exception as e:  # noqa: BLE001
-        info["codex_sdk"] = f"missing: {e}"
-
     _emit(info)
     required_tools = [
         "pnpm",
@@ -2579,8 +2472,6 @@ def _selfcheck() -> int:
         and info["claude_cli"]
         and not str(info["claude_cli"]).startswith("error")
         and not str(info["claude_agent_sdk"]).startswith("missing")
-        and not str(info["codex_cli"]).startswith(("missing", "error"))
-        and not str(info["codex_sdk"]).startswith("missing")
         and not str(info["openpyxl"]).startswith("missing")
         and info["github_skill"] is True
         and all(not str(info[name]).startswith(("missing", "error")) for name in required_tools)

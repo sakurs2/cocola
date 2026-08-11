@@ -99,7 +99,7 @@ func TestMemoryStartRejectsRuntimeChangeWithoutWrites(t *testing.T) {
 	conversations := convo.NewMemory()
 	store := NewMemory(conversations)
 	first := testStartInput("run-1", "request-1", "user-1", "conversation-1")
-	first.Conversation.RuntimeID = "codex"
+	first.Conversation.RuntimeID = "other-runtime"
 	if _, err := store.Start(ctx, first); err != nil {
 		t.Fatal(err)
 	}

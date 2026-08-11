@@ -41,11 +41,11 @@ test("Plan Mode defaults to Execute and restores the latest conversation mode", 
 test("Plan Mode is available only for Claude Code", () => {
   assert.equal(interactionModeForRuntime("claude-code", "plan"), "plan");
   assert.equal(interactionModeForRuntime("claude-code", "execute"), "execute");
-  assert.equal(interactionModeForRuntime("codex", "plan"), "execute");
+  assert.equal(interactionModeForRuntime("unknown-runtime", "plan"), "execute");
   assert.equal(isPlanModeCommandAvailable("claude-code", "execute", false), true);
   assert.equal(isPlanModeCommandAvailable("claude-code", "plan", false), false);
   assert.equal(isPlanModeCommandAvailable("claude-code", "execute", true), false);
-  assert.equal(isPlanModeCommandAvailable("codex", "execute", false), false);
+  assert.equal(isPlanModeCommandAvailable("unknown-runtime", "execute", false), false);
 });
 
 test("Plan Mode product copy is stable and English", () => {

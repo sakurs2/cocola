@@ -311,7 +311,7 @@ func runStoreContract(t *testing.T, st Store) {
 	// ----- model routes -----
 	providers := []LLMProvider{
 		{ID: "provider-chat", Name: "Chat", Type: "anthropic", IconType: "simple-icons", IconSlug: "anthropic", Enabled: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "provider-responses", Name: "Responses", Type: "openai_responses", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "provider-chat-b", Name: "Chat B", Type: "anthropic", Enabled: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "provider-embedding", Name: "Embedding", Type: "openai_embeddings", Enabled: true, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, provider := range providers {
@@ -325,7 +325,7 @@ func runStoreContract(t *testing.T, st Store) {
 	}
 	routes := []LLMModelRoute{
 		{ID: "route-chat", Alias: "shared", ProviderID: "provider-chat", Protocol: "anthropic-messages", RealModel: "chat-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "route-responses", Alias: "shared", ProviderID: "provider-responses", Protocol: "openai-responses", RealModel: "responses-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "route-chat-b", Alias: "shared", ProviderID: "provider-chat-b", Protocol: "anthropic-messages", RealModel: "chat-model-b", Enabled: true, Visible: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "route-embedding", Alias: "embedding", ProviderID: "provider-embedding", Protocol: "openai-embeddings", RealModel: "embedding-model", Enabled: true, Visible: false, EmbeddingDimension: 1024, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, route := range routes {
@@ -339,8 +339,8 @@ func runStoreContract(t *testing.T, st Store) {
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("same provider+alias want ErrConflict, got %v", err)
 	}
-	gotRoute, err := st.GetLLMModelRoute(ctx, "route-responses")
-	if err != nil || gotRoute.Alias != "shared" || gotRoute.ProviderID != "provider-responses" {
+	gotRoute, err := st.GetLLMModelRoute(ctx, "route-chat-b")
+	if err != nil || gotRoute.Alias != "shared" || gotRoute.ProviderID != "provider-chat-b" {
 		t.Fatalf("GetLLMModelRoute by id: %+v %v", gotRoute, err)
 	}
 	gotRoutes, err := st.ListLLMModelRoutes(ctx)

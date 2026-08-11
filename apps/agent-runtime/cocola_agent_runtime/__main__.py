@@ -121,12 +121,11 @@ def _build_prompt_catalog() -> PromptCatalog:
 def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     """Route A (ADR-0009) sandbox image + the ENV injected at creation time.
 
-    The session sandbox contains both built-in Agent Runtimes, so it must be
+    The session sandbox contains the built-in Claude Code Runtime, so it must be
     created from COCOLA_SANDBOX_IMAGE rather than the provider's default image.
-    It also carries secret-free routing endpoints used by both adapters:
+    It also carries the secret-free routing endpoint used by the adapter:
 
       ANTHROPIC_BASE_URL   <- COCOLA_SANDBOX_LLM_BASE_URL (the gateway root)
-      COCOLA_LLM_BASE_URL  <- COCOLA_SANDBOX_LLM_BASE_URL (Codex Responses root)
       ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL <- COCOLA_SANDBOX_MODEL_ALIAS
           (the legacy environment variable contains a model route ID; the
            selected route overrides it in each sandbox exec)
@@ -140,7 +139,6 @@ def _sandbox_provisioning() -> tuple[str, dict[str, str]]:
     default_route_id = _required_env("COCOLA_SANDBOX_MODEL_ALIAS")
     env = {
         "ANTHROPIC_BASE_URL": base_url,
-        "COCOLA_LLM_BASE_URL": base_url,
         "ANTHROPIC_MODEL": default_route_id,
         "ANTHROPIC_SMALL_FAST_MODEL": default_route_id,
     }

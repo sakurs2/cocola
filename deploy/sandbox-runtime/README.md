@@ -167,9 +167,9 @@ own result contract.
 
 At the beginning of a Run, Agent Runtime inspects the image's platform Skill
 manifest and atomically reconciles platform Skills with the effective Admin and
-Personal Skill catalog in the Session Volume. The same snapshot is exposed at
-`/home/cocola/.claude/skills` and `/home/cocola/.agents/skills`. Platform Skill
-IDs are reserved and cannot be shadowed by catalog entries. Because the image
+Personal Skill catalog in the Session Volume. The snapshot is exposed at
+`/home/cocola/.claude/skills`. Platform Skill IDs are reserved and cannot be
+shadowed by catalog entries. Because the image
 reports its actual inventory, a rolling rollout tolerates old images with no
 platform Skills and automatically rebuilds the snapshot when a new image or
 built-in Skill version appears.
@@ -255,7 +255,6 @@ following layout and links the runtime paths into it:
 | -------------------------- | ---------------------- | ----------------------------------- |
 | `/session/workspace`       | `/workspace`           | platform files and Project worktree |
 | `/session/runtime/claude`  | `/home/cocola/.claude` | Claude session state                |
-| `/session/runtime/codex`   | `/home/cocola/.codex`  | Codex session state                 |
 | `/session/runtime/cocola`  | `/home/cocola/.cocola` | Cocola Skills and runtime state     |
 | `/session/runtime/browser` | internal               | persistent Browser profile/state    |
 | `/session/home/local`      | `/home/cocola/.local`  | user-installed tools                |
@@ -284,7 +283,7 @@ The image does not contain Lark credentials or official Lark Agent Skills.
 
 Destroying a sandbox preserves the volume. A later run is scheduled back to
 the volume's node and mounts the same claim; no MinIO checkpoint is involved.
-Claude and Codex share the reconciled Skill Set through symlinks under
+Claude Code uses the reconciled Skill Set through symlinks under
 `/home/cocola/.cocola/skillsets/agents-skill-v1`.
 
 ## Build

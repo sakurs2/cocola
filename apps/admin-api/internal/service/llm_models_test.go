@@ -50,7 +50,7 @@ func TestLLMProviderIconLifecycle(t *testing.T) {
 	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
 	key := "test-only-key"
 	provider, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
-		ID: "custom", Name: "Custom", Type: ProviderOpenAIResponses,
+		ID: "custom", Name: "Custom", Type: ProviderAnthropic,
 		BaseURL: "https://example.invalid/v1", APIKey: &key,
 		IconType: IconImage, IconURL: "https://example.invalid/icon.svg",
 	})
@@ -199,7 +199,6 @@ func TestLLMModelReasoningEffortsAreDerivedFromProtocol(t *testing.T) {
 	key := "test-only-key"
 	for _, provider := range []LLMProviderInput{
 		{ID: "claude", Name: "Claude", Type: ProviderAnthropic, BaseURL: "https://a.invalid", APIKey: &key},
-		{ID: "codex", Name: "Codex", Type: ProviderOpenAIResponses, BaseURL: "https://o.invalid/v1", APIKey: &key},
 	} {
 		if _, err := svc.CreateLLMProvider(ctx, provider); err != nil {
 			t.Fatalf("create provider %s: %v", provider.ID, err)
@@ -215,17 +214,6 @@ func TestLLMModelReasoningEffortsAreDerivedFromProtocol(t *testing.T) {
 	if strings.Join(claude.ReasoningEfforts, ",") != "low,medium,high,xhigh,max" {
 		t.Fatalf("Claude efforts = %+v", claude.ReasoningEfforts)
 	}
-	codex, err := svc.CreateLLMModel(ctx, LLMModelInput{
-		Alias: "codex", ProviderID: "codex", RealModel: "gpt-real", Label: "Codex",
-		IconType: IconSimpleIcons, IconSlug: "openai",
-	})
-	if err != nil {
-		t.Fatalf("create Codex route: %v", err)
-	}
-	if strings.Join(codex.ReasoningEfforts, ",") != "minimal,low,medium,high,xhigh" {
-		t.Fatalf("Codex efforts = %+v", codex.ReasoningEfforts)
-	}
-
 	claude.ReasoningEfforts = nil
 	if err := st.UpdateLLMModelRoute(ctx, claude); err != nil {
 		t.Fatalf("clear stored Claude efforts: %v", err)
@@ -239,24 +227,28 @@ func TestLLMModelReasoningEffortsAreDerivedFromProtocol(t *testing.T) {
 	}
 }
 
-func TestLLMModelAliasIsScopedToProviderAndDefaultsToProtocol(t *testing.T) {
+func TestLLMModelAliasIsScopedToProviderAndProtocolIsDerived(t *testing.T) {
 	ctx := context.Background()
 	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
 	key := "test-only-key"
 	for _, provider := range []LLMProviderInput{
 		{ID: "chat-a", Name: "Chat A", Type: ProviderAnthropic, BaseURL: "https://a.invalid", APIKey: &key},
 		{ID: "chat-b", Name: "Chat B", Type: ProviderAnthropic, BaseURL: "https://b.invalid", APIKey: &key},
-		{ID: "responses", Name: "Responses", Type: ProviderOpenAIResponses, BaseURL: "https://r.invalid/v1", APIKey: &key},
+		{ID: "embeddings", Name: "Embeddings", Type: ProviderOpenAIEmbeddings, BaseURL: "https://e.invalid/v1", APIKey: &key},
 	} {
 		if _, err := svc.CreateLLMProvider(ctx, provider); err != nil {
 			t.Fatalf("create provider %s: %v", provider.ID, err)
 		}
 	}
 	create := func(providerID string, isDefault bool) store.LLMModelRoute {
-		route, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		input := LLMModelInput{
 			Alias: "shared", ProviderID: providerID, RealModel: "real-" + providerID,
 			Label: "Shared", IconType: IconSimpleIcons, IconSlug: "openai", IsDefault: isDefault,
-		})
+		}
+		if providerID == "embeddings" {
+			input.EmbeddingDimension = 1024
+		}
+		route, err := svc.CreateLLMModel(ctx, input)
 		if err != nil {
 			t.Fatalf("create route for %s: %v", providerID, err)
 		}
@@ -264,15 +256,15 @@ func TestLLMModelAliasIsScopedToProviderAndDefaultsToProtocol(t *testing.T) {
 	}
 	chatA := create("chat-a", true)
 	chatB := create("chat-b", false)
-	responses := create("responses", true)
+	embeddings := create("embeddings", true)
 	if chatA.ID == chatB.ID || chatA.Alias != chatB.Alias {
 		t.Fatalf("provider-scoped aliases = %+v %+v", chatA, chatB)
 	}
-	if chatA.Protocol != "anthropic-messages" || responses.Protocol != "openai-responses" {
-		t.Fatalf("route protocols = %q %q", chatA.Protocol, responses.Protocol)
+	if chatA.Protocol != "anthropic-messages" || embeddings.Protocol != "openai-embeddings" {
+		t.Fatalf("route protocols = %q %q", chatA.Protocol, embeddings.Protocol)
 	}
-	if !chatA.IsDefault || !responses.IsDefault {
-		t.Fatalf("defaults should coexist across protocols")
+	if !chatA.IsDefault || embeddings.IsDefault {
+		t.Fatalf("only visible Agent models can be the chat default")
 	}
 	if _, err := svc.CreateLLMModel(ctx, LLMModelInput{
 		Alias: "shared", ProviderID: "chat-a", RealModel: "duplicate",
@@ -299,45 +291,26 @@ func TestReferencedProviderProtocolCannotChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.UpdateLLMProvider(ctx, "provider", LLMProviderInput{
-		Type: ProviderOpenAIResponses,
+		Type: ProviderOpenAIEmbeddings,
 	}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("referenced provider type change want conflict, got %v", err)
 	}
 }
 
-func TestResponsesProviderPublishesResponsesProtocol(t *testing.T) {
+func TestResponsesProviderIsRejected(t *testing.T) {
 	ctx := context.Background()
 	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
 	key := "test-only-key"
-	if _, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
-		ID:      "openai-responses",
-		Name:    "OpenAI Responses",
-		Type:    ProviderOpenAIResponses,
+	_, err := svc.CreateLLMProvider(ctx, LLMProviderInput{
+		ID:      "responses",
+		Name:    "Responses",
+		Type:    "openai_responses",
 		BaseURL: "https://api.openai.com/v1",
 		APIKey:  &key,
 		Enabled: boolPtr(true),
-	}); err != nil {
-		t.Fatalf("create responses provider: %v", err)
-	}
-	if _, err := svc.CreateLLMModel(ctx, LLMModelInput{
-		Alias:      "codex-model",
-		ProviderID: "openai-responses",
-		RealModel:  "gpt-real",
-		Label:      "Codex Model",
-		IconType:   IconSimpleIcons,
-		IconSlug:   "openai",
-		IsDefault:  true,
-	}); err != nil {
-		t.Fatalf("create responses model: %v", err)
-	}
-
-	models, err := svc.ListPublicLLMModels(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 1 || len(models[0].Protocols) != 1 ||
-		models[0].Protocols[0] != "openai-responses" {
-		t.Fatalf("responses model protocols = %+v", models)
+	})
+	if !errors.Is(err, ErrInvalidArg) {
+		t.Fatalf("responses provider want ErrInvalidArg, got %v", err)
 	}
 }
 

@@ -27,7 +27,6 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Protocol
 
 from cocola_common import CocolaError, ErrorCode, get_logger
@@ -49,70 +48,6 @@ from cocola_llm_gateway.types import (
 from cocola_llm_gateway.upstream.errors import UpstreamError
 
 log = get_logger("cocola.llm-gateway.service")
-
-
-@dataclass
-class ResponsesUsage:
-    input_tokens: int = 0
-    cached_input_tokens: int = 0
-    output_tokens: int = 0
-    reasoning_tokens: int = 0
-
-    def quota_usage(self) -> Usage:
-        # Cached and reasoning tokens are subsets of the Responses API input
-        # and output totals; do not double-count them for quota or billing.
-        return Usage(prompt_tokens=self.input_tokens, completion_tokens=self.output_tokens)
-
-
-def responses_usage(payload: dict) -> ResponsesUsage:
-    response = payload.get("response") if isinstance(payload.get("response"), dict) else payload
-    raw = response.get("usage") if isinstance(response, dict) else None
-    if not isinstance(raw, dict):
-        return ResponsesUsage()
-    input_details = raw.get("input_tokens_details") or {}
-    output_details = raw.get("output_tokens_details") or {}
-    return ResponsesUsage(
-        input_tokens=int(raw.get("input_tokens") or 0),
-        cached_input_tokens=int(input_details.get("cached_tokens") or 0),
-        output_tokens=int(raw.get("output_tokens") or 0),
-        reasoning_tokens=int(output_details.get("reasoning_tokens") or 0),
-    )
-
-
-class ResponsesSSEMeter:
-    def __init__(self) -> None:
-        self._buffer = b""
-        self.usage = ResponsesUsage()
-        self.completed = False
-        self.terminal_type = ""
-        self.response_id = ""
-
-    def feed(self, chunk: bytes) -> None:
-        self._buffer = (self._buffer + chunk).replace(b"\r\n", b"\n")
-        while b"\n\n" in self._buffer:
-            event_bytes, self._buffer = self._buffer.split(b"\n\n", 1)
-            event = event_bytes.decode("utf-8", errors="replace")
-            data = "\n".join(
-                line[5:].lstrip() for line in event.splitlines() if line.startswith("data:")
-            )
-            if not data or data == "[DONE]":
-                continue
-            try:
-                payload = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            event_type = str(payload.get("type") or "")
-            if event_type in {
-                "response.completed",
-                "response.incomplete",
-                "response.failed",
-            }:
-                self.terminal_type = event_type
-                self.completed = event_type == "response.completed"
-                self.usage = responses_usage(payload)
-                response = payload.get("response")
-                if isinstance(response, dict):
-                    self.response_id = str(response.get("id") or "")
 
 
 class RegistrySource(Protocol):
@@ -179,28 +114,11 @@ class GatewayService:
         finally:
             await self._registry_source.release_registry(registry)
 
-    async def resolve_responses_model(self, requested_alias: str | None) -> str:
-        registry = await self._registry_source.acquire_registry()
-        try:
-            self._registry = registry
-            route, _ = registry.resolve_responses(requested_alias)
-            return route.real_model
-        finally:
-            await self._registry_source.release_registry(registry)
-
     async def validate_chat_request(self, req: ChatRequest, requested_alias: str | None) -> None:
         registry = await self._registry_source.acquire_registry()
         try:
             route, _ = registry.resolve_chat(requested_alias)
             validate_reasoning_effort(route, anthropic_reasoning_effort(req))
-        finally:
-            await self._registry_source.release_registry(registry)
-
-    async def validate_responses_request(self, payload: dict, requested_alias: str) -> None:
-        registry = await self._registry_source.acquire_registry()
-        try:
-            route, _ = registry.resolve_responses(requested_alias)
-            validate_reasoning_effort(route, responses_reasoning_effort(payload))
         finally:
             await self._registry_source.release_registry(registry)
 
@@ -260,46 +178,36 @@ class GatewayService:
                     ),
                 )
 
-            try:
-                route, provider = registry.resolve_chat(route_id)
-            except CocolaError:
-                route, provider = registry.resolve_responses(route_id)
-                upstream_payload = _memory_responses_payload(payload, route.real_model)
-                response = await self._responses_create_with_retry(provider, upstream_payload)
-                text = _responses_output_text(response)
-                response_usage = responses_usage(response)
-                usage = response_usage.quota_usage()
-                request_id = str(response.get("id") or request_id)
-            else:
-                req = ChatRequest(
-                    model=route.real_model,
-                    messages=messages,
-                    params=ChatParams(
-                        max_tokens=int(payload.get("max_tokens") or 1024),
-                        temperature=payload.get("temperature"),
-                        stream=True,
-                    ),
-                    user_id="memory-service",
-                    session_id="memory-service",
-                )
-                chunks: list[str] = []
-                streamer = ResilientStreamer(provider, self._policy, self._limiter)
-                async for event in streamer.chat_stream(req):
-                    if event.type is StreamEventType.ERROR:
-                        raise UpstreamError(
-                            ErrorCode.UNAVAILABLE,
-                            "memory extraction upstream failed",
-                            retryable=False,
-                        )
-                    text_delta = _memory_stream_text_delta(event)
-                    if text_delta:
-                        chunks.append(text_delta)
-                    if event.usage is not None and event.type in {
-                        StreamEventType.MESSAGE_START,
-                        StreamEventType.MESSAGE_DELTA,
-                    }:
-                        usage.merge(event.usage)
-                text = "".join(chunks)
+            route, provider = registry.resolve_chat(route_id)
+            req = ChatRequest(
+                model=route.real_model,
+                messages=messages,
+                params=ChatParams(
+                    max_tokens=int(payload.get("max_tokens") or 1024),
+                    temperature=payload.get("temperature"),
+                    stream=True,
+                ),
+                user_id="memory-service",
+                session_id="memory-service",
+            )
+            chunks: list[str] = []
+            streamer = ResilientStreamer(provider, self._policy, self._limiter)
+            async for event in streamer.chat_stream(req):
+                if event.type is StreamEventType.ERROR:
+                    raise UpstreamError(
+                        ErrorCode.UNAVAILABLE,
+                        "memory extraction upstream failed",
+                        retryable=False,
+                    )
+                text_delta = _memory_stream_text_delta(event)
+                if text_delta:
+                    chunks.append(text_delta)
+                if event.usage is not None and event.type in {
+                    StreamEventType.MESSAGE_START,
+                    StreamEventType.MESSAGE_DELTA,
+                }:
+                    usage.merge(event.usage)
+            text = "".join(chunks)
 
             if not text:
                 raise UpstreamError(
@@ -464,187 +372,6 @@ class GatewayService:
             finally:
                 await self._registry_source.release_registry(registry)
 
-    async def responses_create(
-        self,
-        payload: dict,
-        *,
-        requested_alias: str,
-        identity: Identity,
-        session_id: str,
-        trace_context: TraceContext | None = None,
-    ) -> dict:
-        await self._check_responses_rate_limit(identity)
-        registry = await self._registry_source.acquire_registry()
-        route = None
-        request_id = f"req_{uuid.uuid4().hex[:16]}"
-        usage = ResponsesUsage()
-        status = "error"
-        error = "upstream Responses request failed"
-        started_at = utc_now()
-        started_mono = time.monotonic()
-        try:
-            self._registry = registry
-            route, provider = registry.resolve_responses(requested_alias)
-            validate_reasoning_effort(route, responses_reasoning_effort(payload))
-            upstream_payload = {**payload, "model": route.real_model, "stream": False}
-            response = await self._responses_create_with_retry(provider, upstream_payload)
-            usage = responses_usage(response)
-            request_id = str(response.get("id") or request_id)
-            status, error = "ok", ""
-            return response
-        finally:
-            try:
-                if route is not None:
-                    quota_usage = usage.quota_usage()
-                    await self._write_usage_record(
-                        request_id=request_id,
-                        user_id=identity.user_id,
-                        session_id=session_id,
-                        route=route,
-                        usage=quota_usage,
-                        status=status,
-                        error=error,
-                    )
-                    await self._commit_quota(identity, quota_usage)
-                    await self._record_responses_trace(
-                        trace_context,
-                        route=route,
-                        started_at=started_at,
-                        started_mono=started_mono,
-                        ttft_ms=int((time.monotonic() - started_mono) * 1000),
-                        status=status,
-                        usage=usage,
-                        error_code="responses_upstream_error" if error else "",
-                    )
-            finally:
-                await self._registry_source.release_registry(registry)
-
-    async def responses_stream(
-        self,
-        payload: dict,
-        *,
-        requested_alias: str,
-        identity: Identity,
-        session_id: str,
-        trace_context: TraceContext | None = None,
-    ) -> AsyncIterator[bytes]:
-        await self._check_responses_rate_limit(identity)
-        registry = await self._registry_source.acquire_registry()
-        route = None
-        status = "error"
-        error = "responses stream incomplete"
-        meter = ResponsesSSEMeter()
-        started_at = utc_now()
-        started_mono = time.monotonic()
-        ttft_ms = 0
-        saw_first_chunk = False
-        try:
-            self._registry = registry
-            route, provider = registry.resolve_responses(requested_alias)
-            validate_reasoning_effort(route, responses_reasoning_effort(payload))
-            upstream_payload = {**payload, "model": route.real_model, "stream": True}
-            async for chunk in self._responses_stream_with_retry(provider, upstream_payload):
-                if not saw_first_chunk:
-                    saw_first_chunk = True
-                    ttft_ms = int((time.monotonic() - started_mono) * 1000)
-                meter.feed(chunk)
-                yield chunk
-            if meter.completed:
-                status, error = "ok", ""
-            elif meter.terminal_type:
-                error = f"Responses stream ended with {meter.terminal_type}"
-        except Exception:
-            error = "upstream Responses stream failed"
-            raise
-        finally:
-            try:
-                if route is not None:
-                    quota_usage = meter.usage.quota_usage()
-                    await self._write_usage_record(
-                        request_id=meter.response_id or f"req_{uuid.uuid4().hex[:16]}",
-                        user_id=identity.user_id,
-                        session_id=session_id,
-                        route=route,
-                        usage=quota_usage,
-                        status=status,
-                        error=error,
-                    )
-                    await self._commit_quota(identity, quota_usage)
-                    await self._record_responses_trace(
-                        trace_context,
-                        route=route,
-                        started_at=started_at,
-                        started_mono=started_mono,
-                        ttft_ms=ttft_ms,
-                        status=status,
-                        usage=meter.usage,
-                        error_code=meter.terminal_type
-                        or ("responses_upstream_error" if error else ""),
-                    )
-            finally:
-                await self._registry_source.release_registry(registry)
-
-    async def _check_responses_rate_limit(self, identity: Identity) -> None:
-        key = identity.user_id or identity.tenant_id or "anonymous"
-        if await self._limiter.allow(key):
-            return
-        raise UpstreamError(
-            ErrorCode.UNAVAILABLE,
-            "rate limit exceeded",
-            status=429,
-            retryable=False,
-        )
-
-    async def _record_responses_trace(
-        self,
-        trace_context: TraceContext | None,
-        *,
-        route,
-        started_at,
-        started_mono: float,
-        ttft_ms: int,
-        status: str,
-        usage: ResponsesUsage,
-        error_code: str,
-    ) -> None:
-        if self._trace_store is None or trace_context is None:
-            return
-        try:
-            await self._trace_store.record_model_call(
-                trace_context,
-                started_at=started_at,
-                duration_us=int((time.monotonic() - started_mono) * 1_000_000),
-                ttft_ms=ttft_ms,
-                status="success" if status == "ok" else "error",
-                model_alias=route.alias,
-                real_model=route.real_model,
-                provider=route.provider_name,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                error_code=error_code,
-            )
-        except Exception as exc:  # noqa: BLE001 - tracing never breaks inference
-            log.warning("conversation trace write failed", error=repr(exc))
-
-    async def _responses_create_with_retry(self, provider, payload: dict) -> dict:
-        for attempt in range(self._policy.max_retries + 1):
-            try:
-                async with asyncio.timeout(self._policy.timeout_s):
-                    return await provider.create_response(payload)
-            except TimeoutError as exc:
-                if attempt >= self._policy.max_retries:
-                    raise UpstreamError(
-                        ErrorCode.UNAVAILABLE,
-                        "upstream timeout",
-                        retryable=True,
-                    ) from exc
-                await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
-            except UpstreamError as exc:
-                if not exc.retryable or attempt >= self._policy.max_retries:
-                    raise
-                await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
-        raise RuntimeError("unreachable")
-
     async def _embeddings_create_with_retry(self, provider, payload: dict) -> dict:
         for attempt in range(self._policy.max_retries + 1):
             try:
@@ -662,43 +389,6 @@ class GatewayService:
                     raise
             await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
         raise RuntimeError("unreachable")
-
-    async def _responses_stream_with_retry(self, provider, payload: dict) -> AsyncIterator[bytes]:
-        for attempt in range(self._policy.max_retries + 1):
-            stream = provider.stream_response(payload)
-            produced = False
-            try:
-                async with asyncio.timeout(self._policy.timeout_s):
-                    first = await anext(stream)
-                    produced = True
-                    yield first
-                    async for chunk in stream:
-                        yield chunk
-                return
-            except StopAsyncIteration:
-                if attempt >= self._policy.max_retries:
-                    raise UpstreamError(
-                        ErrorCode.UNAVAILABLE,
-                        "upstream returned an empty stream",
-                        retryable=True,
-                    ) from None
-                await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
-            except TimeoutError as exc:
-                if produced or attempt >= self._policy.max_retries:
-                    raise UpstreamError(
-                        ErrorCode.UNAVAILABLE,
-                        "upstream timeout",
-                        retryable=True,
-                    ) from exc
-                await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
-            except UpstreamError as exc:
-                if produced or attempt >= self._policy.max_retries or not exc.retryable:
-                    raise
-                await asyncio.sleep(self._policy.backoff_base_s * (2**attempt))
-            finally:
-                close = getattr(stream, "aclose", None)
-                if close is not None:
-                    await close()
 
     async def _write_record(self, req, route, request_id, usage, status, error) -> None:
         await self._write_usage_record(
@@ -774,43 +464,6 @@ def _memory_stream_text_delta(event: StreamEvent) -> str:
     return text if isinstance(text, str) else ""
 
 
-def _memory_responses_payload(payload: dict, real_model: str) -> dict:
-    instructions: list[str] = []
-    input_messages: list[dict] = []
-    for message in payload["messages"]:
-        if message["role"] == "system":
-            instructions.append(message["content"])
-        else:
-            input_messages.append({"role": message["role"], "content": message["content"]})
-    response_format = payload.get("response_format")
-    if response_format:
-        instructions.append(_structured_output_instruction(response_format))
-    out: dict = {
-        "model": real_model,
-        "input": input_messages,
-        "stream": False,
-        "max_output_tokens": int(payload.get("max_tokens") or 1024),
-    }
-    if instructions:
-        out["instructions"] = "\n\n".join(instructions)
-    if payload.get("temperature") is not None:
-        out["temperature"] = payload["temperature"]
-    if response_format:
-        if response_format["type"] == "json_object":
-            out["text"] = {"format": {"type": "json_object"}}
-        else:
-            schema = response_format["json_schema"]
-            out["text"] = {
-                "format": {
-                    "type": "json_schema",
-                    "name": schema.get("name") or "memory_extraction",
-                    "schema": schema.get("schema") or {},
-                    "strict": bool(schema.get("strict", True)),
-                }
-            }
-    return out
-
-
 def anthropic_reasoning_effort(req: ChatRequest) -> str:
     output_config = req.params.output_config
     if output_config is None or output_config.get("effort") is None:
@@ -821,43 +474,15 @@ def anthropic_reasoning_effort(req: ChatRequest) -> str:
     return effort.strip()
 
 
-def responses_reasoning_effort(payload: dict) -> str:
-    reasoning = payload.get("reasoning")
-    if reasoning is None:
-        return ""
-    if not isinstance(reasoning, dict):
-        raise CocolaError(ErrorCode.INVALID_ARGUMENT, "reasoning must be an object")
-    effort = reasoning.get("effort")
-    if effort is None:
-        return ""
-    if not isinstance(effort, str):
-        raise CocolaError(ErrorCode.INVALID_ARGUMENT, "reasoning effort must be a string")
-    return effort.strip()
-
-
 def validate_reasoning_effort(route: ModelRoute, effort: str) -> None:
     if not effort:
         return
-    allowed = {"minimal", "low", "medium", "high", "xhigh", "max"}
+    allowed = {"low", "medium", "high", "xhigh", "max"}
     if effort not in allowed or effort not in route.reasoning_efforts:
         raise CocolaError(
             ErrorCode.INVALID_ARGUMENT,
             f"reasoning effort '{effort}' is not supported by model route '{route.alias}'",
         )
-
-
-def _responses_output_text(payload: dict) -> str:
-    direct = payload.get("output_text")
-    if isinstance(direct, str) and direct:
-        return direct
-    chunks: list[str] = []
-    for output in payload.get("output") or []:
-        if not isinstance(output, dict):
-            continue
-        for part in output.get("content") or []:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                chunks.append(part["text"])
-    return "".join(chunks)
 
 
 def _validate_embedding_dimensions(payload: dict, expected: int) -> None:

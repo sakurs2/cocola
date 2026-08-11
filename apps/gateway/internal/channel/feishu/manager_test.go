@@ -729,8 +729,8 @@ func TestProcessInboxHistoryAndSwitch(t *testing.T) {
 				"chat_type": "chat", "runtime_id": "claude-code", "agent_id": "agent-2",
 			},
 			{
-				"id": "codex", "title": "Codex chat",
-				"chat_type": "chat", "runtime_id": "codex", "agent_id": "agent-1",
+				"id": "other-runtime", "title": "Other runtime chat",
+				"chat_type": "chat", "runtime_id": "other-runtime", "agent_id": "agent-1",
 			},
 			{
 				"id": "scheduled", "title": "Scheduled task",
@@ -781,7 +781,7 @@ func TestProcessInboxHistoryAndSwitch(t *testing.T) {
 		!strings.Contains(history, "2. Older chat") ||
 		strings.Contains(history, "Base chat") ||
 		strings.Contains(history, "Other Agent chat") ||
-		strings.Contains(history, "Codex chat") ||
+		strings.Contains(history, "Other runtime chat") ||
 		strings.Contains(history, "Scheduled task") ||
 		strings.Contains(history, "Project chat") {
 		t.Fatalf("history response = %q", history)

@@ -1466,7 +1466,6 @@ func userSkillID(userID, skillID string) string {
 
 const (
 	ProviderAnthropic        = "anthropic"
-	ProviderOpenAIResponses  = "openai_responses"
 	ProviderOpenAIEmbeddings = "openai_embeddings"
 	IconSimpleIcons          = "simple-icons"
 	IconImage                = "image"
@@ -1922,7 +1921,7 @@ func normalizeProviderType(v string) string {
 }
 
 func validProviderType(v string) bool {
-	return v == ProviderAnthropic || v == ProviderOpenAIResponses || v == ProviderOpenAIEmbeddings
+	return v == ProviderAnthropic || v == ProviderOpenAIEmbeddings
 }
 
 func validIcon(route store.LLMModelRoute) bool {
@@ -1988,8 +1987,6 @@ func inferPublicModelFamily(route store.LLMModelRoute) string {
 		return "xai"
 	case strings.Contains(haystack, "moonshot") || strings.Contains(haystack, "kimi"):
 		return "moonshot"
-	case strings.Contains(haystack, "codex"):
-		return "codex"
 	case strings.Contains(haystack, "gpt") || strings.Contains(haystack, "openai"):
 		return "openai"
 	default:
@@ -2031,17 +2028,12 @@ func reasoningEffortsForProtocol(protocol string) []string {
 	switch protocol {
 	case "anthropic-messages":
 		return []string{"low", "medium", "high", "xhigh", "max"}
-	case "openai-responses":
-		return []string{"minimal", "low", "medium", "high", "xhigh"}
 	default:
 		return []string{}
 	}
 }
 
 func modelProtocol(providerType string) string {
-	if providerType == ProviderOpenAIResponses {
-		return "openai-responses"
-	}
 	if providerType == ProviderOpenAIEmbeddings {
 		return "openai-embeddings"
 	}
@@ -2272,12 +2264,6 @@ func (a *Admin) probeExtraction(
 			"model": route.RealModel, "max_tokens": 8, "stream": false,
 			"messages": []map[string]string{{"role": "user", "content": "Reply OK"}},
 		}
-	case ProviderOpenAIResponses:
-		endpoint = strings.TrimRight(provider.BaseURL, "/") + "/responses"
-		payload = map[string]any{
-			"model": route.RealModel, "max_output_tokens": 8,
-			"input": []map[string]string{{"role": "user", "content": "Reply OK"}},
-		}
 	default:
 		return ErrInvalidArg
 	}
@@ -2381,8 +2367,8 @@ func (a *Admin) memoryConfigView(
 	if err != nil {
 		return incompleteMemoryView(view, config.Enabled, "selected embedding provider is unavailable")
 	}
-	if (extraction.Protocol != "anthropic-messages" && extraction.Protocol != "openai-responses") ||
-		!extraction.Enabled || !extractionProvider.Enabled {
+	if extraction.Protocol != "anthropic-messages" || !extraction.Enabled ||
+		!extractionProvider.Enabled {
 		return incompleteMemoryView(view, config.Enabled, "extraction model is not an enabled generation route")
 	}
 	view.ExtractionStatus = "ready"

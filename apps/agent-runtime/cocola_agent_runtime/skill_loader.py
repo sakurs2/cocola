@@ -53,7 +53,7 @@ class Skill:
 
     @property
     def native_id(self) -> str:
-        """Claude/Codex-visible identity; catalog ``id`` stays internal."""
+        """Claude Code-visible identity; catalog ``id`` stays internal."""
         return self.runtime_id.strip() or self.id.strip()
 
     @classmethod

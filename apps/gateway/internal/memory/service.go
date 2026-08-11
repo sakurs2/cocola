@@ -181,8 +181,8 @@ func (s *Service) enabled(ctx context.Context) (bool, error) {
 	err := s.pool.QueryRow(ctx, `SELECT c.enabled,
 		COALESCE(extraction.enabled, FALSE)
 			AND COALESCE(extraction_provider.enabled, FALSE)
-			AND extraction.protocol IN ('anthropic-messages', 'openai-responses')
-			AND extraction_provider.type IN ('anthropic', 'openai_responses')
+			AND extraction.protocol = 'anthropic-messages'
+			AND extraction_provider.type = 'anthropic'
 			AND COALESCE(embedding.enabled, FALSE)
 			AND COALESCE(embedding_provider.enabled, FALSE)
 			AND embedding.protocol = 'openai-embeddings'
@@ -450,8 +450,8 @@ func (s *Service) ScheduleCapture(ctx context.Context, input CaptureInput) error
 	if err := tx.QueryRow(ctx, `SELECT c.enabled,
 		COALESCE(extraction.enabled, FALSE)
 			AND COALESCE(extraction_provider.enabled, FALSE)
-			AND extraction.protocol IN ('anthropic-messages', 'openai-responses')
-			AND extraction_provider.type IN ('anthropic', 'openai_responses')
+			AND extraction.protocol = 'anthropic-messages'
+			AND extraction_provider.type = 'anthropic'
 			AND COALESCE(embedding.enabled, FALSE)
 			AND COALESCE(embedding_provider.enabled, FALSE)
 			AND embedding.protocol = 'openai-embeddings'

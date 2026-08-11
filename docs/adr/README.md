@@ -44,9 +44,11 @@ Code shows _what_ and _how_. ADRs preserve _why_ — invaluable when:
 | 0019 | Single-Gateway reconnectable chat runs                                                                | Accepted           |
 | 0020 | Configuration ownership and reload boundaries                                                         | Accepted           |
 | 0021 | Standalone CLI and release-asset bootstrap installer                                                  | Accepted           |
-| 0022 | Built-in Agent Runtime registry and immutable conversation runtime                                    | Accepted           |
+| 0022 | Built-in Agent Runtime registry and immutable conversation runtime                                    | Superseded by 0029 |
 | 0023 | Node-local Session storage with sticky scheduling and explicit reset                                  | Accepted           |
 | 0024 | Versioned Sandbox Runtime contract and operator profiles                                              | Accepted           |
 | 0025 | On-demand headless Browser capability and built-in Agent Skill                                        | Accepted           |
 | 0026 | Workspace Artifacts and isolated static HTML preview                                                  | Accepted           |
 | 0027 | Sandbox command supervision as a Runtime contract                                                     | Proposed           |
+| 0028 | Hidden Forgejo and unified Project change requests                                                    | Accepted           |
+| 0029 | Retire Codex and standardize on Claude Code                                                           | Accepted           |

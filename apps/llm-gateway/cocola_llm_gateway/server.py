@@ -1,4 +1,4 @@
-"""FastAPI app exposing Anthropic Messages and OpenAI Responses front-ends.
+"""FastAPI app exposing the Anthropic Messages front-end.
 
 Endpoints:
   POST /v1/messages   Anthropic Messages API. Honors `stream` (SSE vs JSON).
@@ -6,7 +6,6 @@ Endpoints:
                       ANTHROPIC_BASE_URL points at this gateway. The bearer token
                       it sends (as ANTHROPIC_API_KEY) is the cocola-issued JWT;
                       we verify it -> Identity (M4).
-  POST /v1/responses  Transparent OpenAI Responses API for the Codex runtime.
   GET  /healthz       Liveness + which model aliases are configured.
   GET  /v1/usage      Billing read: recent records + per-user/session aggregates.
   GET  /v1/quota      Current token-quota standings for the caller (M4).
@@ -133,7 +132,7 @@ def create_app(
     @app.post("/internal/memory/v1/chat/completions")
     async def memory_chat_completions(request: Request):
         if not _memory_authenticated(request):
-            return _responses_err(
+            return _openai_error(
                 401, "invalid memory service token", error_type="authentication_error"
             )
         try:
@@ -142,20 +141,20 @@ def create_app(
             payload = await service.memory_chat_completion(body)
             return JSONResponse(payload)
         except CocolaError as exc:
-            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
+            return _openai_error(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
         except UpstreamError as exc:
             log.warning("memory extraction upstream failed", error_type=type(exc).__name__)
-            return _responses_err(503, "memory extraction upstream failed")
+            return _openai_error(503, "memory extraction upstream failed")
         except (TypeError, ValueError) as exc:
-            return _responses_err(400, str(exc))
+            return _openai_error(400, str(exc))
         except Exception as exc:  # noqa: BLE001 - never expose provider details
             log.warning("memory extraction failed", error_type=type(exc).__name__)
-            return _responses_err(503, "memory extraction unavailable")
+            return _openai_error(503, "memory extraction unavailable")
 
     @app.get("/internal/memory/v1/status")
     async def memory_status(request: Request):
         if not _memory_authenticated(request):
-            return _responses_err(
+            return _openai_error(
                 401, "invalid memory service token", error_type="authentication_error"
             )
         configured = await service.memory_embedding_configured()
@@ -164,7 +163,7 @@ def create_app(
     @app.post("/internal/memory/v1/embeddings")
     async def memory_embeddings(request: Request):
         if not _memory_authenticated(request):
-            return _responses_err(
+            return _openai_error(
                 401, "invalid memory service token", error_type="authentication_error"
             )
         try:
@@ -173,15 +172,15 @@ def create_app(
             payload = await service.memory_embeddings(body)
             return JSONResponse(payload)
         except CocolaError as exc:
-            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
+            return _openai_error(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
         except UpstreamError as exc:
             log.warning("memory embedding upstream failed", error_type=type(exc).__name__)
-            return _responses_err(503, "memory embedding upstream failed")
+            return _openai_error(503, "memory embedding upstream failed")
         except (TypeError, ValueError) as exc:
-            return _responses_err(400, str(exc))
+            return _openai_error(400, str(exc))
         except Exception as exc:  # noqa: BLE001 - never expose provider details
             log.warning("memory embedding failed", error_type=type(exc).__name__)
-            return _responses_err(503, "memory embedding unavailable")
+            return _openai_error(503, "memory embedding unavailable")
 
     @app.post("/v1/messages")
     async def messages(request: Request):
@@ -251,98 +250,6 @@ def create_app(
             log.warning("upstream drain failed", error=repr(e))
             return _err(ErrorCode.UNAVAILABLE, f"upstream error: {e}")
         return JSONResponse(payload)
-
-    @app.post("/v1/responses")
-    async def responses(request: Request):
-        try:
-            body = await request.json()
-        except Exception:
-            return _responses_err(400, "request body must be JSON")
-        if not isinstance(body, dict):
-            return _responses_err(400, "request body must be a JSON object")
-        requested_alias = str(body.get("model") or "").strip()
-        if not requested_alias:
-            return _responses_err(400, "model is required")
-        try:
-            identity = await _authenticate(request)
-        except JWTError as exc:
-            return _responses_err(401, str(exc), error_type="authentication_error")
-        try:
-            await service.resolve_responses_model(requested_alias)
-            await service.validate_responses_request(body, requested_alias)
-        except CocolaError as exc:
-            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
-        try:
-            await service.check_quota(identity)
-        except QuotaExceeded as exc:
-            return _responses_err(429, str(exc), error_type="rate_limit_error")
-
-        session_id = (
-            request.headers.get("x-cocola-conversation-id", "").strip()
-            or request.headers.get("x-cocola-session", "").strip()
-            or identity.user_id
-        )
-        if not bool(body.get("stream", False)):
-            try:
-                payload = await service.responses_create(
-                    body,
-                    requested_alias=requested_alias,
-                    identity=identity,
-                    session_id=session_id,
-                    trace_context=TraceContext.parse(request.headers.get("traceparent")),
-                )
-            except UpstreamError as exc:
-                log.warning(
-                    "responses upstream failed",
-                    error_type=type(exc).__name__,
-                    upstream_status=exc.status,
-                )
-                return _responses_upstream_err(exc)
-            except CocolaError as exc:
-                return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
-            except Exception as exc:  # noqa: BLE001 - sanitized provider errors only
-                log.warning("responses upstream failed", error_type=type(exc).__name__)
-                return _responses_err(503, "upstream Responses request failed")
-            return JSONResponse(payload)
-
-        event_stream = service.responses_stream(
-            body,
-            requested_alias=requested_alias,
-            identity=identity,
-            session_id=session_id,
-            trace_context=TraceContext.parse(request.headers.get("traceparent")),
-        )
-        try:
-            first = await anext(event_stream)
-        except UpstreamError as exc:
-            log.warning(
-                "responses stream start failed",
-                error_type=type(exc).__name__,
-                upstream_status=exc.status,
-            )
-            await event_stream.aclose()
-            return _responses_upstream_err(exc)
-        except CocolaError as exc:
-            await event_stream.aclose()
-            return _responses_err(_CODE_TO_HTTP.get(exc.code, 500), exc.message)
-        except Exception as exc:  # noqa: BLE001 - no response headers sent yet
-            log.warning("responses stream start failed", error_type=type(exc).__name__)
-            await event_stream.aclose()
-            return _responses_err(503, "upstream Responses stream failed")
-
-        async def stream_with_first():
-            try:
-                yield first
-                async for chunk in event_stream:
-                    yield chunk
-            finally:
-                await event_stream.aclose()
-
-        return StreamingResponse(
-            stream_with_first(),
-            media_type="text/event-stream",
-            headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
-        )
 
     @app.get("/v1/usage")
     async def usage(request: Request):
@@ -503,26 +410,8 @@ def _quota_err(exc: QuotaExceeded) -> JSONResponse:
     )
 
 
-def _responses_err(status: int, message: str, *, error_type: str = "invalid_request_error"):
+def _openai_error(status: int, message: str, *, error_type: str = "invalid_request_error"):
     return JSONResponse(
         {"error": {"type": error_type, "message": message}},
         status_code=status,
     )
-
-
-def _responses_upstream_err(exc: UpstreamError) -> JSONResponse:
-    """Preserve actionable status classes without exposing upstream bodies."""
-    status = exc.status or 503
-    if status == 429:
-        return _responses_err(429, "upstream rate limit exceeded", error_type="rate_limit_error")
-    if status == 401:
-        return _responses_err(
-            401,
-            "upstream authentication failed",
-            error_type="authentication_error",
-        )
-    if status == 403:
-        return _responses_err(403, "upstream request was forbidden", error_type="permission_error")
-    if status in {400, 404, 409, 422}:
-        return _responses_err(status, "upstream rejected the Responses request")
-    return _responses_err(503, "upstream Responses request failed", error_type="server_error")

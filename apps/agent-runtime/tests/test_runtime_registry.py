@@ -32,9 +32,8 @@ def test_registry_requires_one_default_and_unique_ids():
 
 
 def test_registry_resolves_default_and_rejects_unknown_runtime():
-    registry = RuntimeRegistry([_entry("claude-code", default=True), _entry("codex")])
+    registry = RuntimeRegistry([_entry("claude-code", default=True)])
 
     assert registry.resolve("").descriptor.id == "claude-code"
-    assert registry.resolve("codex").descriptor.id == "codex"
     with pytest.raises(KeyError, match="unsupported"):
         registry.resolve("other")

@@ -1134,25 +1134,21 @@ func TestPlanApprovalSerializesWorkspaceValidationWithNormalRunStart(t *testing.
 	}
 }
 
-func TestPlanModeRejectsCodexAndScheduledTasks(t *testing.T) {
+func TestPlanModeRejectsScheduledTasks(t *testing.T) {
 	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	api, _, _ := durableTestAPI(streamer)
 	api.WithAgentRuntimes([]agent.Runtime{
 		{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true},
-		{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 	})
 	handler := api.Handler()
-	for name, body := range map[string]string{
-		"codex":     `{"prompt":"plan","session_id":"codex-plan","runtime_id":"codex","interaction_mode":"plan"}`,
-		"scheduled": `{"prompt":"plan","session_id":"scheduled-plan","conversation_type":"scheduled_task","interaction_mode":"plan"}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(body)))
-			if recorder.Code != http.StatusConflict {
-				t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
-			}
-		})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat",
+		strings.NewReader(`{"prompt":"plan","session_id":"scheduled-plan","conversation_type":"scheduled_task","interaction_mode":"plan"}`),
+	))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 

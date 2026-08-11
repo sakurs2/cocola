@@ -640,8 +640,6 @@ func migrateEnvironmentWithOptions(
 		{"COCOLA_FEATURE_GITHUB_AGENT_WRITE", "true"},
 		{"COCOLA_SESSION_VOLUME_SIZE", "2Gi"},
 		{"COCOLA_SANDBOX_PROFILE", "coding"},
-		{"COCOLA_AGENT_RUNTIME_DEFAULT_ID", defaultAgentRuntimeID},
-		{"COCOLA_AGENT_RUNTIME_PICKER_ENABLED", defaultRuntimePickerEnabled},
 		{"COCOLA_AGENT_MAX_TURNS", defaultAgentMaxTurns},
 		{"COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", defaultToolStepTimeoutSecs},
 		{"COCOLA_LLM_TIMEOUT_SECS", defaultLLMTimeoutSecs},

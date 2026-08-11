@@ -637,10 +637,9 @@ def _validated_model_route_id(requested_route_id: str) -> str | None:
 
 
 def _model_env(model_route_id: str | None, *, runtime_id: str = "claude-code") -> dict[str, str]:
+    del runtime_id
     if not model_route_id:
         return {}
-    if runtime_id == "codex":
-        return {"CODEX_MODEL": model_route_id}
     return {
         "ANTHROPIC_MODEL": model_route_id,
         "ANTHROPIC_SMALL_FAST_MODEL": model_route_id,
@@ -658,9 +657,10 @@ def _acquire_env(
     per-turn exec env (shim_provider._model_env) applies the token on every
     execution, so identity is correct for warm and reused sandboxes as well.
     """
+    del runtime_id
     env = dict(model_env)
     if sandbox_token:
-        env["CODEX_API_KEY" if runtime_id == "codex" else "ANTHROPIC_AUTH_TOKEN"] = sandbox_token
+        env["ANTHROPIC_AUTH_TOKEN"] = sandbox_token
     return env
 
 
@@ -1991,7 +1991,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
     ) -> list[dict[str, str]]:
         if self._executor is None:
             return []
-        del runtime_id  # Claude and Codex share the agents-skill-v1 compatibility set.
+        del runtime_id  # The skill layout no longer varies by Agent Runtime.
         inspected = await self._executor.exec(
             sandbox_id=sandbox_id,
             cmd=["python3", "-c", SKILLS_INSPECT_SCRIPT],

@@ -18,7 +18,7 @@ test("normalizes Claude Code TodoWrite items", () => {
   );
 });
 
-test("normalizes Codex todo list items", () => {
+test("normalizes alternate todo list item shapes", () => {
   assert.deepEqual(
     normalizeProgressItems([
       { id: "one", text: "Read files", completed: true },

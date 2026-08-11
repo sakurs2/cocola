@@ -200,7 +200,6 @@ func TestAgentRuntimeCatalog(t *testing.T) {
 	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithAgentRuntimes([]agent.Runtime{
 			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true},
-			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 		})
 	recorder := httptest.NewRecorder()
 	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/agent-runtimes", nil))
@@ -209,7 +208,7 @@ func TestAgentRuntimeCatalog(t *testing.T) {
 		t.Fatalf("runtime catalog status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 	body := recorder.Body.String()
-	for _, want := range []string{`"id":"claude-code"`, `"id":"codex"`, `"model_protocol":"openai-responses"`} {
+	for _, want := range []string{`"id":"claude-code"`, `"model_protocol":"anthropic-messages"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("runtime catalog missing %s: %s", want, body)
 		}
@@ -219,7 +218,7 @@ func TestAgentRuntimeCatalog(t *testing.T) {
 func TestProductConfig(t *testing.T) {
 	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
-			DefaultID: "claude-code", PickerEnabled: false,
+			DefaultID: "claude-code",
 		}})
 	recorder := httptest.NewRecorder()
 	api.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/product-config", nil))
@@ -231,7 +230,7 @@ func TestProductConfig(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.AgentRuntime.DefaultID != "claude-code" || body.AgentRuntime.PickerEnabled {
+	if body.AgentRuntime.DefaultID != "claude-code" {
 		t.Fatalf("product config = %+v", body)
 	}
 }
@@ -254,11 +253,8 @@ func TestChatUsesConfiguredDefaultRuntime(t *testing.T) {
 	api := newConfiguredTestAPI(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithAgentRuntimes([]agent.Runtime{
 			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
-			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 		}).
-		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
-			DefaultID: "codex",
-		}})
+		WithProductConfig(DefaultProductConfig())
 
 	recorder := httptest.NewRecorder()
 	api.Handler().ServeHTTP(recorder, httptest.NewRequest(
@@ -269,8 +265,8 @@ func TestChatUsesConfiguredDefaultRuntime(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("chat status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
-	if streamer.gotQuery.RuntimeID != "codex" {
-		t.Fatalf("forwarded runtime = %q, want codex", streamer.gotQuery.RuntimeID)
+	if streamer.gotQuery.RuntimeID != "claude-code" {
+		t.Fatalf("forwarded runtime = %q, want claude-code", streamer.gotQuery.RuntimeID)
 	}
 }
 
@@ -279,11 +275,8 @@ func TestScheduledChatUsesConfiguredDefaultRuntime(t *testing.T) {
 	api := newConfiguredTestAPI(streamer, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithAgentRuntimes([]agent.Runtime{
 			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
-			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 		}).
-		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
-			DefaultID: "codex",
-		}})
+		WithProductConfig(DefaultProductConfig())
 
 	recorder := httptest.NewRecorder()
 	api.Handler().ServeHTTP(recorder, httptest.NewRequest(
@@ -294,8 +287,8 @@ func TestScheduledChatUsesConfiguredDefaultRuntime(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("scheduled chat status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
-	if streamer.gotQuery.RuntimeID != "codex" {
-		t.Fatalf("scheduled runtime = %q, want codex", streamer.gotQuery.RuntimeID)
+	if streamer.gotQuery.RuntimeID != "claude-code" {
+		t.Fatalf("scheduled runtime = %q, want claude-code", streamer.gotQuery.RuntimeID)
 	}
 }
 
@@ -323,11 +316,8 @@ func TestCreateProjectUsesConfiguredDefaultRuntime(t *testing.T) {
 	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithAgentRuntimes([]agent.Runtime{
 			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
-			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 		}).
-		WithProductConfig(ProductConfig{AgentRuntime: AgentRuntimeProductConfig{
-			DefaultID: "codex",
-		}}).
+		WithProductConfig(DefaultProductConfig()).
 		WithProjects(service)
 
 	recorder := httptest.NewRecorder()
@@ -339,15 +329,15 @@ func TestCreateProjectUsesConfiguredDefaultRuntime(t *testing.T) {
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("create project status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
-	if store.created.RuntimeID != "codex" {
-		t.Fatalf("project runtime = %q, want codex", store.created.RuntimeID)
+	if store.created.RuntimeID != "claude-code" {
+		t.Fatalf("project runtime = %q, want claude-code", store.created.RuntimeID)
 	}
 }
 
 func TestUpdateProjectWithoutRuntimePreservesBinding(t *testing.T) {
 	const projectID = "11111111-1111-1111-1111-111111111111"
 	store := &fakeProjectStore{current: project.Project{
-		ID: projectID, Name: "Project", RuntimeID: "codex", Version: 1,
+		ID: projectID, Name: "Project", RuntimeID: "claude-code", Version: 1,
 	}}
 	service, err := project.New(store, project.Config{
 		MaxRepositoryMB:         512,
@@ -360,7 +350,6 @@ func TestUpdateProjectWithoutRuntimePreservesBinding(t *testing.T) {
 	api := newConfiguredTestAPI(&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must()).
 		WithAgentRuntimes([]agent.Runtime{
 			{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages"},
-			{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 		}).
 		WithProductConfig(DefaultProductConfig()).
 		WithProjects(service)
@@ -374,12 +363,12 @@ func TestUpdateProjectWithoutRuntimePreservesBinding(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("update project status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
-	if store.updatedRuntime != "codex" {
-		t.Fatalf("updated runtime = %q, want codex", store.updatedRuntime)
+	if store.updatedRuntime != "claude-code" {
+		t.Fatalf("updated runtime = %q, want claude-code", store.updatedRuntime)
 	}
 }
 
-func TestChatRuntimeIsImmutableAndMismatchHasNoWrites(t *testing.T) {
+func TestChatRejectsUnsupportedRuntimeWithoutWrites(t *testing.T) {
 	streamer := &fakeStreamer{script: []agent.Event{{Kind: "done"}}}
 	conversations := convo.NewMemory()
 	api := newConfiguredTestAPIWithConvo(
@@ -389,34 +378,23 @@ func TestChatRuntimeIsImmutableAndMismatchHasNoWrites(t *testing.T) {
 		conversations,
 	).WithAgentRuntimes([]agent.Runtime{
 		{ID: "claude-code", Label: "Claude Code", ModelProtocol: "anthropic-messages", IsDefault: true},
-		{ID: "codex", Label: "Codex", ModelProtocol: "openai-responses"},
 	})
 	handler := api.Handler()
 
-	first := httptest.NewRecorder()
-	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
-		`{"prompt":"hello","session_id":"conversation-1","client_request_id":"request-1","runtime_id":"codex"}`,
-	)))
-	if first.Code != http.StatusOK {
-		t.Fatalf("first chat status = %d, body=%s", first.Code, first.Body.String())
-	}
-	if streamer.gotQuery.RuntimeID != "codex" {
-		t.Fatalf("forwarded runtime = %q, want codex", streamer.gotQuery.RuntimeID)
-	}
 	before, err := conversations.GetMessages(context.Background(), "conversation-1", auth.DevIdentity.UserID)
-	if err != nil {
+	if err != nil && !errors.Is(err, convo.ErrNotFound) {
 		t.Fatal(err)
 	}
 
-	mismatch := httptest.NewRecorder()
-	handler.ServeHTTP(mismatch, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
-		`{"prompt":"change runtime","session_id":"conversation-1","client_request_id":"request-2","runtime_id":"claude-code"}`,
+	unsupported := httptest.NewRecorder()
+	handler.ServeHTTP(unsupported, httptest.NewRequest(http.MethodPost, "/v1/chat", strings.NewReader(
+		`{"prompt":"hello","session_id":"conversation-1","client_request_id":"request-1","runtime_id":"retired-runtime"}`,
 	)))
-	if mismatch.Code != http.StatusConflict || !strings.Contains(mismatch.Body.String(), "RUNTIME_MISMATCH") {
-		t.Fatalf("runtime mismatch = %d, body=%s", mismatch.Code, mismatch.Body.String())
+	if unsupported.Code != http.StatusBadRequest || !strings.Contains(unsupported.Body.String(), "UNSUPPORTED_RUNTIME") {
+		t.Fatalf("unsupported runtime = %d, body=%s", unsupported.Code, unsupported.Body.String())
 	}
 	after, err := conversations.GetMessages(context.Background(), "conversation-1", auth.DevIdentity.UserID)
-	if err != nil {
+	if err != nil && !errors.Is(err, convo.ErrNotFound) {
 		t.Fatal(err)
 	}
 	if len(after) != len(before) {

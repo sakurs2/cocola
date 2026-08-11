@@ -11,8 +11,7 @@ import (
 const DefaultAgentRuntimeID = "claude-code"
 
 type AgentRuntimeProductConfig struct {
-	DefaultID     string `json:"default_id"`
-	PickerEnabled bool   `json:"picker_enabled"`
+	DefaultID string `json:"default_id"`
 }
 
 type WikiProductConfig struct {

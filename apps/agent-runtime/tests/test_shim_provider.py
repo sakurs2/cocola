@@ -597,11 +597,11 @@ async def test_model_route_id_is_injected_into_exec_env():
     assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "route-claude"
 
 
-async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
+async def test_claude_credentials_stay_in_exec_env_and_out_of_request():
     def stream_handler(sandbox_id, cmd, stdin):
         request = json.loads(stdin)
-        assert request["runtime_id"] == "codex"
-        assert request["model"] == "route-codex"
+        assert request["runtime_id"] == "claude-code"
+        assert request["model"] == "route-claude"
         assert request["traceparent"] == "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
         assert "auth_token" not in request
         yield ExecChunk(
@@ -615,9 +615,9 @@ async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
     options = AgentOptions(
         user_id="U1",
         session_id="S1",
-        runtime_id="codex",
+        runtime_id="claude-code",
         sandbox_id="box-1",
-        model_route_id="route-codex",
+        model_route_id="route-claude",
         auth_token="short-lived-cocola-token",
         traceparent="00-" + "a" * 32 + "-" + "b" * 16 + "-01",
     )
@@ -626,8 +626,10 @@ async def test_codex_credentials_stay_in_exec_env_and_out_of_request():
 
     env = executor.stream_calls[0]["env"]
     assert env == {
-        "CODEX_API_KEY": "short-lived-cocola-token",
-        "CODEX_MODEL": "route-codex",
+        "ANTHROPIC_AUTH_TOKEN": "short-lived-cocola-token",
+        "ANTHROPIC_CUSTOM_HEADERS": ("traceparent: 00-" + "a" * 32 + "-" + "b" * 16 + "-01"),
+        "ANTHROPIC_MODEL": "route-claude",
+        "ANTHROPIC_SMALL_FAST_MODEL": "route-claude",
         "COCOLA_AGENT_CWD": "/workspace",
         "PYTHONUNBUFFERED": "1",
     }
@@ -677,7 +679,7 @@ async def test_thread_started_session_is_indexed_even_when_turn_fails():
     options = AgentOptions(
         user_id="U1",
         session_id="S1",
-        runtime_id="codex",
+        runtime_id="claude-code",
         sandbox_id="box-1",
     )
 
@@ -685,7 +687,7 @@ async def test_thread_started_session_is_indexed_even_when_turn_fails():
 
     assert [event.kind for event in events] == ["error", "done"]
     assert events[-1].data == {"session_id": "thread-created"}
-    assert await session_map.get("S1", user_id="U1", runtime_id="codex") == "thread-created"
+    assert await session_map.get("S1", user_id="U1", runtime_id="claude-code") == "thread-created"
 
 
 async def test_thread_started_session_is_indexed_before_cancellation():
@@ -704,14 +706,14 @@ async def test_thread_started_session_is_indexed_before_cancellation():
     options = AgentOptions(
         user_id="U1",
         session_id="S1",
-        runtime_id="codex",
+        runtime_id="claude-code",
         sandbox_id="box-1",
     )
 
     with pytest.raises(asyncio.CancelledError):
         await _drain(provider, "hello", options)
 
-    assert await session_map.get("S1", user_id="U1", runtime_id="codex") == "thread-created"
+    assert await session_map.get("S1", user_id="U1", runtime_id="claude-code") == "thread-created"
 
 
 async def test_nonzero_exit_becomes_terminal_error():

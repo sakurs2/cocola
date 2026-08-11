@@ -33,11 +33,6 @@ from cocola_llm_gateway.upstream.openai_embeddings import (
     OpenAIEmbeddingsConfig,
     OpenAIEmbeddingsUpstream,
 )
-from cocola_llm_gateway.upstream.openai_responses import (
-    OpenAIResponsesConfig,
-    OpenAIResponsesUpstream,
-)
-from cocola_llm_gateway.upstream.responses_base import ResponsesProvider
 
 log = get_logger("cocola.llm-gateway.config")
 
@@ -95,7 +90,6 @@ def _build_from_dict(spec: dict) -> Registry:
       }
     """
     providers: dict[str, UpstreamProvider] = {}
-    responses_providers: dict[str, ResponsesProvider] = {}
     embeddings_providers: dict[str, EmbeddingsProvider] = {}
     provider_protocols: dict[str, tuple[str, ...]] = {}
     for name, pcfg in (spec.get("providers") or {}).items():
@@ -103,9 +97,6 @@ def _build_from_dict(spec: dict) -> Registry:
         if isinstance(provider, EmbeddingsProvider):
             embeddings_providers[name] = provider
             provider_protocols[name] = ("openai-embeddings",)
-        elif isinstance(provider, ResponsesProvider):
-            responses_providers[name] = provider
-            provider_protocols[name] = ("openai-responses",)
         else:
             providers[name] = provider
             provider_protocols[name] = ("anthropic-messages",)
@@ -140,8 +131,7 @@ def _build_from_dict(spec: dict) -> Registry:
         providers,
         routes,
         default_alias,
-        responses_providers,
-        embeddings_providers,
+        embeddings_providers=embeddings_providers,
         memory_enabled=_cfg_bool(spec.get("memory_enabled", False)),
         memory_extraction_route_id=str(spec.get("memory_extraction_route_id") or ""),
         memory_embedding_route_id=str(spec.get("memory_embedding_route_id") or ""),
@@ -160,9 +150,7 @@ def _resolve_secret(cfg: dict, inline_key: str, env_key_field: str) -> str:
     return cfg.get(inline_key, "")
 
 
-def _build_provider(
-    name: str, cfg: dict
-) -> UpstreamProvider | ResponsesProvider | EmbeddingsProvider:
+def _build_provider(name: str, cfg: dict) -> UpstreamProvider | EmbeddingsProvider:
     ptype = cfg.get("type", name)
     if ptype == "fake":
         return FakeUpstream(reply=cfg.get("reply", ""), chunk_size=int(cfg.get("chunk_size", 4)))
@@ -174,14 +162,6 @@ def _build_provider(
                 anthropic_version=cfg.get("anthropic_version", AnthropicConfig.anthropic_version),
                 timeout_s=float(cfg.get("timeout_s", AnthropicConfig.timeout_s)),
                 stream=bool(cfg.get("stream", AnthropicConfig.stream)),
-            )
-        )
-    if ptype == "openai_responses":
-        return OpenAIResponsesUpstream(
-            OpenAIResponsesConfig(
-                base_url=cfg.get("base_url", OpenAIResponsesConfig.base_url),
-                api_key=_resolve_secret(cfg, "api_key", "api_key_env"),
-                timeout_s=float(cfg.get("timeout_s", OpenAIResponsesConfig.timeout_s)),
             )
         )
     if ptype == "openai_embeddings":

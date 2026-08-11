@@ -2,7 +2,7 @@ export const REASONING_PRESETS = ["auto", "fast", "deep", "max"];
 
 const EFFORT_PREFERENCES = {
   auto: [],
-  fast: ["low", "minimal"],
+  fast: ["low"],
   deep: ["high", "medium"],
   max: ["max", "xhigh"],
 };
@@ -24,7 +24,7 @@ export const reasoningPresetOptions = (supportedEfforts) =>
   }));
 
 export const reasoningPresetForEffort = (effort) => {
-  if (effort === "minimal" || effort === "low") return "fast";
+  if (effort === "low") return "fast";
   if (effort === "medium" || effort === "high") return "deep";
   if (effort === "xhigh" || effort === "max") return "max";
   return "auto";

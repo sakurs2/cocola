@@ -6,7 +6,7 @@
 #
 # What it proves (ADR-0009 / ADR-0008):
 #   1. build   : the image builds; CLI is pre-baked (offline tgz if vendored).
-#   2. selfcheck: Node + Claude/Codex CLIs and SDKs present; runtime state dirs,
+#   2. selfcheck: Node + Claude CLI and SDK present; runtime state dirs,
 #                 workspace and common browser/document tooling wired. (no network)
 #   3. query   : a real turn through the in-sandbox stdio shim -> reaches the
 #                llm-gateway (egress) AND exercises native bash/file IO inside
@@ -14,8 +14,8 @@
 #                (ADR-0010): the model can only write proof.txt by emitting a
 #                tool_use that the gateway forwarded -- if tools were dropped the
 #                file never appears. Requires ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN.
-#   4. persist : session storage keeps /home/cocola/.claude and
-#                /home/cocola/.codex across a container destroy + recreate;
+#   4. persist : session storage keeps /home/cocola/.claude across a container
+#                destroy + recreate;
 #                Claude `--resume <session_id>` is checked after a live turn.
 #
 # The shim is driven over `docker exec -i` STDIO -- never a listening port.
@@ -40,7 +40,7 @@ MODEL="${MODEL:-cocola-default}"
 # Per-test scratch dir that stands in for the session workspace volume.
 WORK="$(mktemp -d)"
 SESS_VOL="$WORK/session"   # session root; subdirs emulate session volume subPaths
-mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude" "$SESS_VOL/codex" "$SESS_VOL/browser"
+mkdir -p "$SESS_VOL/workspace" "$SESS_VOL/claude" "$SESS_VOL/browser"
 
 CTR="cocola-verify-$$"
 PASS=0; FAIL=0
@@ -58,27 +58,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Mounts shared by every container we spin up: the session workspace and both
-# runtimes' native state directories.
+# Mounts shared by every container we spin up: the session workspace and the
+# runtime's native state directory.
 run_args=(
   --rm -d --name "$CTR"
   --runtime "$DOCKER_RUNTIME"
   -v "$SESS_VOL/workspace:/workspace"
   -v "$SESS_VOL/claude:/home/cocola/.claude"
-  -v "$SESS_VOL/codex:/home/cocola/.codex"
   -v "$SESS_VOL/browser:/session/runtime/browser"
   -e "CLAUDE_CONFIG_DIR=/home/cocola/.claude"
   -e "ANTHROPIC_CONFIG_DIR=/home/cocola/.claude"
-  -e "CODEX_HOME=/home/cocola/.codex"
   -e "COCOLA_WORKSPACE=/workspace"
   -e "CLAUDE_CODE_MAX_RETRIES=${CLAUDE_CODE_MAX_RETRIES:-3}"
 )
 [ -n "${ANTHROPIC_BASE_URL:-}" ]   && run_args+=( -e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" )
 [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] && run_args+=( -e "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" )
 [ -n "${MODEL:-}" ]                && run_args+=( -e "ANTHROPIC_MODEL=$MODEL" )
-[ -n "${COCOLA_LLM_BASE_URL:-}" ]  && run_args+=( -e "COCOLA_LLM_BASE_URL=$COCOLA_LLM_BASE_URL" )
-[ -n "${CODEX_API_KEY:-}" ]         && run_args+=( -e "CODEX_API_KEY=$CODEX_API_KEY" )
-[ -n "${MODEL:-}" ]                 && run_args+=( -e "CODEX_MODEL=$MODEL" )
 
 start_ctr() { docker run "${run_args[@]}" "$IMAGE" >/dev/null; }
 
@@ -112,8 +107,6 @@ echo "$SELF"
 echo "$SELF" | grep -q '"node":"v2' && ok "Node 22+ present" || bad "Node missing / wrong major"
 echo "$SELF" | grep -q '"claude_cli":"[0-9]' && ok "claude CLI pre-baked" || bad "claude CLI missing"
 echo "$SELF" | grep -qv '"claude_agent_sdk":"missing' && ok "claude-agent-sdk importable" || bad "claude-agent-sdk missing"
-echo "$SELF" | grep -q '"codex_cli":"codex-cli [0-9]' && ok "codex CLI pre-baked" || bad "codex CLI missing"
-echo "$SELF" | grep -q '"codex_sdk":"0.144.1"' && ok "codex SDK pinned" || bad "codex SDK missing / wrong version"
 echo "$SELF" | grep -q '"openpyxl":"3.1.5"' && ok "openpyxl pinned in runtime venv" || bad "openpyxl missing / wrong version"
 CLAUDE_PLAN_DIR_METADATA="$(docker exec -i "$CTR" stat -c '%U:%G:%a' \
   /home/cocola/.claude/plans 2>/dev/null || true)"
@@ -385,12 +378,10 @@ fi
 
 # ---- 4. persistence across container destroy + recreate ------------------
 note "persistence: session storage survives container teardown"
-# Markers that should outlive the container in both native state directories.
+# Marker that should outlive the container in the native state directory.
 docker exec -i "$CTR" bash -lc 'echo cocola-persist-marker > /home/cocola/.claude/persist_probe.txt'
-docker exec -i "$CTR" bash -lc 'echo cocola-persist-marker > /home/cocola/.codex/persist_probe.txt'
 docker rm -f "$CTR" >/dev/null
 ls "$SESS_VOL/claude/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .claude file on host after destroy" || bad "session storage lost .claude data"
-ls "$SESS_VOL/codex/persist_probe.txt" >/dev/null 2>&1 && ok "session storage retained .codex file on host after destroy" || bad "session storage lost .codex data"
 find "$SESS_VOL/browser/profile" -mindepth 1 -print -quit 2>/dev/null | grep -q . \
   && ok "session storage retained Browser profile on host after destroy" \
   || bad "session storage lost Browser profile data"
@@ -398,8 +389,6 @@ find "$SESS_VOL/browser/profile" -mindepth 1 -print -quit 2>/dev/null | grep -q 
 start_ctr
 docker exec -i "$CTR" cat /home/cocola/.claude/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
   && ok "re-created container re-mounts the same /home/cocola/.claude" || bad "remount did not restore /home/cocola/.claude"
-docker exec -i "$CTR" cat /home/cocola/.codex/persist_probe.txt 2>/dev/null | grep -q cocola-persist-marker \
-  && ok "re-created container re-mounts the same /home/cocola/.codex" || bad "remount did not restore /home/cocola/.codex"
 docker exec -d -u cocola "$CTR" \
   python3 -m http.server 39400 --bind 127.0.0.1 --directory /workspace
 for _ in {1..10}; do
@@ -416,8 +405,8 @@ echo "$BROWSER_RESTORED" | grep -q 'COCOLA_BROWSER_PERSISTED' \
 
 # Exercise the exact Agent Runtime scripts against the built image. An empty
 # Admin/Personal catalog must still reconcile the image-baked platform Skill
-# into the shared Claude/Codex Session Skill Set.
-note "skills: reconcile image-baked platform Skill into both Agent runtimes"
+# into the Claude Session Skill Set.
+note "skills: reconcile image-baked platform Skill into the Agent runtime"
 SKILL_RECONCILER="$ROOT/apps/agent-runtime/cocola_agent_runtime/skill_reconciler.py"
 SKILLS_INSPECT_SCRIPT="$(python_string_constant "$SKILL_RECONCILER" SKILLS_INSPECT_SCRIPT)"
 SKILLS_RECONCILE_SCRIPT="$(python_string_constant "$SKILL_RECONCILER" SKILLS_RECONCILE_SCRIPT)"
@@ -436,13 +425,9 @@ docker exec -i -u cocola "$CTR" python3 -c "$SKILLS_RECONCILE_SCRIPT" \
 docker exec -i -u cocola "$CTR" test -s \
   /home/cocola/.claude/skills/cocola-sandbox-browser/SKILL.md \
   && docker exec -i -u cocola "$CTR" test -s \
-    /home/cocola/.agents/skills/cocola-sandbox-browser/SKILL.md \
-  && docker exec -i -u cocola "$CTR" test -s \
     /home/cocola/.claude/skills/cocola-sandbox-artifacts/SKILL.md \
-  && docker exec -i -u cocola "$CTR" test -s \
-    /home/cocola/.agents/skills/cocola-sandbox-artifacts/SKILL.md \
-  && ok "empty catalog still loads both built-in Skills for Claude and Codex" \
-  || bad "built-in Skills were not loaded into both Agent runtime directories"
+  && ok "empty catalog still loads both built-in Skills for Claude" \
+  || bad "built-in Skills were not loaded into the Claude runtime directory"
 
 # resume only if we got a session id from step 3
 if [ -n "$SESSION_ID" ]; then

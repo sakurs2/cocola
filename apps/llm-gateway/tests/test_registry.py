@@ -5,18 +5,6 @@ from cocola_llm_gateway.registry import ModelRoute, Pricing, Registry
 from cocola_llm_gateway.upstream.fake import FakeUpstream
 
 
-class FakeResponses:
-    async def create_response(self, payload):
-        return payload
-
-    async def stream_response(self, payload):
-        if False:
-            yield b""
-
-    async def aclose(self):
-        return None
-
-
 def _reg():
     fake = FakeUpstream()
     routes = {
@@ -107,55 +95,17 @@ def test_duplicate_aliases_route_by_id_and_never_guess_provider():
     assert error.value.code is ErrorCode.NOT_FOUND
 
 
-def test_defaults_and_legacy_alias_resolution_are_scoped_to_protocol():
-    routes = {
-        "chat-route": ModelRoute("shared", "chat", "chat-real", is_default=True),
-        "responses-route": ModelRoute(
-            "shared",
-            "responses",
-            "responses-real",
-            protocols=("openai-responses",),
-            is_default=True,
-        ),
-    }
-    reg = Registry(
-        {"chat": FakeUpstream()},
-        routes,
-        default_alias="",
-        responses_providers={"responses": FakeResponses()},
-    )
-
-    assert reg.resolve_chat(None)[0].real_model == "chat-real"
-    assert reg.resolve_responses(None)[0].real_model == "responses-real"
-    assert reg.resolve_chat("shared")[0].real_model == "chat-real"
-    assert reg.resolve_responses("shared")[0].real_model == "responses-real"
-
-
-async def test_openai_responses_provider_is_isolated_from_chat_routes():
-    registry = _build_from_dict(
-        {
-            "default_alias": "codex",
-            "providers": {
-                "responses": {
-                    "type": "openai_responses",
-                    "base_url": "https://example.invalid/v1",
-                    "api_key": "test-only-key",
+def test_openai_responses_provider_is_rejected():
+    with pytest.raises(CocolaError) as error:
+        _build_from_dict(
+            {
+                "providers": {
+                    "responses": {
+                        "type": "openai_responses",
+                        "base_url": "https://example.invalid/v1",
+                        "api_key": "test-only-key",
+                    }
                 }
-            },
-            "routes": {
-                "codex": {
-                    "provider": "responses",
-                    "real_model": "gpt-real",
-                }
-            },
-        }
-    )
-    try:
-        route, _ = registry.resolve_responses("codex")
-        assert route.real_model == "gpt-real"
-        assert route.protocols == ("openai-responses",)
-        with pytest.raises(CocolaError) as error:
-            registry.resolve_chat("codex")
-        assert error.value.code is ErrorCode.NOT_FOUND
-    finally:
-        await registry.aclose()
+            }
+        )
+    assert error.value.code is ErrorCode.INVALID_ARGUMENT

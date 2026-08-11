@@ -16,8 +16,6 @@
 //	COCOLA_PG_DSN           required Postgres DSN for conversations and chat runs
 //	COCOLA_AGENT_MAX_TURNS maximum model turns in one Agent run (default 200)
 //	COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS hard runtime limit for one tool execution (default 3600)
-//	COCOLA_AGENT_RUNTIME_DEFAULT_ID default runtime for new work (default claude-code)
-//	COCOLA_AGENT_RUNTIME_PICKER_ENABLED expose experimental runtime choices (default false)
 //	COCOLA_WIKI_MAX_FILE_BYTES maximum bytes accepted for one Wiki file (default 20MiB)
 //	COCOLA_SKILL_PUBLISH_ENABLED enable run-scoped Personal Skill publishing (default false)
 //	COCOLA_OPENVIKING_URL internal OpenViking URL (default http://127.0.0.1:1933)
@@ -105,18 +103,6 @@ func mustEnvBool(log logger.Logger, key string, fallback bool) bool {
 
 func productConfigFromEnv(runtimes []agent.Runtime) (httpapi.ProductConfig, error) {
 	config := httpapi.DefaultProductConfig()
-	if raw, ok := os.LookupEnv("COCOLA_AGENT_RUNTIME_DEFAULT_ID"); ok {
-		config.AgentRuntime.DefaultID = strings.TrimSpace(raw)
-	}
-	if raw, ok := os.LookupEnv("COCOLA_AGENT_RUNTIME_PICKER_ENABLED"); ok {
-		enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
-		if err != nil {
-			return httpapi.ProductConfig{}, fmt.Errorf(
-				"invalid COCOLA_AGENT_RUNTIME_PICKER_ENABLED=%s", raw,
-			)
-		}
-		config.AgentRuntime.PickerEnabled = enabled
-	}
 	if raw, ok := os.LookupEnv("COCOLA_WIKI_MAX_FILE_BYTES"); ok {
 		maxFileBytes, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 		if err != nil || maxFileBytes <= 0 {

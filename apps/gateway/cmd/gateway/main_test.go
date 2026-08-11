@@ -20,46 +20,35 @@ func TestBoundedEnvInt(t *testing.T) {
 }
 
 func TestProductConfigFromEnv(t *testing.T) {
-	runtimes := []agent.Runtime{
-		{ID: "claude-code"},
-		{ID: "codex"},
-	}
+	runtimes := []agent.Runtime{{ID: "claude-code"}}
 
 	config, err := productConfigFromEnv(runtimes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.AgentRuntime.DefaultID != "claude-code" || config.AgentRuntime.PickerEnabled {
+	if config.AgentRuntime.DefaultID != "claude-code" {
 		t.Fatalf("default product config = %+v", config)
 	}
 
-	t.Setenv("COCOLA_AGENT_RUNTIME_DEFAULT_ID", "codex")
+	// Removed runtime-selection variables must not reactivate a retired runtime.
+	t.Setenv("COCOLA_AGENT_RUNTIME_DEFAULT_ID", "retired-runtime")
 	t.Setenv("COCOLA_AGENT_RUNTIME_PICKER_ENABLED", "true")
 	config, err = productConfigFromEnv(runtimes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.AgentRuntime.DefaultID != "codex" || !config.AgentRuntime.PickerEnabled {
-		t.Fatalf("configured product config = %+v", config)
+	if config.AgentRuntime.DefaultID != "claude-code" {
+		t.Fatalf("legacy environment changed product config = %+v", config)
 	}
 }
 
 func TestProductConfigFromEnvRejectsInvalidValues(t *testing.T) {
-	runtimes := []agent.Runtime{{ID: "claude-code"}}
-
-	t.Setenv("COCOLA_AGENT_RUNTIME_PICKER_ENABLED", "sometimes")
-	if _, err := productConfigFromEnv(runtimes); err == nil {
-		t.Fatal("invalid picker boolean should fail")
-	}
-
-	t.Setenv("COCOLA_AGENT_RUNTIME_PICKER_ENABLED", "false")
-	t.Setenv("COCOLA_AGENT_RUNTIME_DEFAULT_ID", "codex")
-	if _, err := productConfigFromEnv(runtimes); err == nil {
+	if _, err := productConfigFromEnv(nil); err == nil {
 		t.Fatal("unavailable default runtime should fail")
 	}
 
-	t.Setenv("COCOLA_AGENT_RUNTIME_DEFAULT_ID", " ")
-	if _, err := productConfigFromEnv(runtimes); err == nil {
-		t.Fatal("empty default runtime should fail")
+	t.Setenv("COCOLA_WIKI_MAX_FILE_BYTES", "invalid")
+	if _, err := productConfigFromEnv([]agent.Runtime{{ID: "claude-code"}}); err == nil {
+		t.Fatal("invalid Wiki limit should fail")
 	}
 }

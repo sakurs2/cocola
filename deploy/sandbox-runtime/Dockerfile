@@ -3,7 +3,7 @@
 # cocola Route-A sandbox runtime image (see ADR-0009).
 #
 # This image bakes both supported Agent Runtimes into the per-user sandbox:
-# Claude Code, Codex, their SDKs, and a thin stdio dispatcher, plus Python/uv
+# Claude Code, its Agent SDK, and a thin stdio dispatcher, plus Python/uv
 # for user workloads. The selected agent's brain and tools run inside the
 # user's own container, so there is no MCP forwarding seam.
 #
@@ -23,8 +23,8 @@
 #     (The base image's default entrypoint would start a Jupyter server; cocola
 #     OVERRIDES both ENTRYPOINT and CMD below, so that never runs.)
 #   - Persistence is via mounted volumes: /workspace holds user-visible files;
-#     /home/cocola/.claude and /home/cocola/.codex hold runtime-native session
-#     state on the same session storage unit without appearing in workspace.
+#     /home/cocola/.claude holds runtime-native session state on the same
+#     session storage unit without appearing in workspace.
 #
 # Build:
 #   # optional: vendor the CLI for offline builds
@@ -133,12 +133,6 @@ RUN set -eux; \
     fi; \
     rm -rf /tmp/offline; \
     claude --version
-
-# ---- Codex CLI + SDK: exact, lockfile-backed versions --------------------
-COPY package.json package-lock.json /opt/cocola/
-RUN npm ci --prefix /opt/cocola --omit=dev \
-    && ln -sf /opt/cocola/node_modules/.bin/codex /usr/local/bin/codex \
-    && codex --version
 
 # ---- GitHub CLI: pinned official binary behind Cocola's auth wrapper ------
 # The real binary is immutable and never performs persistent `gh auth login`.
@@ -339,7 +333,7 @@ RUN chmod +x /opt/cocola/shim/entrypoint.sh
 #                         links the runtime paths below into its stable layout
 RUN useradd -m -u 10001 -s /bin/bash cocola \
     && mkdir -p /session /workspace /cache \
-        /home/cocola/.claude /home/cocola/.codex /home/cocola/.cocola \
+        /home/cocola/.claude /home/cocola/.cocola \
         /home/cocola/.local/bin \
         /home/cocola/.local/lib/node_modules \
         /home/cocola/.local/share/pnpm \
@@ -377,7 +371,6 @@ WORKDIR /
 # memory/sessions are isolated without appearing in user file listings.
 ENV CLAUDE_CONFIG_DIR=/home/cocola/.claude \
     ANTHROPIC_CONFIG_DIR=/home/cocola/.claude \
-    CODEX_HOME=/home/cocola/.codex \
     HOME=/home/cocola \
     XDG_CACHE_HOME=/cache/xdg \
     UV_CACHE_DIR=/cache/uv \

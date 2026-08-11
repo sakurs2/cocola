@@ -388,7 +388,6 @@ export type AgentRuntimeOption = {
 export type ProductConfig = {
   agent_runtime: {
     default_id: string;
-    picker_enabled: boolean;
   };
   wiki?: {
     enabled: boolean;
@@ -512,10 +511,7 @@ type CocolaContextValue = {
   runtimes: AgentRuntimeOption[];
   selectedRuntime: AgentRuntimeOption | null;
   defaultAgentRuntimeID: string;
-  runtimePickerEnabled: boolean;
   runtimeConfigError: string | null;
-  runtimeLocked: boolean;
-  setSelectedRuntimeId: (id: string) => void;
   interactionMode: InteractionMode;
   setInteractionMode: (mode: InteractionMode) => void;
   revisingPlanId: string;
@@ -1527,7 +1523,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   const sessionIdRef = useRef(sessionId);
   const sessionFolderHintsRef = useRef<Map<string, string>>(new Map());
   const sessionProjectHintsRef = useRef<Map<string, PendingProjectTaskHint>>(new Map());
-  const preferredRuntimeIdRef = useRef("");
   const preferredModelIdRef = useRef("");
   const conversationsRef = useRef(conversations);
   const awaitingUserActionIdsRef = useRef<Set<string>>(new Set());
@@ -1549,7 +1544,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
     [runtimes, selectedRuntimeId],
   );
   const defaultAgentRuntimeID = productConfig?.agent_runtime.default_id ?? "";
-  const runtimePickerEnabled = productConfig?.agent_runtime.picker_enabled ?? false;
   const compatibleModels = useMemo(
     () =>
       selectedRuntime
@@ -1713,41 +1707,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const preferred = selectAgentRuntime({
         runtimes,
         defaultRuntimeId: defaultAgentRuntimeID,
-        pickerEnabled: runtimePickerEnabled,
-        preferredRuntimeId: preferredRuntimeIdRef.current,
       });
       setSelectedRuntimeIdState(preferred?.id ?? "");
       if (preferredModelIdRef.current) setSelectedModelID(preferredModelIdRef.current);
     },
-    [
-      agentLocked,
-      agents,
-      defaultAgentRuntimeID,
-      questionInputLocked,
-      runtimePickerEnabled,
-      runtimes,
-      sessionId,
-    ],
-  );
-
-  const setSelectedRuntimeId = useCallback(
-    (id: string) => {
-      if (
-        selectedAgent ||
-        !runtimePickerEnabled ||
-        runtimeLocked ||
-        !runtimes.some((runtime) => runtime.id === id)
-      )
-        return;
-      setSelectedRuntimeIdState(id);
-      preferredRuntimeIdRef.current = id;
-      try {
-        localStorage.setItem("cocola:last-agent-runtime", id);
-      } catch {
-        // Browser storage is an optional preference only.
-      }
-    },
-    [runtimeLocked, runtimePickerEnabled, runtimes, selectedAgent],
+    [agentLocked, agents, defaultAgentRuntimeID, questionInputLocked, runtimes, sessionId],
   );
 
   useEffect(() => {
@@ -3679,8 +3643,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const preferred = selectAgentRuntime({
         runtimes,
         defaultRuntimeId: defaultAgentRuntimeID,
-        pickerEnabled: runtimePickerEnabled,
-        preferredRuntimeId: preferredRuntimeIdRef.current,
       });
       sessionFolderHintsRef.current.delete(sessionIdRef.current);
       sessionProjectHintsRef.current.delete(sessionIdRef.current);
@@ -3702,7 +3664,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       setSandboxes((prev) => ({ ...prev, [fresh]: null }));
       return fresh;
     },
-    [defaultAgentRuntimeID, runtimePickerEnabled, runtimes],
+    [defaultAgentRuntimeID, runtimes],
   );
 
   const newProjectTask = useCallback(
@@ -3714,8 +3676,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const selected = selectAgentRuntime({
         runtimes,
         defaultRuntimeId: defaultAgentRuntimeID,
-        pickerEnabled: false,
-        preferredRuntimeId: "",
       });
       sessionFolderHintsRef.current.delete(sessionIdRef.current);
       sessionProjectHintsRef.current.delete(sessionIdRef.current);
@@ -3815,8 +3775,6 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const preferred = selectAgentRuntime({
           runtimes,
           defaultRuntimeId: defaultAgentRuntimeID,
-          pickerEnabled: runtimePickerEnabled,
-          preferredRuntimeId: preferredRuntimeIdRef.current,
         });
         sessionIdRef.current = fresh;
         setSessionId(fresh);
@@ -3827,7 +3785,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
       return true;
     },
-    [defaultAgentRuntimeID, runtimePickerEnabled, runtimes],
+    [defaultAgentRuntimeID, runtimes],
   );
 
   // Initial load of the sidebar list.
@@ -3906,35 +3864,22 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           typeof config?.agent_runtime?.default_id === "string"
             ? config.agent_runtime.default_id.trim()
             : "";
-        const pickerEnabled = config?.agent_runtime?.picker_enabled;
-        if (!defaultID || typeof pickerEnabled !== "boolean") {
+        if (!defaultID) {
           throw new Error("Product configuration unavailable");
         }
         setRuntimes(next);
-        let preferred = "";
-        if (pickerEnabled) {
-          try {
-            preferred = localStorage.getItem("cocola:last-agent-runtime") ?? "";
-          } catch {
-            // Ignore unavailable browser storage.
-          }
-        }
         const selected = selectAgentRuntime({
           runtimes: next,
           defaultRuntimeId: defaultID,
-          pickerEnabled,
-          preferredRuntimeId: preferred,
         });
         if (!selected) throw new Error("Configured Agent Runtime unavailable");
         setProductConfig({
           agent_runtime: {
             default_id: defaultID,
-            picker_enabled: pickerEnabled,
           },
           wiki: config.wiki,
         });
         setRuntimeConfigError(null);
-        preferredRuntimeIdRef.current = selected.id;
         setSelectedRuntimeIdState(selected.id);
       } catch (error) {
         setRuntimes([]);
@@ -4011,10 +3956,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       runtimes,
       selectedRuntime,
       defaultAgentRuntimeID,
-      runtimePickerEnabled,
       runtimeConfigError,
-      runtimeLocked,
-      setSelectedRuntimeId,
       interactionMode,
       setInteractionMode,
       revisingPlanId,
@@ -4079,10 +4021,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       runtimes,
       selectedRuntime,
       defaultAgentRuntimeID,
-      runtimePickerEnabled,
       runtimeConfigError,
-      runtimeLocked,
-      setSelectedRuntimeId,
       interactionMode,
       setInteractionMode,
       revisingPlanId,

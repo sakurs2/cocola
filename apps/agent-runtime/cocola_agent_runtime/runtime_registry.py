@@ -59,7 +59,7 @@ class RuntimeRegistry:
 
 
 def built_in_registry(provider: AgentProvider) -> RuntimeRegistry:
-    """Cocola ships both runtimes in one sandbox image and one provider seam."""
+    """Cocola ships one production Agent Runtime."""
     return RuntimeRegistry(
         [
             RuntimeEntry(
@@ -68,14 +68,6 @@ def built_in_registry(provider: AgentProvider) -> RuntimeRegistry:
                     label="Claude Code",
                     model_protocol="anthropic-messages",
                     is_default=True,
-                ),
-                provider,
-            ),
-            RuntimeEntry(
-                RuntimeDescriptor(
-                    id="codex",
-                    label="Codex",
-                    model_protocol="openai-responses",
                 ),
                 provider,
             ),
