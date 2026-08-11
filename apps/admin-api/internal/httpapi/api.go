@@ -196,6 +196,11 @@ func (a *API) Router() http.Handler {
 			r.Delete("/{id}", a.deleteLLMProvider)
 		})
 
+		r.Route("/model-icons", func(r chi.Router) {
+			r.Post("/", a.uploadModelIcon)
+			r.Get("/{id}", a.getModelIcon)
+		})
+
 		r.Route("/models", func(r chi.Router) {
 			r.Get("/", a.listLLMModels)
 			r.Post("/", a.createLLMModel)

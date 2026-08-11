@@ -6,6 +6,7 @@ import {
   Bot,
   Boxes,
   Check,
+  ChevronDown,
   CircleCheck,
   KeyRound,
   LoaderCircle,
@@ -15,13 +16,14 @@ import {
   Route,
   Star,
   Trash2,
+  Upload,
 } from "lucide-react";
 import Image from "next/image";
 import { Button, Chip, Dropdown, Input, SearchField, Switch } from "@heroui/react";
 import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AdminAlert,
   AdminConfirmDialog,
@@ -31,6 +33,7 @@ import {
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 import {
@@ -108,6 +111,18 @@ type ModelForm = {
   is_default: boolean;
   sort_order: string;
 };
+
+function DisclosureSummary({ children }: { children: ReactNode }) {
+  return (
+    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
+      <span>{children}</span>
+      <ChevronDown
+        aria-hidden="true"
+        className="size-4 shrink-0 text-muted transition-transform group-open:rotate-180"
+      />
+    </summary>
+  );
+}
 
 type EmbeddingForm = {
   model: string;
@@ -188,13 +203,29 @@ const PROVIDER_TYPES: Array<{
 const inputClass =
   "h-10 w-full min-w-0 rounded-xl border border-separator bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-surface-secondary/50 disabled:text-muted";
 
+function useObjectURL(file: File | null) {
+  const [url, setURL] = useState("");
+  useEffect(() => {
+    if (!file) {
+      setURL("");
+      return;
+    }
+    const next = URL.createObjectURL(file);
+    setURL(next);
+    return () => URL.revokeObjectURL(next);
+  }, [file]);
+  return url;
+}
+
 export default function AdminModelsPage() {
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [models, setModels] = useState<LLMModel[]>([]);
   const [view, setView] = useState<View>("models");
   const [query, setQuery] = useState("");
   const [providerForm, setProviderForm] = useState<ProviderForm>(EMPTY_PROVIDER);
+  const [providerIconFile, setProviderIconFile] = useState<File | null>(null);
   const [modelForm, setModelForm] = useState<ModelForm>(EMPTY_MODEL);
+  const [modelIconFile, setModelIconFile] = useState<File | null>(null);
   const [modelKind, setModelKind] = useState<ModelKind>("chat");
   const [embeddingForm, setEmbeddingForm] = useState<EmbeddingForm>(EMPTY_EMBEDDING);
   const [embeddingTest, setEmbeddingTest] = useState<EmbeddingTestResult | null>(null);
@@ -209,6 +240,8 @@ export default function AdminModelsPage() {
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
+  const providerIconPreview = useObjectURL(providerIconFile);
+  const modelIconPreview = useObjectURL(modelIconFile);
 
   const providerByID = useMemo(
     () => new Map(providers.map((provider) => [provider.id, provider])),
@@ -273,6 +306,7 @@ export default function AdminModelsPage() {
   function createProvider() {
     setEditingProvider(null);
     setProviderForm(EMPTY_PROVIDER);
+    setProviderIconFile(null);
     setFormError("");
     setProviderDrawerOpen(true);
   }
@@ -291,6 +325,7 @@ export default function AdminModelsPage() {
       icon_url: provider.icon_url || "",
       enabled: provider.enabled,
     });
+    setProviderIconFile(null);
     setFormError("");
     setProviderDrawerOpen(true);
   }
@@ -299,7 +334,18 @@ export default function AdminModelsPage() {
     const firstChatProvider = providers.find((provider) => provider.type !== "openai_embeddings");
     setEditingModel(null);
     setModelKind("chat");
-    setModelForm({ ...EMPTY_MODEL, provider_id: firstChatProvider?.id ?? "" });
+    setModelForm({
+      ...EMPTY_MODEL,
+      provider_id: firstChatProvider?.id ?? "",
+      icon_type: firstChatProvider?.icon_type || "simple-icons",
+      icon_slug:
+        firstChatProvider?.icon_slug ||
+        (firstChatProvider
+          ? providerTypeMeta(firstChatProvider.type).defaultIconSlug
+          : EMPTY_MODEL.icon_slug),
+      icon_url: firstChatProvider?.icon_url || "",
+    });
+    setModelIconFile(null);
     setEmbeddingForm(EMPTY_EMBEDDING);
     setEmbeddingTest(null);
     setFormError("");
@@ -331,6 +377,7 @@ export default function AdminModelsPage() {
       is_default: model.is_default,
       sort_order: String(model.sort_order),
     });
+    setModelIconFile(null);
     setFormError("");
     setModelDrawerOpen(true);
   }
@@ -339,6 +386,13 @@ export default function AdminModelsPage() {
     setSaving(true);
     setFormError("");
     try {
+      let iconURL = providerForm.icon_type === "image" ? providerForm.icon_url : "";
+      if (providerForm.icon_type === "image" && providerIconFile) {
+        iconURL = await uploadModelIcon(providerIconFile);
+      }
+      if (providerForm.icon_type === "image" && !iconURL) {
+        throw new Error("Choose an image for this provider icon.");
+      }
       const body: Record<string, unknown> = {
         id: providerForm.id.trim() || providerIDFromName(providerForm.name),
         name: providerForm.name,
@@ -346,7 +400,7 @@ export default function AdminModelsPage() {
         base_url: providerForm.base_url,
         icon_type: providerForm.icon_type,
         icon_slug: providerForm.icon_slug,
-        icon_url: providerForm.icon_url,
+        icon_url: iconURL,
         enabled: providerForm.enabled,
       };
       if (providerForm.api_key.trim()) body.api_key = providerForm.api_key.trim();
@@ -359,6 +413,7 @@ export default function AdminModelsPage() {
         body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error(await errorText(response));
+      setProviderIconFile(null);
       setProviderDrawerOpen(false);
       await load();
     } catch (cause) {
@@ -391,14 +446,24 @@ export default function AdminModelsPage() {
         await load();
         return;
       }
+      let iconURL = modelForm.icon_type === "image" ? modelForm.icon_url : "";
+      if (modelForm.icon_type === "image" && modelIconFile) {
+        iconURL = await uploadModelIcon(modelIconFile);
+      }
+      if (modelForm.icon_type === "image" && !iconURL) {
+        throw new Error("Choose an image for this model icon.");
+      }
       const body = {
-        alias: modelForm.alias,
+        alias:
+          modelForm.alias ||
+          providerIDFromName(modelForm.label) ||
+          providerIDFromName(modelForm.real_model),
         provider_id: modelForm.provider_id,
         real_model: modelForm.real_model,
         label: modelForm.label,
         icon_type: modelForm.icon_type,
         icon_slug: modelForm.icon_slug,
-        icon_url: modelForm.icon_url,
+        icon_url: iconURL,
         enabled: modelForm.enabled,
         visible: modelForm.visible,
         is_default: modelForm.is_default,
@@ -413,6 +478,7 @@ export default function AdminModelsPage() {
         body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error(await errorText(response));
+      setModelIconFile(null);
       setModelDrawerOpen(false);
       await load();
     } catch (cause) {
@@ -677,6 +743,27 @@ export default function AdminModelsPage() {
             </Field>
           </div>
 
+          <IconPicker
+            iconType={providerForm.icon_type}
+            iconSlug={providerForm.icon_slug}
+            imageSrc={providerIconPreview || providerForm.icon_url}
+            fileName={providerIconFile?.name}
+            fallbackText={(providerForm.name || providerForm.id || "AI").slice(0, 2).toUpperCase()}
+            disabled={saving}
+            onTypeChange={(iconType) => {
+              setProviderIconFile(null);
+              setProviderForm((current) => ({
+                ...current,
+                icon_type: iconType,
+              }));
+            }}
+            onSlugChange={(iconSlug) =>
+              setProviderForm((current) => ({ ...current, icon_slug: iconSlug }))
+            }
+            onFileChange={setProviderIconFile}
+            onInvalid={setFormError}
+          />
+
           <Field label="Base URL">
             <Input
               className={inputClass}
@@ -706,10 +793,13 @@ export default function AdminModelsPage() {
             label="API key"
             hint={editingProvider ? "Leave blank to keep the current key." : undefined}
           >
-            <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
-              <KeyRound className="size-4 shrink-0 text-muted" />
+            <div className="relative">
+              <KeyRound
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted"
+              />
               <Input
-                className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+                className={cn(inputClass, "pl-10")}
                 value={providerForm.api_key}
                 onChange={(event) =>
                   setProviderForm({ ...providerForm, api_key: event.target.value })
@@ -721,66 +811,8 @@ export default function AdminModelsPage() {
             </div>
           </Field>
 
-          <details
-            className="group rounded-2xl border border-border/70 p-3"
-            open={!editingProvider}
-          >
-            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-              Appearance
-            </summary>
-            <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
-              <Field label="Icon source">
-                <SelectControl
-                  className={inputClass}
-                  value={providerForm.icon_type}
-                  onValueChange={(value) =>
-                    setProviderForm({
-                      ...providerForm,
-                      icon_type: value as ProviderForm["icon_type"],
-                    })
-                  }
-                  options={[
-                    { value: "simple-icons", label: "Brand icon" },
-                    { value: "image", label: "Image URL" },
-                  ]}
-                  contentClassName="cocola-admin-ui"
-                />
-              </Field>
-              {providerForm.icon_type === "image" ? (
-                <Field label="Image URL">
-                  <Input
-                    className={inputClass}
-                    value={providerForm.icon_url}
-                    onChange={(event) =>
-                      setProviderForm({ ...providerForm, icon_url: event.target.value })
-                    }
-                    placeholder="https://..."
-                  />
-                </Field>
-              ) : (
-                <Field label="Brand">
-                  <SelectControl
-                    className={inputClass}
-                    value={providerForm.icon_slug}
-                    onValueChange={(value) =>
-                      setProviderForm({ ...providerForm, icon_slug: value })
-                    }
-                    options={SIMPLE_ICON_SLUGS.map((slug) => ({
-                      value: slug,
-                      label: SIMPLE_ICON_LABELS[slug] ?? slug,
-                      icon: <BrandGlyph slug={slug} />,
-                    }))}
-                    contentClassName="cocola-admin-ui"
-                  />
-                </Field>
-              )}
-            </div>
-          </details>
-
           <details className="group rounded-2xl border border-border/70 p-3">
-            <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-              Advanced
-            </summary>
+            <DisclosureSummary>Advanced</DisclosureSummary>
             <div className="mt-4 border-t border-border/70 pt-4">
               <Field
                 label="Provider ID"
@@ -873,7 +905,7 @@ export default function AdminModelsPage() {
             <div className="grid gap-5">
               <Field label="Model name">
                 <Input
-                  className={cn(inputClass, "font-mono text-xs")}
+                  className={inputClass}
                   value={embeddingForm.model}
                   onChange={(event) => {
                     setEmbeddingForm({ ...embeddingForm, model: event.target.value });
@@ -885,7 +917,7 @@ export default function AdminModelsPage() {
 
               <Field label="Base URL">
                 <Input
-                  className={cn(inputClass, "font-mono text-xs")}
+                  className={inputClass}
                   value={embeddingForm.base_url}
                   onChange={(event) => {
                     setEmbeddingForm({ ...embeddingForm, base_url: event.target.value });
@@ -900,10 +932,13 @@ export default function AdminModelsPage() {
                 label="API key"
                 hint={editingModel ? "Leave blank to keep the current key." : undefined}
               >
-                <div className="flex items-center gap-2 rounded-xl border border-separator bg-background px-3">
-                  <KeyRound className="size-4 shrink-0 text-muted" />
+                <div className="relative">
+                  <KeyRound
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted"
+                  />
                   <Input
-                    className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+                    className={cn(inputClass, "pl-10")}
                     value={embeddingForm.api_key}
                     onChange={(event) => {
                       setEmbeddingForm({ ...embeddingForm, api_key: event.target.value });
@@ -989,29 +1024,18 @@ export default function AdminModelsPage() {
                 </div>
               ) : null}
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Display name">
-                  <Input
-                    className={inputClass}
-                    value={modelForm.label}
-                    onChange={(event) => setModelForm({ ...modelForm, label: event.target.value })}
-                    placeholder="GPT-5"
-                  />
-                </Field>
-                <Field label="Alias" hint="Unique only inside the selected provider.">
-                  <Input
-                    className={cn(inputClass, "font-mono text-xs")}
-                    value={modelForm.alias}
-                    disabled={Boolean(editingModel)}
-                    onChange={(event) => setModelForm({ ...modelForm, alias: event.target.value })}
-                    placeholder="gpt-5"
-                  />
-                </Field>
-              </div>
+              <Field label="Model name">
+                <Input
+                  className={inputClass}
+                  value={modelForm.label}
+                  onChange={(event) => setModelForm({ ...modelForm, label: event.target.value })}
+                  placeholder="GPT-5"
+                />
+              </Field>
 
               <Field label="Upstream model ID">
                 <Input
-                  className={cn(inputClass, "font-mono text-xs")}
+                  className={inputClass}
                   value={modelForm.real_model}
                   onChange={(event) =>
                     setModelForm({ ...modelForm, real_model: event.target.value })
@@ -1019,6 +1043,29 @@ export default function AdminModelsPage() {
                   placeholder="gpt-5"
                 />
               </Field>
+
+              <IconPicker
+                iconType={modelForm.icon_type}
+                iconSlug={modelForm.icon_slug}
+                imageSrc={modelIconPreview || modelForm.icon_url}
+                fileName={modelIconFile?.name}
+                fallbackText={(modelForm.label || modelForm.real_model || "AI")
+                  .slice(0, 2)
+                  .toUpperCase()}
+                disabled={saving}
+                onTypeChange={(iconType) => {
+                  setModelIconFile(null);
+                  setModelForm((current) => ({
+                    ...current,
+                    icon_type: iconType,
+                  }));
+                }}
+                onSlugChange={(iconSlug) =>
+                  setModelForm((current) => ({ ...current, icon_slug: iconSlug }))
+                }
+                onFileChange={setModelIconFile}
+                onInvalid={setFormError}
+              />
 
               <div className="grid gap-3 rounded-2xl border border-border/70 p-3 sm:grid-cols-3">
                 <Toggle
@@ -1039,53 +1086,8 @@ export default function AdminModelsPage() {
               </div>
 
               <details className="group rounded-2xl border border-border/70 p-3">
-                <summary className="cursor-pointer list-none text-sm font-medium [&::-webkit-details-marker]:hidden">
-                  Appearance and order
-                </summary>
-                <div className="mt-4 grid gap-4 border-t border-border/70 pt-4 sm:grid-cols-2">
-                  <Field label="Icon source">
-                    <SelectControl
-                      className={inputClass}
-                      value={modelForm.icon_type}
-                      onValueChange={(value) =>
-                        setModelForm({
-                          ...modelForm,
-                          icon_type: value as ModelForm["icon_type"],
-                        })
-                      }
-                      options={[
-                        { value: "simple-icons", label: "Brand icon" },
-                        { value: "image", label: "Image URL" },
-                      ]}
-                      contentClassName="cocola-admin-ui"
-                    />
-                  </Field>
-                  {modelForm.icon_type === "image" ? (
-                    <Field label="Image URL">
-                      <Input
-                        className={inputClass}
-                        value={modelForm.icon_url}
-                        onChange={(event) =>
-                          setModelForm({ ...modelForm, icon_url: event.target.value })
-                        }
-                        placeholder="https://..."
-                      />
-                    </Field>
-                  ) : (
-                    <Field label="Brand">
-                      <SelectControl
-                        className={inputClass}
-                        value={modelForm.icon_slug}
-                        onValueChange={(value) => setModelForm({ ...modelForm, icon_slug: value })}
-                        options={SIMPLE_ICON_SLUGS.map((slug) => ({
-                          value: slug,
-                          label: SIMPLE_ICON_LABELS[slug] ?? slug,
-                          icon: <BrandGlyph slug={slug} />,
-                        }))}
-                        contentClassName="cocola-admin-ui"
-                      />
-                    </Field>
-                  )}
+                <DisclosureSummary>Advanced</DisclosureSummary>
+                <div className="mt-4 border-t border-border/70 pt-4">
                   <Field label="Display priority" hint="Lower numbers appear first.">
                     <Input
                       className={inputClass}
@@ -1228,6 +1230,119 @@ function BrandGlyph({ slug }: { slug: string }) {
   return <span className="admin-brand-glyph admin-brand-glyph-fallback">{fallbackText}</span>;
 }
 
+function IconPicker({
+  iconType,
+  iconSlug,
+  imageSrc,
+  fileName,
+  fallbackText,
+  disabled,
+  onTypeChange,
+  onSlugChange,
+  onFileChange,
+  onInvalid,
+}: {
+  iconType: ModelIconType;
+  iconSlug: string;
+  imageSrc: string;
+  fileName?: string;
+  fallbackText: string;
+  disabled: boolean;
+  onTypeChange: (type: ModelIconType) => void;
+  onSlugChange: (slug: string) => void;
+  onFileChange: (file: File | null) => void;
+  onInvalid: (message: string) => void;
+}) {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const chooseFile = () => fileInput.current?.click();
+
+  return (
+    <FormGroup label="Icon">
+      <div className="grid grid-cols-[42px_minmax(0,1fr)] items-start gap-3 rounded-2xl border border-border/70 bg-surface-secondary/15 p-3">
+        <BrandIcon
+          slug={iconSlug}
+          imageSrc={iconType === "image" ? imageSrc : undefined}
+          fallbackText={fallbackText || "AI"}
+        />
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-1.5">
+            <span className="text-xs font-medium text-muted">Source</span>
+            <SelectControl
+              className={inputClass}
+              value={iconType}
+              onValueChange={(value) => onTypeChange(value as ModelIconType)}
+              options={[
+                { value: "simple-icons", label: "Brand icon" },
+                { value: "image", label: "Upload image" },
+              ]}
+              contentClassName="cocola-admin-ui"
+            />
+          </div>
+          {iconType === "simple-icons" ? (
+            <div className="grid min-w-0 gap-1.5">
+              <span className="text-xs font-medium text-muted">Brand</span>
+              <SelectControl
+                className={inputClass}
+                value={iconSlug}
+                onValueChange={onSlugChange}
+                options={SIMPLE_ICON_SLUGS.map((slug) => ({
+                  value: slug,
+                  label: SIMPLE_ICON_LABELS[slug] ?? slug,
+                  icon: <BrandGlyph slug={slug} />,
+                }))}
+                contentClassName="cocola-admin-ui"
+              />
+            </div>
+          ) : (
+            <div className="grid min-w-0 gap-1.5">
+              <span className="text-xs font-medium text-muted">Image</span>
+              <input
+                ref={fileInput}
+                className="sr-only"
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                disabled={disabled}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  const supported =
+                    ["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
+                    /\.(png|jpe?g|webp)$/i.test(file.name);
+                  if (!supported) {
+                    onInvalid("Choose a PNG, JPEG, or WebP image.");
+                    return;
+                  }
+                  if (file.size > 1024 * 1024) {
+                    onInvalid("Model icons must be 1 MB or smaller.");
+                    return;
+                  }
+                  onInvalid("");
+                  onFileChange(file);
+                }}
+              />
+              <Button
+                className="h-10 min-w-0 justify-start overflow-hidden"
+                variant="outline"
+                isDisabled={disabled}
+                onPress={chooseFile}
+              >
+                <Upload className="size-4 shrink-0" />
+                <span className="truncate" title={fileName}>
+                  {fileName || imageSrc ? "Replace image" : "Choose image"}
+                </span>
+              </Button>
+              <span className="truncate text-xs font-normal text-muted" title={fileName}>
+                {fileName || "PNG, JPEG or WebP · up to 1 MB"}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </FormGroup>
+  );
+}
+
 function protoChipLabel(type: ProviderType | undefined, protocol: ModelProtocol) {
   if (type) return providerTypeMeta(type).shortLabel;
   if (protocol === "openai-embeddings") return "Embeddings";
@@ -1258,17 +1373,18 @@ function ModelsList({
       isRowHeader: true,
       minWidth: 300,
       cell: (model) => (
-        <Button
-          className="h-auto min-w-0 justify-start px-0 py-1"
-          variant="ghost"
-          onClick={() => onEdit(model)}
-        >
+        <span className="flex min-w-0 items-center gap-2 py-1">
           <ModelIcon model={model} />
-          <span className="min-w-0 truncate font-semibold">{model.label || model.alias}</span>
+          <AdminTruncatedValue
+            className="font-semibold"
+            copyLabel="model name"
+            onPress={() => onEdit(model)}
+            value={model.label || model.alias}
+          />
           {model.is_default ? (
             <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" />
           ) : null}
-        </Button>
+        </span>
       ),
     },
     {
@@ -1289,9 +1405,11 @@ function ModelsList({
       header: "Provider",
       minWidth: 180,
       cell: (model) => (
-        <span className="block truncate text-sm">
-          {providerByID.get(model.provider_id)?.name || model.provider_id}
-        </span>
+        <AdminTruncatedValue
+          className="text-sm"
+          copyLabel="provider name"
+          value={providerByID.get(model.provider_id)?.name || model.provider_id}
+        />
       ),
     },
     {
@@ -1389,17 +1507,22 @@ function ProvidersList({
       isRowHeader: true,
       minWidth: 280,
       cell: (provider) => (
-        <Button
-          className="h-auto min-w-0 justify-start px-0 py-1"
-          variant="ghost"
-          onClick={() => onEdit(provider)}
-        >
+        <span className="flex min-w-0 items-center gap-2 py-1">
           <ProviderIcon provider={provider} />
-          <span className="min-w-0 text-left">
-            <span className="block truncate font-semibold">{provider.name || provider.id}</span>
-            <span className="text-muted block truncate font-mono text-xs">{provider.id}</span>
+          <span className="block min-w-0 flex-1 text-left">
+            <AdminTruncatedValue
+              className="font-semibold"
+              copyLabel="provider name"
+              onPress={() => onEdit(provider)}
+              value={provider.name || provider.id}
+            />
+            <AdminTruncatedValue
+              className="text-muted font-mono text-xs"
+              copyLabel="provider ID"
+              value={provider.id}
+            />
           </span>
-        </Button>
+        </span>
       ),
     },
     {
@@ -1417,12 +1540,11 @@ function ProvidersList({
       header: "Endpoint",
       minWidth: 260,
       cell: (provider) => (
-        <span
-          className="text-muted block max-w-64 truncate font-mono text-xs"
-          title={provider.base_url}
-        >
-          {provider.base_url || "—"}
-        </span>
+        <AdminTruncatedValue
+          className="text-muted max-w-64 font-mono text-xs"
+          copyLabel="provider endpoint"
+          value={provider.base_url || "—"}
+        />
       ),
     },
     {
@@ -1721,4 +1843,14 @@ async function errorText(response: Response) {
     // Fall through to the safe response body returned by Admin API.
   }
   return body;
+}
+
+async function uploadModelIcon(file: File) {
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch("/api/admin/model-icons", { method: "POST", body: form });
+  if (!response.ok) throw new Error(await errorText(response));
+  const asset = (await response.json()) as { src?: string };
+  if (!asset.src) throw new Error("The uploaded image did not return a usable icon.");
+  return asset.src;
 }

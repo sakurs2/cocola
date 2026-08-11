@@ -1178,6 +1178,48 @@ func (a *API) effectiveAgentPrompt(w http.ResponseWriter, r *http.Request) {
 
 // ---- LLM model configuration ----
 
+func (a *API) uploadModelIcon(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, service.MaxModelIconBytes+(64<<10))
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_MODEL_ICON", "Choose a PNG, JPEG, or WebP image up to 1 MB.")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, service.MaxModelIconBytes+1))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	if len(data) > service.MaxModelIconBytes {
+		writeErr(w, http.StatusRequestEntityTooLarge, "MODEL_ICON_TOO_LARGE", "Model icons must be 1 MB or smaller.")
+		return
+	}
+	asset, err := a.svc.SaveModelIcon(r.Context(), data)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidArg) {
+			writeErr(w, http.StatusBadRequest, "INVALID_MODEL_ICON", "Choose a PNG, JPEG, or WebP image no larger than 2048 by 2048 pixels.")
+			return
+		}
+		mapErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, asset)
+}
+
+func (a *API) getModelIcon(w http.ResponseWriter, r *http.Request) {
+	data, contentType, err := a.svc.GetModelIcon(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		mapErr(w, err)
+		return
+	}
+	w.Header().Set("content-type", contentType)
+	w.Header().Set("cache-control", "public, max-age=31536000, immutable")
+	w.Header().Set("x-content-type-options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 type llmProviderReq struct {
 	ID       string  `json:"id,omitempty"`
 	Name     string  `json:"name,omitempty"`

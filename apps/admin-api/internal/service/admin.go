@@ -69,6 +69,7 @@ type Admin struct {
 	issuer                   *token.Issuer
 	now                      Clock
 	skillBundles             SkillBundleStore
+	modelIcons               ModelIconStore
 	sandboxNodes             SandboxNodeManager
 	sandboxRuntimes          SandboxRuntimeManager
 	sessionStorage           SessionStorageMonitor
@@ -104,6 +105,16 @@ type SkillBundleStore interface {
 
 func (a *Admin) WithSkillBundleStore(store SkillBundleStore) *Admin {
 	a.skillBundles = store
+	return a
+}
+
+type ModelIconStore interface {
+	PutBytes(ctx context.Context, key string, data []byte, contentType string) error
+	GetBytes(ctx context.Context, key string) ([]byte, string, error)
+}
+
+func (a *Admin) WithModelIconStore(store ModelIconStore) *Admin {
+	a.modelIcons = store
 	return a
 }
 
@@ -1923,7 +1934,8 @@ func validIconConfig(iconType, iconSlug, iconURL string) bool {
 	case IconSimpleIcons:
 		return strings.TrimSpace(iconSlug) != ""
 	case IconImage:
-		return strings.HasPrefix(strings.TrimSpace(iconURL), "https://")
+		url := strings.TrimSpace(iconURL)
+		return strings.HasPrefix(url, "https://") || validManagedModelIconURL(url)
 	default:
 		return false
 	}

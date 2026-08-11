@@ -191,6 +191,7 @@ func main() {
 		log.Sugar().Fatalf("skill bundle store health check: %v", herr)
 	}
 	svc.WithSkillBundleStore(skillStore)
+	svc.WithModelIconStore(skillStore)
 	log.Sugar().Infow("skill bundle store enabled", "endpoint", oc.Endpoint, "bucket", oc.Bucket)
 	if getenvBool("COCOLA_DEFAULT_SKILLS_ENABLED", true) {
 		defaultSets, err := defaultskills.All()

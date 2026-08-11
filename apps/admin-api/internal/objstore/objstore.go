@@ -1,5 +1,5 @@
 // Package objstore is the admin-api's thin client to the S3-compatible object
-// store (MinIO in dev, any S3 API in prod) for normalized skill bundles.
+// store (MinIO in dev, any S3 API in prod) for Admin-managed binary assets.
 package objstore
 
 import (

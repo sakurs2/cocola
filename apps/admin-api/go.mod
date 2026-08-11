@@ -12,6 +12,7 @@ require (
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/xuri/excelize/v2 v2.8.1
 	golang.org/x/crypto v0.31.0
+	golang.org/x/image v0.14.0
 	golang.org/x/sync v0.13.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.31.4
