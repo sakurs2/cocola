@@ -47,9 +47,12 @@ test("destructive admin actions use product dialogs instead of browser confirmat
   assert.match(sandboxesSource, /<AdminConfirmDialog/);
 });
 
-test("Session Storage cleanup remains scoped to an explicit row", () => {
+test("Session Storage supports explicit row cleanup and safe bulk orphan deletion", () => {
   assert.match(storageSource, /volume\.delete_allowed && !missing/);
   assert.match(storageSource, /label: missing \? "Clean stale binding" : "Delete orphan volume"/);
   assert.match(storageSource, /if \(action === "delete"\) setPendingDelete\(volume\)/);
-  assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed|session-storage\/orphans/);
+  assert.match(storageSource, /fetch\("\/api\/admin\/session-storage\/orphans"/);
+  assert.match(storageSource, /Delete orphans \(\{orphanCount\}\)/);
+  assert.match(storageSource, /Active Session Volumes are not affected/);
+  assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed/);
 });

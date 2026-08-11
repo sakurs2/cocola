@@ -396,10 +396,26 @@ func (c *dockerClient) Logs(ctx context.Context, containerID string, tail int) (
 	if err != nil {
 		return nil, err
 	}
-	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/vnd.docker.raw-stream") {
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/vnd.docker.raw-stream") || looksLikeDockerMultiplexed(raw) {
 		return demuxDockerStream(raw), nil
 	}
 	return raw, nil
+}
+
+func looksLikeDockerMultiplexed(raw []byte) bool {
+	frames := 0
+	for len(raw) >= 8 {
+		if raw[0] < 1 || raw[0] > 3 || raw[1] != 0 || raw[2] != 0 || raw[3] != 0 {
+			return false
+		}
+		length := int(binary.BigEndian.Uint32(raw[4:8]))
+		if length > len(raw)-8 {
+			return false
+		}
+		raw = raw[8+length:]
+		frames++
+	}
+	return frames > 0 && len(raw) == 0
 }
 
 func (c *dockerClient) getJSON(ctx context.Context, path string, out any) error {

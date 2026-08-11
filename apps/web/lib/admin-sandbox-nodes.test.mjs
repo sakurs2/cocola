@@ -7,9 +7,10 @@ const sandboxNodesPageSource = await readFile(
   "utf8",
 );
 
-test("add node dialog presents the unfinished feature as coming soon", () => {
-  assert.match(sandboxNodesPageSource, /Node onboarding is coming soon/);
-  assert.match(sandboxNodesPageSource, /This\s*feature is not available yet/);
+test("nodes page omits the unfinished add-node affordance", () => {
+  assert.match(sandboxNodesPageSource, /<AdminRefreshButton/);
+  assert.doesNotMatch(sandboxNodesPageSource, /Add node/);
+  assert.doesNotMatch(sandboxNodesPageSource, /Node onboarding is coming soon/);
   assert.doesNotMatch(sandboxNodesPageSource, /sandbox-nodes\/join-command/);
   assert.doesNotMatch(sandboxNodesPageSource, /Copy command/);
 });

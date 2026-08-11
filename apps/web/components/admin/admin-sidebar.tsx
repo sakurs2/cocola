@@ -51,7 +51,7 @@ function AdminSidebarContents({
         </div>
       </Sidebar.Header>
 
-      <Sidebar.Content>
+      <Sidebar.Content className="overscroll-contain pb-3 pt-1">
         <Sidebar.Group>
           <Sidebar.Menu aria-label="Admin overview">
             <AdminSidebarItem
@@ -79,7 +79,7 @@ function AdminSidebarContents({
         ))}
       </Sidebar.Content>
 
-      <Sidebar.Footer>
+      <Sidebar.Footer className="relative z-10 border-t border-separator bg-background">
         <Sidebar.Menu aria-label="Admin settings">
           <AdminSidebarItem
             activeSectionId={activeSectionId}

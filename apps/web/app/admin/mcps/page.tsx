@@ -14,7 +14,6 @@ import {
   Boxes,
   ChevronDown,
   CircleAlert,
-  CircleCheck,
   Cloud,
   Cpu,
   Eye,
@@ -53,6 +52,8 @@ import {
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
+  AdminToast,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 
 type MCPServer = {
@@ -315,10 +316,12 @@ export default function AdminMCPPage() {
             <AdminRefreshButton refreshing={loading} onClick={() => void load()} variant="outline">
               Refresh
             </AdminRefreshButton>
-            <Button className="gap-2" onPress={openCreate}>
-              <Plus className="size-4" />
-              Add server
-            </Button>
+            {loading || mcps.length > 0 ? (
+              <Button className="gap-2" onPress={openCreate}>
+                <Plus className="size-4" />
+                Add server
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -329,24 +332,22 @@ export default function AdminMCPPage() {
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
-      {notice ? (
-        <AdminAlert tone="success" icon={<CircleCheck className="size-4" />}>
-          <span aria-live="polite">{notice}</span>
-        </AdminAlert>
-      ) : null}
+      <AdminToast message={notice} tone="success" onDismiss={() => setNotice("")} />
 
-      <SearchField
-        aria-label="Search MCP servers"
-        className="w-full sm:w-[320px]"
-        value={query}
-        onChange={setQuery}
-      >
-        <SearchField.Group>
-          <SearchField.SearchIcon />
-          <SearchField.Input placeholder="Search MCP servers" />
-          <SearchField.ClearButton />
-        </SearchField.Group>
-      </SearchField>
+      {loading || mcps.length > 0 ? (
+        <SearchField
+          aria-label="Search MCP servers"
+          className="w-full sm:w-[320px]"
+          value={query}
+          onChange={setQuery}
+        >
+          <SearchField.Group>
+            <SearchField.SearchIcon />
+            <SearchField.Input placeholder="Search MCP servers" />
+            <SearchField.ClearButton />
+          </SearchField.Group>
+        </SearchField>
+      ) : null}
 
       {loading && !mcps.length ? (
         <div className="flex min-h-48 items-center justify-center text-sm text-muted">
@@ -651,8 +652,8 @@ function MCPCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-sm font-semibold text-foreground">
-                {mcp.name || mcp.id}
+              <h2 className="min-w-0 flex-1 text-sm font-semibold text-foreground">
+                <AdminTruncatedValue copyLabel="MCP name" value={mcp.name || mcp.id} />
               </h2>
               <Chip size="sm" variant="soft">
                 {transport === "http" ? "HTTP" : transport}
@@ -668,9 +669,11 @@ function MCPCard({
           <div className="text-muted text-[10px] font-semibold uppercase tracking-[0.12em]">
             {remote ? "URL" : "Command"}
           </div>
-          <code className="mt-1 block truncate font-mono text-xs tabular-nums text-foreground/80">
-            {endpoint || (remote ? "Remote URL saved" : "Command saved")}
-          </code>
+          <AdminTruncatedValue
+            className="mt-1 font-mono text-xs tabular-nums text-foreground/80"
+            copyLabel={remote ? "MCP URL" : "MCP command"}
+            value={endpoint || (remote ? "Remote URL saved" : "Command saved")}
+          />
         </div>
 
         {mcp.default_enabled ? <div className="text-muted mt-3 text-xs">Default on</div> : null}

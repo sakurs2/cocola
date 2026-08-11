@@ -16,6 +16,7 @@ import {
   AdminPageHeader,
   AdminRefreshButton,
   AdminStatusBadge,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { TaskConfirmDialog } from "@/components/scheduled-tasks/task-drawer";
 import {
@@ -118,16 +119,19 @@ export default function ScheduledTasksPage() {
       isRowHeader: true,
       minWidth: 300,
       cell: (task) => (
-        <Button
-          className="h-auto min-w-0 justify-start px-0 py-1 text-left"
-          variant="ghost"
-          onPress={() => view(task)}
-        >
-          <span className="min-w-0">
-            <span className="block truncate font-semibold">{task.name}</span>
-            <span className="text-muted mt-0.5 block truncate text-xs">{task.prompt}</span>
-          </span>
-        </Button>
+        <span className="block min-w-0 py-1">
+          <AdminTruncatedValue
+            className="font-semibold"
+            copyLabel="task name"
+            onPress={() => view(task)}
+            value={task.name}
+          />
+          <AdminTruncatedValue
+            className="text-muted mt-0.5 text-xs"
+            copyLabel="task prompt"
+            value={task.prompt}
+          />
+        </span>
       ),
     },
     {
@@ -136,12 +140,18 @@ export default function ScheduledTasksPage() {
       minWidth: 190,
       cell: (task) =>
         task.owner_user_id ? (
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">
-              {task.owner?.name || task.owner?.email || task.owner_user_id}
-            </span>
+          <span className="block min-w-0">
+            <AdminTruncatedValue
+              className="text-sm font-medium"
+              copyLabel="task owner"
+              value={task.owner?.name || task.owner?.email || task.owner_user_id}
+            />
             {task.owner?.name && task.owner.email ? (
-              <span className="text-muted block truncate text-xs">{task.owner.email}</span>
+              <AdminTruncatedValue
+                className="text-muted text-xs"
+                copyLabel="owner email"
+                value={task.owner.email}
+              />
             ) : null}
           </span>
         ) : (

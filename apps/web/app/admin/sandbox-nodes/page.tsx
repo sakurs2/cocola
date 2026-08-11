@@ -14,6 +14,7 @@ import {
   AdminRefreshButton,
   AdminRowActions,
   AdminStatusBadge,
+  AdminToast,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
@@ -23,7 +24,6 @@ import {
   Ban,
   CheckCircle2,
   LoaderCircle,
-  Plus,
   Power,
   Server,
   SlidersHorizontal,
@@ -86,7 +86,6 @@ export default function SandboxNodesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [unsupported, setUnsupported] = useState(false);
-  const [showAddNode, setShowAddNode] = useState(false);
   const [capacityTarget, setCapacityTarget] = useState<SandboxNode | null>(null);
   const [offlineTarget, setOfflineTarget] = useState<OfflineTarget | null>(null);
 
@@ -205,7 +204,11 @@ export default function SandboxNodesPage() {
     }
   };
 
-  const columns: DataGridColumn<SandboxNode>[] = [
+  const composeOnly =
+    nodes.length > 0 &&
+    nodes.every((node) => node.labels?.["cocola.dev/runtime-mode"] === "compose");
+
+  const allColumns: DataGridColumn<SandboxNode>[] = [
     {
       id: "node",
       header: "Node",
@@ -255,8 +258,9 @@ export default function SandboxNodesPage() {
             {node.cpu_capacity || "—"}
           </span>
           <span className="mt-1 block">
-            <span className="text-muted">Memory</span> {node.memory_allocatable || "—"} /{" "}
-            {node.memory_capacity || "—"}
+            <span className="text-muted">Memory</span>{" "}
+            {formatMemoryQuantity(node.memory_allocatable)} /{" "}
+            {formatMemoryQuantity(node.memory_capacity)}
           </span>
         </span>
       ),
@@ -290,7 +294,7 @@ export default function SandboxNodesPage() {
       minWidth: 150,
       cell: (node) =>
         node.labels?.["cocola.dev/runtime-mode"] === "compose" ? (
-          <span className="text-muted text-xs">Managed by Compose</span>
+          <span className="text-muted text-xs">—</span>
         ) : (
           <span className="flex items-center gap-2">
             <span className="font-mono text-xs">
@@ -333,7 +337,7 @@ export default function SandboxNodesPage() {
         const composeNode = node.labels?.["cocola.dev/runtime-mode"] === "compose";
         const alreadyOffline = ["offline", "offline_pending"].includes(node.status);
         return composeNode ? (
-          <span className="text-muted text-xs">Single-node runtime</span>
+          <span className="text-muted text-xs">—</span>
         ) : (
           <AdminRowActions
             label={`Actions for node ${node.name}`}
@@ -369,6 +373,9 @@ export default function SandboxNodesPage() {
       },
     },
   ];
+  const columns = allColumns.filter(
+    (column) => !composeOnly || (column.id !== "capacity" && column.id !== "actions"),
+  );
 
   return (
     <AdminPage className="admin-theme-sky">
@@ -377,20 +384,14 @@ export default function SandboxNodesPage() {
         title="Nodes"
         description="Runtime capacity and node health for Cocola sandboxes"
         actions={
-          <>
-            <AdminRefreshButton
-              variant="outline"
-              refreshing={loading}
-              disabled={loading}
-              onClick={() => void refresh()}
-            >
-              Refresh
-            </AdminRefreshButton>
-            <Button onPress={() => setShowAddNode(true)}>
-              <Plus className="size-4" />
-              Add node
-            </Button>
-          </>
+          <AdminRefreshButton
+            variant="outline"
+            refreshing={loading}
+            disabled={loading}
+            onClick={() => void refresh()}
+          >
+            Refresh
+          </AdminRefreshButton>
         }
       />
 
@@ -400,12 +401,11 @@ export default function SandboxNodesPage() {
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
-      {notice && !error ? (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
-          <CheckCircle2 className="size-4 shrink-0" />
-          <span>{notice}</span>
-        </div>
-      ) : null}
+      <AdminToast
+        message={!error ? notice : undefined}
+        tone="success"
+        onDismiss={() => setNotice("")}
+      />
 
       {unsupported ? (
         <UnsupportedState />
@@ -413,7 +413,7 @@ export default function SandboxNodesPage() {
         <AdminDataGrid
           aria-label="Sandbox nodes"
           columns={columns}
-          contentClassName="min-w-[1160px]"
+          contentClassName={composeOnly ? "min-w-[920px]" : "min-w-[1160px]"}
           data={nodes}
           getRowId={(node) => node.name}
           selectionMode="none"
@@ -444,7 +444,6 @@ export default function SandboxNodesPage() {
           onConfirm={() => void runNodeAction(offlineTarget.node, "offline", true)}
         />
       )}
-      {showAddNode && <AddNodeDialog onClose={() => setShowAddNode(false)} />}
       {capacityTarget && (
         <CapacityDialog
           node={capacityTarget}
@@ -518,39 +517,6 @@ function OfflineDialog({
       onOpenChange={(open) => !open && onCancel()}
       onConfirm={onConfirm}
     />
-  );
-}
-
-function AddNodeDialog({ onClose }: { onClose: () => void }) {
-  return (
-    <Sheet isOpen placement="right" onOpenChange={(open) => !open && onClose()}>
-      <Sheet.Backdrop>
-        <Sheet.Content className="w-full md:w-[440px]">
-          <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close add node" />
-            <Sheet.Header>
-              <span className="flex items-center gap-3">
-                <span className="bg-accent-soft text-accent grid size-10 place-items-center rounded-2xl">
-                  <Plus className="size-5" />
-                </span>
-                <Sheet.Heading>Node onboarding is coming soon</Sheet.Heading>
-              </span>
-            </Sheet.Header>
-            <Sheet.Body>
-              <p className="text-muted text-sm leading-6">
-                We&apos;re building a guided and secure way to add nodes to your Cocola cluster.
-                This feature is not available yet.
-              </p>
-            </Sheet.Body>
-            <Sheet.Footer>
-              <Button variant="outline" onPress={onClose}>
-                Close
-              </Button>
-            </Sheet.Footer>
-          </Sheet.Dialog>
-        </Sheet.Content>
-      </Sheet.Backdrop>
-    </Sheet>
   );
 }
 
@@ -725,6 +691,15 @@ function formatBytes(value: number) {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   const amount = value / 1024 ** index;
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
+}
+
+function formatMemoryQuantity(value: string) {
+  const raw = value.trim();
+  if (!raw) return "—";
+  const match = raw.match(/^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti)$/);
+  if (!match) return raw;
+  const unitPower = { Ki: 1, Mi: 2, Gi: 3, Ti: 4 }[match[2] as "Ki" | "Mi" | "Gi" | "Ti"];
+  return formatBytes(Number(match[1]) * 1024 ** unitPower);
 }
 
 async function responseError(res: Response) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { Workflow as ArchitecturePageIcon } from "lucide-react";
-import { ExternalLink, LoaderCircle, Server } from "lucide-react";
+import { ChevronRight, ExternalLink, LoaderCircle, Server } from "lucide-react";
 import { Button, Card } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -284,11 +284,17 @@ function NodeCard({
           <Server
             className={`admin-architecture-node-icon size-5 ${s.tone === "green" ? "text-success" : s.tone === "amber" ? "text-warning" : s.tone === "red" ? "text-danger" : "text-muted"}`}
           />
-          <AdminStatusBadge tone={s.tone}>{s.label}</AdminStatusBadge>
+          <span className="flex items-center gap-1.5">
+            <AdminStatusBadge tone={s.tone}>{s.label}</AdminStatusBadge>
+            <ChevronRight
+              aria-hidden="true"
+              className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+            />
+          </span>
         </span>
         <span className="mt-auto min-w-0">
           <span className="block truncate text-sm font-semibold">{node.label}</span>
-          <span className="text-muted block truncate font-mono text-[10px]">{node.kind}</span>
+          <span className="text-muted mt-0.5 block truncate text-xs">{node.kind}</span>
         </span>
       </button>
     </Card>
@@ -299,14 +305,13 @@ function NodeDetail({ node }: { node: ArchitectureNode }) {
   const s = statusStyle(node.status);
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <h3 className="text-base font-semibold text-foreground">{node.label}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+          Current status
+        </span>
         <AdminStatusBadge tone={s.tone} dot>
           {s.label}
         </AdminStatusBadge>
-      </div>
-      <div className="text-xs text-muted">
-        {node.layer} · {node.kind}
       </div>
       {node.detail ? <p className="text-sm text-foreground">{node.detail}</p> : null}
       {node.endpoint ? (

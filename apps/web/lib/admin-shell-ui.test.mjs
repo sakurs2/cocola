@@ -40,8 +40,14 @@ test("formal Admin uses the Cocola AppLayout compatibility layer and compound Si
   assert.match(shellSource, /sidebar=\{<AdminSidebar activeSectionId=\{section\.id\} \/>\}/);
   assert.match(shellSource, /style=\{getAdminThemeStyle\(section\.theme\)\}/);
   assert.doesNotMatch(shellSource, /admin-glass-sidebar|admin-glass-shell|<aside/);
-  assert.match(sidebarSource, /<Sidebar>[\s\S]*?<Sidebar\.Header>[\s\S]*?<Sidebar\.Content>/);
-  assert.match(sidebarSource, /<Sidebar\.Footer>/);
+  assert.match(sidebarSource, /<Sidebar>[\s\S]*?<Sidebar\.Header>[\s\S]*?<Sidebar\.Content/);
+  assert.match(sidebarSource, /<Sidebar\.Footer/);
+  assert.match(sidebarSource, /Sidebar\.Content className="overscroll-contain pb-3 pt-1"/);
+  assert.match(
+    sidebarSource,
+    /Sidebar\.Footer className="relative z-10 border-t border-separator bg-background"/,
+  );
+  assert.match(sidebarSource, /<Icon className=\{`size-4 \$\{section\.iconClassName\}`\} \/>/);
   assert.match(
     sidebarSource,
     /grid-cols-\[1\.25rem_minmax\(0,1fr\)\][\s\S]*?<CocolaCoreLogo className="size-10 max-w-none shrink-0" \/>/,
@@ -77,6 +83,7 @@ test("Admin Overview is copied from the approved grouped HeroUI card layout", ()
   assert.match(overviewSource, /admin-overview-card h-full min-h-40 p-5/);
   assert.match(overviewSource, /admin-overview-icon bg-accent-soft text-accent/);
   assert.match(overviewSource, /admin-overview-cta[\s\S]*?text-white/);
+  assert.match(overviewSource, /style=\{getAdminThemeStyle\(section\.theme\)\}/);
   assert.doesNotMatch(overviewSource, /cocola-admin-module/);
   assert.match(globalStyles, /\.cocola-admin-ui a:hover > \.admin-overview-card/);
   assert.match(globalStyles, /\.cocola-admin-ui \.cocola-sidebar-tab:hover/);
@@ -93,6 +100,10 @@ test("Admin utility pages keep stable HeroUI controls and visible architecture c
   assert.match(componentLogsSource, /<Input className="h-10"/);
   assert.match(architectureSource, /<Card[\s\S]*?admin-architecture-node-card group h-28 w-full/);
   assert.match(architectureSource, /<button[\s\S]*?aria-pressed=\{selected\}/);
+  assert.match(architectureSource, /<ChevronRight/);
+  assert.match(componentLogsSource, /<Label>Service<\/Label>/);
+  assert.match(componentLogsSource, /lines\.length === 1 \? "line" : "lines"/);
+  assert.match(componentLogsSource, /max-h-\[32rem\] min-h-32/);
   assert.match(globalStyles, /\.admin-architecture-node-card:hover/);
   assert.match(globalStyles, /transform: translateY\(-2px\)/);
 });

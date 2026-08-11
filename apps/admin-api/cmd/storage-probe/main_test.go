@@ -119,8 +119,14 @@ func TestDemuxDockerStream(t *testing.T) {
 		return append(header, payload...)
 	}
 	raw := append(frame(1, "stdout\n"), frame(2, "stderr\n")...)
+	if !looksLikeDockerMultiplexed(raw) {
+		t.Fatal("valid Docker multiplex stream was not detected")
+	}
 	if got := demuxDockerStream(raw); !bytes.Equal(got, []byte("stdout\nstderr\n")) {
 		t.Fatalf("demux = %q", got)
+	}
+	if looksLikeDockerMultiplexed([]byte("ordinary log output\n")) {
+		t.Fatal("plain log output was detected as a Docker multiplex stream")
 	}
 }
 

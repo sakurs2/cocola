@@ -22,6 +22,7 @@ import {
   AdminErrorDialog,
   AdminPage,
   AdminPageHeader,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import {
   CheckCircle2,
@@ -331,13 +332,17 @@ export default function AdminUsersPage() {
           <Avatar className="size-10">
             <Avatar.Fallback>{avatarInitials(user)}</Avatar.Fallback>
           </Avatar>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold">
-              {user.name || user.username || user.email}
-            </span>
-            <span className="text-muted mt-0.5 block truncate text-xs">
-              {user.username} · {user.email}
-            </span>
+          <span className="block min-w-0 flex-1">
+            <AdminTruncatedValue
+              className="text-sm font-semibold"
+              copyLabel="user name"
+              value={user.name || user.username || user.email}
+            />
+            <AdminTruncatedValue
+              className="text-muted mt-0.5 text-xs"
+              copyLabel="username and email"
+              value={`${user.username} · ${user.email}`}
+            />
           </span>
         </span>
       ),
@@ -718,28 +723,14 @@ function CredentialRow({
   value: string;
   mono?: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="bg-surface-secondary flex items-center gap-2 rounded-2xl px-3 py-2">
       <div className="w-16 shrink-0 text-xs text-muted">{label}</div>
-      <div className={`min-w-0 flex-1 truncate text-sm ${mono ? "font-mono" : ""}`}>{value}</div>
-      <Button
-        variant="ghost"
-        isIconOnly
-        size="sm"
-        aria-label={`Copy ${label}`}
-        onPress={async () => {
-          await copyText(value);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        }}
-      >
-        {copied ? (
-          <CheckCircle2 className="size-4 text-emerald-500" />
-        ) : (
-          <Copy className="size-4" />
-        )}
-      </Button>
+      <AdminTruncatedValue
+        className={`text-sm ${mono ? "font-mono" : ""}`}
+        copyLabel={label}
+        value={value}
+      />
     </div>
   );
 }

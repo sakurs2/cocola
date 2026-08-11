@@ -11,6 +11,7 @@ import {
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 import { SelectControl } from "@/components/ui/select-control";
 
@@ -198,13 +199,19 @@ export default function AdminSettingsPage() {
                           {setting.description}
                         </p>
                         <div className="text-muted mt-2 flex min-w-0 flex-wrap gap-2 font-mono text-[11px]">
-                          <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">
-                            {setting.key} · v{setting.version}
-                          </code>
+                          <span className="bg-surface-secondary max-w-full rounded-lg px-2 py-1">
+                            <AdminTruncatedValue
+                              copyLabel="setting key"
+                              value={`${setting.key} · v${setting.version}`}
+                            />
+                          </span>
                           {setting.env ? (
-                            <code className="bg-surface-secondary max-w-full truncate rounded-lg px-2 py-1">
-                              {setting.env}
-                            </code>
+                            <span className="bg-surface-secondary max-w-full rounded-lg px-2 py-1">
+                              <AdminTruncatedValue
+                                copyLabel="environment variable"
+                                value={setting.env}
+                              />
+                            </span>
                           ) : null}
                         </div>
                       </div>

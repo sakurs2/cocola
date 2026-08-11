@@ -6,7 +6,6 @@ import { Button, Input, Label, SearchField, TextField } from "@heroui/react";
 import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   AdminDataGrid,
@@ -109,16 +108,18 @@ export default function AdminAuditPage() {
       minWidth: 280,
       cell: (run) => (
         <span className="block min-w-0">
-          <span className="block truncate text-sm font-semibold">
-            {run.conversation_title || "Untitled conversation"}
-          </span>
+          <AdminTruncatedValue
+            className="text-sm font-semibold"
+            copyLabel="conversation title"
+            value={run.conversation_title || "Untitled conversation"}
+          />
           {run.conversation_id ? (
-            <Link
-              className="text-accent block truncate font-mono text-xs hover:underline"
+            <AdminTruncatedValue
+              className="text-accent font-mono text-xs"
+              copyLabel="conversation ID"
               href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
-            >
-              {run.conversation_id}
-            </Link>
+              value={run.conversation_id}
+            />
           ) : null}
         </span>
       ),
@@ -137,7 +138,13 @@ export default function AdminAuditPage() {
       id: "model",
       header: "Model",
       minWidth: 160,
-      cell: (run) => <span className="text-sm">{run.model_alias || "Default"}</span>,
+      cell: (run) => (
+        <AdminTruncatedValue
+          className="text-sm"
+          copyLabel="model name"
+          value={run.model_alias || "Default"}
+        />
+      ),
     },
     {
       id: "latency",
@@ -158,7 +165,11 @@ export default function AdminAuditPage() {
         <span>
           <RunStatus status={run.status} />
           {run.error_code ? (
-            <span className="text-muted mt-1 block font-mono text-xs">{run.error_code}</span>
+            <AdminTruncatedValue
+              className="text-muted mt-1 font-mono text-xs"
+              copyLabel="error code"
+              value={run.error_code}
+            />
           ) : null}
         </span>
       ),

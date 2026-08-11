@@ -24,6 +24,7 @@ import {
 import { DataGrid, type DataGridProps } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
+import Link from "next/link";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { cn } from "@/lib/utils";
 
@@ -400,7 +401,7 @@ export function AdminRowActions({
           <MoreHorizontal className="size-4" />
         )}
       </Dropdown.Trigger>
-      <Dropdown.Popover placement="bottom end">
+      <Dropdown.Popover className="w-max min-w-0 md:min-w-0" placement="bottom end">
         <Dropdown.Menu aria-label={label} onAction={(key) => onAction(String(key))}>
           {actions.map((action) => (
             <Dropdown.Item
@@ -431,24 +432,16 @@ export function AdminTruncatedValue({
   value,
   copyLabel = "value",
   className,
+  href,
+  onPress,
 }: {
   value: string;
   copyLabel?: string;
   className?: string;
+  href?: string;
+  onPress?: () => void;
 }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [truncated, setTruncated] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  useLayoutEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const update = () => setTruncated(node.scrollWidth > node.clientWidth + 1);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [value]);
 
   const copy = async () => {
     await navigator.clipboard.writeText(value);
@@ -456,39 +449,45 @@ export function AdminTruncatedValue({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const text = (
-    <span ref={ref} className={cn("block min-w-0 flex-1 truncate", className)}>
+  const textClassName = cn(
+    "block min-w-0 truncate text-left",
+    (href || onPress) &&
+      "rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus",
+    className,
+  );
+  const text = href ? (
+    <Link className={textClassName} href={href}>
       {value}
-    </span>
+    </Link>
+  ) : onPress ? (
+    <button className={textClassName} type="button" onClick={onPress}>
+      {value}
+    </button>
+  ) : (
+    <span className={textClassName}>{value}</span>
   );
   return (
-    <span className="group flex min-w-0 items-center gap-1">
-      {truncated ? (
-        <Tooltip delay={0}>
-          <span className="min-w-0 flex-1">{text}</span>
-          <Tooltip.Content className="max-w-sm break-all">{value}</Tooltip.Content>
-        </Tooltip>
-      ) : (
-        text
-      )}
-      <Button
-        isIconOnly
-        aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`}
-        className={cn(
-          "size-7 min-w-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
-          !truncated && "invisible",
-        )}
-        isDisabled={!truncated}
-        size="sm"
-        variant="ghost"
-        onPress={() => void copy()}
-      >
-        {copied ? (
-          <CheckCircle2 className="text-success size-3.5" />
-        ) : (
-          <Copy className="size-3.5" />
-        )}
-      </Button>
+    <span className="group inline-flex min-w-0 max-w-full items-center align-middle">
+      <Tooltip delay={0}>
+        <span className="min-w-0">{text}</span>
+        <Tooltip.Content className="max-w-sm break-all">{value}</Tooltip.Content>
+      </Tooltip>
+      {value !== "—" ? (
+        <Button
+          isIconOnly
+          aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`}
+          className="size-6 min-w-6 shrink-0 opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+          size="sm"
+          variant="ghost"
+          onPress={() => void copy()}
+        >
+          {copied ? (
+            <CheckCircle2 className="text-success size-3.5" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
+        </Button>
+      ) : null}
     </span>
   );
 }

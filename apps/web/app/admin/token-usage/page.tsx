@@ -26,6 +26,7 @@ import {
   AdminPage,
   AdminPageHeader,
   AdminRefreshButton,
+  AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
 
 ChartJS.register(
@@ -255,12 +256,11 @@ export default function AdminTokenUsagePage() {
       isRowHeader: true,
       minWidth: 180,
       cell: (user) => (
-        <span
-          className="block min-w-0 truncate text-sm font-semibold"
-          title={`${displayUser(user)} · ${user.user_id}`}
-        >
-          {displayUser(user)}
-        </span>
+        <AdminTruncatedValue
+          className="text-sm font-semibold"
+          copyLabel="user"
+          value={`${displayUser(user)} · ${user.user_id}`}
+        />
       ),
     },
     {

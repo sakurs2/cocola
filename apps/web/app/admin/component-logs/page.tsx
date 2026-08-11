@@ -90,21 +90,24 @@ export default function ComponentLogsPage() {
 
       <Card className="p-4">
         <Card.Content className="grid gap-3 p-0 md:grid-cols-[minmax(240px,1fr)_160px_120px] md:items-end">
-          <SelectControl
-            ariaLabel="Service"
-            className="h-10 w-full rounded-xl"
-            value={selected}
-            onValueChange={(value) => {
-              setSelected(value);
-              void load(value);
-            }}
-            options={
-              files.length
-                ? files.map((file) => ({ value: file.name, label: file.label }))
-                : [{ value: "", label: "No component logs", disabled: true }]
-            }
-            contentClassName="cocola-admin-ui"
-          />
+          <div className="grid gap-1.5">
+            <Label>Service</Label>
+            <SelectControl
+              ariaLabel="Service"
+              className="h-10 w-full rounded-xl"
+              value={selected}
+              onValueChange={(value) => {
+                setSelected(value);
+                void load(value);
+              }}
+              options={
+                files.length
+                  ? files.map((file) => ({ value: file.name, label: file.label }))
+                  : [{ value: "", label: "No component logs", disabled: true }]
+              }
+              contentClassName="cocola-admin-ui"
+            />
+          </div>
           <TextField
             value={String(lineCount)}
             variant="secondary"
@@ -136,7 +139,8 @@ export default function ComponentLogsPage() {
           <span>
             <Card.Title>{selectedFile?.label ?? "Logs"}</Card.Title>
             <Card.Description>
-              {lines.length} lines · {formatBytes(selectedFile?.size ?? 0)}
+              {lines.length} {lines.length === 1 ? "line" : "lines"} ·{" "}
+              {formatBytes(selectedFile?.size ?? 0)}
             </Card.Description>
           </span>
           {loading ? (
@@ -166,7 +170,7 @@ export default function ComponentLogsPage() {
             </Tooltip>
           )}
         </Card.Header>
-        <pre className="h-[560px] overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
+        <pre className="max-h-[32rem] min-h-32 overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
           {lines.length > 0 ? lines.join("\n") : "No component log lines"}
         </pre>
       </Card>
@@ -175,7 +179,7 @@ export default function ComponentLogsPage() {
 }
 
 function formatBytes(value: number) {
-  if (!value) return "-";
+  if (!value) return "0 B";
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;

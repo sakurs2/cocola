@@ -11,12 +11,13 @@ import {
   AdminRefreshButton,
   AdminRowActions,
   AdminStatusBadge,
+  AdminToast,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
-import { Card } from "@heroui/react";
+import { Card, Modal } from "@heroui/react";
 import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
-import { CircleDot, Server, Trash2 } from "lucide-react";
+import { Eye, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -78,8 +79,9 @@ export default function SandboxesPage() {
   const [notice, setNotice] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState("");
+  const [detailSandbox, setDetailSandbox] = useState<SandboxRuntime | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (notify = false) => {
     setError("");
     setLoading(true);
     try {
@@ -94,7 +96,7 @@ export default function SandboxesPage() {
       const body = (await res.json()) as SandboxListResponse;
       setUnsupported(false);
       setSandboxes(Array.isArray(body.sandboxes) ? body.sandboxes : []);
-      setNotice("Sandbox runtime state refreshed");
+      if (notify) setNotice("Sandbox runtime state refreshed");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -134,16 +136,11 @@ export default function SandboxesPage() {
       isRowHeader: true,
       width: 220,
       cell: (sandbox) => (
-        <span className="block min-w-0">
-          <AdminTruncatedValue
-            className="font-mono text-xs font-medium"
-            copyLabel="sandbox ID"
-            value={sandbox.sandbox_id}
-          />
-          <span className="text-muted block truncate text-xs">
-            {sandbox.lifecycle_state || "unknown"}
-          </span>
-        </span>
+        <AdminTruncatedValue
+          className="font-mono text-xs font-medium"
+          copyLabel="sandbox ID"
+          value={sandbox.sandbox_id}
+        />
       ),
     },
     {
@@ -157,35 +154,14 @@ export default function SandboxesPage() {
       ),
     },
     {
-      id: "session",
-      header: "Session / User",
-      width: 260,
-      cell: (sandbox) => (
-        <span className="block min-w-0">
-          <AdminTruncatedValue
-            className="font-mono text-xs font-medium"
-            copyLabel="session ID"
-            value={sandbox.session_id || "—"}
-          />
-          <AdminTruncatedValue
-            className="text-muted text-xs"
-            copyLabel={sandbox.username ? "user ID" : "user"}
-            value={
-              sandbox.username ? `${sandbox.username} · ${sandbox.user_id}` : sandbox.user_id || "—"
-            }
-          />
-        </span>
-      ),
-    },
-    {
-      id: "runtime",
-      header: "Runtime",
-      width: 200,
+      id: "owner",
+      header: "Owner",
+      width: 190,
       cell: (sandbox) => (
         <AdminTruncatedValue
-          className="font-mono text-xs"
-          copyLabel="runtime image"
-          value={sandbox.image || "—"}
+          className="text-sm"
+          copyLabel={sandbox.username ? "username" : "user ID"}
+          value={sandbox.username || sandbox.user_id || "—"}
         />
       ),
     },
@@ -198,22 +174,15 @@ export default function SandboxesPage() {
       ),
     },
     {
-      id: "placement",
-      header: "Node / Pod",
-      width: 220,
+      id: "node",
+      header: "Node",
+      width: 190,
       cell: (sandbox) => (
-        <span className="block min-w-0">
-          <AdminTruncatedValue
-            className="text-xs"
-            copyLabel="node name"
-            value={sandbox.node_name || "—"}
-          />
-          <AdminTruncatedValue
-            className="text-muted font-mono text-xs"
-            copyLabel="pod ID"
-            value={`${sandbox.pod_name || "—"}${sandbox.pod_phase ? ` / ${sandbox.pod_phase}` : ""}`}
-          />
-        </span>
+        <AdminTruncatedValue
+          className="text-xs"
+          copyLabel="node name"
+          value={sandbox.node_name || "Unassigned"}
+        />
       ),
     },
     {
@@ -227,6 +196,11 @@ export default function SandboxesPage() {
           busy={deletingId === sandbox.sandbox_id}
           actions={[
             {
+              id: "details",
+              label: "View details",
+              icon: <Eye className="size-4" />,
+            },
+            {
               id: "delete",
               label: sandbox.status === "running" ? "Delete running sandbox" : "Delete sandbox",
               icon: <Trash2 className="size-4" />,
@@ -234,6 +208,7 @@ export default function SandboxesPage() {
             },
           ]}
           onAction={(action) => {
+            if (action === "details") setDetailSandbox(sandbox);
             if (action === "delete") setPendingDeleteId(sandbox.sandbox_id);
           }}
         />
@@ -252,7 +227,7 @@ export default function SandboxesPage() {
             variant="outline"
             refreshing={loading}
             disabled={loading}
-            onClick={() => void refresh()}
+            onClick={() => void refresh(true)}
           >
             Refresh
           </AdminRefreshButton>
@@ -265,12 +240,11 @@ export default function SandboxesPage() {
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
-      {notice && !loading && !error && !unsupported ? (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
-          <CircleDot className="size-4 shrink-0" />
-          <span>{notice}</span>
-        </div>
-      ) : null}
+      <AdminToast
+        message={!loading && !error && !unsupported ? notice : undefined}
+        tone="success"
+        onDismiss={() => setNotice("")}
+      />
 
       {unsupported ? (
         <UnsupportedState />
@@ -278,7 +252,7 @@ export default function SandboxesPage() {
         <AdminDataGrid
           aria-label="Sandboxes"
           columns={columns}
-          contentClassName="min-w-[1080px]"
+          contentClassName="min-w-[860px]"
           data={sandboxes}
           getRowId={(sandbox) => sandbox.sandbox_id}
           selectionMode="none"
@@ -303,6 +277,13 @@ export default function SandboxesPage() {
         />
       )}
 
+      <SandboxDetailsDialog
+        sandbox={detailSandbox}
+        onOpenChange={(open) => {
+          if (!open) setDetailSandbox(null);
+        }}
+      />
+
       <AdminConfirmDialog
         open={Boolean(pendingDeleteId)}
         onOpenChange={(open) => {
@@ -316,6 +297,101 @@ export default function SandboxesPage() {
         onConfirm={() => void handleDelete(pendingDeleteId)}
       />
     </AdminPage>
+  );
+}
+
+function SandboxDetailsDialog({
+  sandbox,
+  onOpenChange,
+}: {
+  sandbox: SandboxRuntime | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Modal isOpen={Boolean(sandbox)} onOpenChange={onOpenChange}>
+      <Modal.Backdrop>
+        <Modal.Container placement="center" scroll="inside" size="md">
+          <Modal.Dialog>
+            <Modal.CloseTrigger aria-label="Close sandbox details" />
+            <Modal.Header className="items-start">
+              <Modal.Icon className="bg-teal-500/10 text-teal-600">
+                <SandboxesPageIcon className="size-5" />
+              </Modal.Icon>
+              <div className="min-w-0">
+                <Modal.Heading>Sandbox details</Modal.Heading>
+                <p className="mt-1 text-sm text-muted">Runtime diagnostics for this sandbox.</p>
+              </div>
+            </Modal.Header>
+            <Modal.Body>
+              {sandbox ? (
+                <dl className="divide-y divide-border/70 rounded-2xl border border-border/70 px-4">
+                  <SandboxDetailValue
+                    label="Sandbox ID"
+                    value={sandbox.sandbox_id}
+                    copyLabel="sandbox ID"
+                  />
+                  <SandboxDetailValue
+                    label="Session ID"
+                    value={sandbox.session_id || "—"}
+                    copyLabel="session ID"
+                  />
+                  <SandboxDetailValue
+                    label="User ID"
+                    value={sandbox.user_id || "—"}
+                    copyLabel="user ID"
+                  />
+                  <SandboxDetailValue
+                    label="Lifecycle"
+                    value={sandbox.lifecycle_state || "unknown"}
+                  />
+                  <SandboxDetailValue
+                    label="Runtime image"
+                    value={sandbox.image || "—"}
+                    copyLabel="runtime image"
+                  />
+                  <SandboxDetailValue
+                    label="Node"
+                    value={sandbox.node_name || "Unassigned"}
+                    copyLabel="node name"
+                  />
+                  <SandboxDetailValue
+                    label="Pod"
+                    value={sandbox.pod_name || "—"}
+                    copyLabel="pod name"
+                  />
+                  <SandboxDetailValue label="Pod phase" value={sandbox.pod_phase || "—"} />
+                  <SandboxDetailValue label="Created" value={formatDate(sandbox.created_at)} />
+                  <SandboxDetailValue label="Paused" value={formatDate(sandbox.paused_at)} />
+                </dl>
+              ) : null}
+            </Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
+  );
+}
+
+function SandboxDetailValue({
+  label,
+  value,
+  copyLabel,
+}: {
+  label: string;
+  value: string;
+  copyLabel?: string;
+}) {
+  return (
+    <div className="grid min-w-0 gap-1 py-3 sm:grid-cols-[110px_minmax(0,1fr)] sm:items-center">
+      <dt className="text-xs font-medium text-muted">{label}</dt>
+      <dd className="min-w-0 text-sm">
+        {copyLabel ? (
+          <AdminTruncatedValue className="font-mono text-xs" copyLabel={copyLabel} value={value} />
+        ) : (
+          <span className="break-all">{value}</span>
+        )}
+      </dd>
+    </div>
   );
 }
 

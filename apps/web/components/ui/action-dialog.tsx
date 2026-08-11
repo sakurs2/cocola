@@ -106,19 +106,23 @@ export function ActionConfirmDialog({
                 aria-disabled={busy}
                 aria-busy={busy}
                 aria-label={confirmLabel}
-                className={`relative ${busy ? "pointer-events-none" : ""}`}
+                className={busy ? "pointer-events-none" : undefined}
                 variant={tone === "danger" ? "danger" : "primary"}
                 onPress={() => {
                   if (!busy) onConfirm();
                 }}
               >
-                <span className={showBusy ? "invisible" : undefined}>{confirmLabel}</span>
-                {showBusy ? (
-                  <LoaderCircle
-                    aria-hidden="true"
-                    className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 animate-spin"
-                  />
-                ) : null}
+                <span className="inline-grid place-items-center">
+                  <span className={`col-start-1 row-start-1 ${showBusy ? "invisible" : ""}`}>
+                    {confirmLabel}
+                  </span>
+                  {showBusy ? (
+                    <LoaderCircle
+                      aria-hidden="true"
+                      className="col-start-1 row-start-1 size-4 animate-spin"
+                    />
+                  ) : null}
+                </span>
               </Button>
             </AlertDialog.Footer>
           </AlertDialog.Dialog>
