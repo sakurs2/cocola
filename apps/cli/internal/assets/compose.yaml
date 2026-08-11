@@ -75,6 +75,10 @@ services:
       - "127.0.0.1:${COCOLA_FORGEJO_HOST_PORT}:3000"
     volumes:
       - forgejodata:/data
+    networks:
+      default:
+      sandbox-services:
+        aliases: [forgejo]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/healthz"]
       interval: 5s
@@ -271,6 +275,10 @@ services:
       COCOLA_PG_DSN: "postgres://cocola:${COCOLA_PG_PASSWORD}@postgres:5432/cocola?sslmode=disable"
     ports:
       - "${COCOLA_LLM_HOST_PORT}:8080"
+    networks:
+      default:
+      sandbox-services:
+        aliases: [llm-gateway]
     healthcheck:
       test:
         [
@@ -427,6 +435,10 @@ services:
       COCOLA_SKILL_PUBLISH_ENABLED: "${COCOLA_SKILL_PUBLISH_ENABLED:-false}"
     volumes:
       - "${COCOLA_HOME}/secrets:/run/secrets:ro"
+    networks:
+      default:
+      sandbox-services:
+        aliases: [gateway]
     # Direct OpenSandbox endpoints use the portable host-gateway alias. This
     # covers Preview and Terminal in addition to sandbox-manager Exec calls.
     extra_hosts:
@@ -474,6 +486,14 @@ services:
       timeout: 5s
       retries: 30
 
+networks:
+  default:
+  sandbox-services:
+    # OpenSandbox creates dynamic containers outside Compose. A stable name lets
+    # those containers share only the authenticated services they need without
+    # joining Cocola's control-plane network or hairpinning through host ports.
+    name: cocola-sandbox-services
+
 configs:
   opensandbox-config:
     content: |
@@ -495,7 +515,7 @@ configs:
       allowed_host_paths = ["${COCOLA_SANDBOX_ROOT}"]
 
       [docker]
-      network_mode = "bridge"
+      network_mode = "cocola-sandbox-services"
       host_ip = "host.docker.internal"
       drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
       no_new_privileges = true

@@ -52,7 +52,7 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_PUBLIC_ORIGINS="http://127.0.0.1:3000,http://localhost:3000"`,
 		`COCOLA_BOOTSTRAP_ADMIN_PASSWORD="strong-password"`,
 		`COCOLA_AUTH_SECRET="`,
-		`COCOLA_SANDBOX_LLM_BASE_URL="http://host.docker.internal:18091"`,
+		`COCOLA_SANDBOX_LLM_BASE_URL="http://llm-gateway:8080"`,
 		`COCOLA_SESSION_VOLUME_SIZE="2Gi"`,
 		`COCOLA_SANDBOX_PROFILE="coding"`,
 		`COCOLA_AGENT_RUNTIME_DEFAULT_ID="claude-code"`,
@@ -70,10 +70,10 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		`COCOLA_SCM_SECRET_KEY_FILE=""`,
 		`COCOLA_FORGEJO_HOST_PORT="3001"`,
 		`COCOLA_FORGEJO_API_URL="http://forgejo:3000"`,
-		`COCOLA_FORGEJO_CLONE_URL="http://host.docker.internal:3001"`,
+		`COCOLA_FORGEJO_CLONE_URL="http://forgejo:3000"`,
 		`COCOLA_FEATURE_LOCAL_PROJECTS="true"`,
-		`COCOLA_SANDBOX_PROJECT_BROKER_URL="http://host.docker.internal:8080"`,
-		`COCOLA_SANDBOX_SKILL_BROKER_URL="http://host.docker.internal:8080"`,
+		`COCOLA_SANDBOX_PROJECT_BROKER_URL="http://gateway:8080"`,
+		`COCOLA_SANDBOX_SKILL_BROKER_URL="http://gateway:8080"`,
 		`COCOLA_SKILL_PUBLISH_ENABLED="false"`,
 		`COCOLA_PROJECT_MAX_REPOSITORY_MB="512"`,
 	} {
@@ -92,7 +92,7 @@ func TestWriteInstallationCreatesPrivateConfigAndStableState(t *testing.T) {
 		state.ConfigSchemaVersion != CurrentSchemaVersion || state.DeploymentRevision == "" ||
 		state.LLMPort != 18091 || state.InternalSCM.HostPort != 3001 ||
 		state.InternalSCM.APIURL != "http://forgejo:3000" ||
-		state.InternalSCM.SandboxCloneURL != "http://host.docker.internal:3001" {
+		state.InternalSCM.SandboxCloneURL != "http://forgejo:3000" {
 		t.Fatalf("state = %+v", state)
 	}
 	if _, err := WriteInstallation(paths, options, []byte("different")); !errors.Is(err, ErrAlreadyInstalled) {
@@ -619,6 +619,82 @@ func TestUpgradeRequiresExplicitInternalSCMURLForExternalSandboxes(t *testing.T)
 	)...)
 	if _, _, err := migrateEnvironment(paths, state, "v0.2.0", environment); err != nil {
 		t.Fatalf("explicit external SCM URL: %v", err)
+	}
+}
+
+func TestManagedUpgradeMovesLegacySandboxEndpointsToDedicatedNetwork(t *testing.T) {
+	paths := Paths{Home: t.TempDir(), SandboxRoot: t.TempDir()}
+	state := State{
+		ManagedOpenSandbox: true,
+		WebPort:            3000, GatewayPort: 8080, LLMPort: 18091,
+		InternalSCM: InternalSCMEndpoint{
+			APIURL:          defaultInternalSCMAPIURL,
+			HostPort:        defaultInternalSCMHostPort,
+			SandboxCloneURL: "http://host.docker.internal:3001",
+		},
+	}
+	environment := []byte(strings.Join([]string{
+		`COCOLA_VERSION="v0.1.0"`,
+		`COCOLA_OPENSANDBOX_MANAGED="1"`,
+		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
+		`COCOLA_LLM_HOST_PORT="18091"`,
+		`COCOLA_GATEWAY_HOST_PORT="8080"`,
+		`COCOLA_FORGEJO_HOST_PORT="3001"`,
+		`COCOLA_SANDBOX_LLM_BASE_URL="http://host.docker.internal:18091"`,
+		`COCOLA_FORGEJO_CLONE_URL="http://host.docker.internal:3001"`,
+		`COCOLA_SANDBOX_PROJECT_BROKER_URL="http://host.docker.internal:8080"`,
+		`COCOLA_SANDBOX_SKILL_BROKER_URL="http://host.docker.internal:8080"`,
+		"",
+	}, "\n"))
+
+	migrated, derived, err := migrateEnvironment(paths, state, "v0.2.0", environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(migrated)
+	for _, expected := range []string{
+		`COCOLA_SANDBOX_LLM_BASE_URL="http://llm-gateway:8080"`,
+		`COCOLA_FORGEJO_CLONE_URL="http://forgejo:3000"`,
+		`COCOLA_SANDBOX_PROJECT_BROKER_URL="http://gateway:8080"`,
+		`COCOLA_SANDBOX_SKILL_BROKER_URL="http://gateway:8080"`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("managed endpoint migration missing %q:\n%s", expected, text)
+		}
+	}
+	if derived.internalSCM.SandboxCloneURL != defaultInternalSCMAPIURL {
+		t.Fatalf("derived Sandbox clone URL = %q", derived.internalSCM.SandboxCloneURL)
+	}
+}
+
+func TestManagedUpgradePreservesOperatorOwnedSandboxEndpoints(t *testing.T) {
+	paths := Paths{Home: t.TempDir(), SandboxRoot: t.TempDir()}
+	state := State{ManagedOpenSandbox: true, WebPort: 3000, GatewayPort: 8080, LLMPort: 18091}
+	environment := []byte(strings.Join([]string{
+		`COCOLA_VERSION="v0.1.0"`,
+		`COCOLA_OPENSANDBOX_MANAGED="1"`,
+		`COCOLA_IMAGE_REGISTRY="ghcr.io/sakurs2"`,
+		`COCOLA_SANDBOX_LLM_BASE_URL="https://llm.sandbox.example.com" # operator route`,
+		`COCOLA_FORGEJO_CLONE_URL="https://scm.sandbox.example.com"`,
+		`COCOLA_SANDBOX_PROJECT_BROKER_URL="https://project-broker.example.com"`,
+		`COCOLA_SANDBOX_SKILL_BROKER_URL="https://skill-broker.example.com"`,
+		"",
+	}, "\n"))
+
+	migrated, _, err := migrateEnvironment(paths, state, "v0.2.0", environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(migrated)
+	for _, expected := range []string{
+		`COCOLA_SANDBOX_LLM_BASE_URL="https://llm.sandbox.example.com" # operator route`,
+		`COCOLA_FORGEJO_CLONE_URL="https://scm.sandbox.example.com"`,
+		`COCOLA_SANDBOX_PROJECT_BROKER_URL="https://project-broker.example.com"`,
+		`COCOLA_SANDBOX_SKILL_BROKER_URL="https://skill-broker.example.com"`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("operator endpoint changed; missing %q:\n%s", expected, text)
+		}
 	}
 }
 

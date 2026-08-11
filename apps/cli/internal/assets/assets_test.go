@@ -146,6 +146,38 @@ func TestComposeUsesHostMappedOpenSandboxEndpoints(t *testing.T) {
 	}
 }
 
+func TestComposeRoutesSandboxDependenciesOverDedicatedNetwork(t *testing.T) {
+	for _, required := range [][]byte{
+		[]byte("  sandbox-services:\n"),
+		[]byte("name: cocola-sandbox-services"),
+		[]byte(`network_mode = "cocola-sandbox-services"`),
+	} {
+		if !bytes.Contains(Compose, required) {
+			t.Fatalf("production compose is missing the dedicated Sandbox service network: %q", required)
+		}
+	}
+
+	for _, service := range []struct {
+		name string
+		next string
+	}{
+		{name: "forgejo", next: "forgejo-init"},
+		{name: "llm-gateway", next: "admin-api"},
+		{name: "gateway", next: "web"},
+	} {
+		start := bytes.Index(Compose, []byte("  "+service.name+":\n"))
+		end := bytes.Index(Compose, []byte("  "+service.next+":\n"))
+		if start < 0 || end <= start {
+			t.Fatalf("production compose %s service block is missing", service.name)
+		}
+		block := Compose[start:end]
+		if !bytes.Contains(block, []byte("      sandbox-services:\n")) ||
+			!bytes.Contains(block, []byte("aliases: ["+service.name+"]")) {
+			t.Fatalf("%s must expose only its authenticated service alias to Sandboxes", service.name)
+		}
+	}
+}
+
 func TestComposeAuthenticatesPostgreSQLHealthChecks(t *testing.T) {
 	for _, required := range [][]byte{
 		[]byte("PGPASSWORD=$$POSTGRES_PASSWORD"),

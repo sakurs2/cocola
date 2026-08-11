@@ -516,6 +516,27 @@ func migrateEnvironmentWithOptions(
 	if value, ok := document.values["COCOLA_OPENSANDBOX_MANAGED"]; ok {
 		managed = value == "1" || strings.EqualFold(value, "true")
 	}
+	sandboxLLMBaseURL, replaceSandboxLLMBaseURL := migratedManagedSandboxEndpoint(
+		document,
+		"COCOLA_SANDBOX_LLM_BASE_URL",
+		fmt.Sprintf("http://host.docker.internal:%d", llmPort),
+		managedSandboxLLMBaseURL,
+		managed,
+	)
+	sandboxProjectBrokerURL, replaceSandboxProjectBrokerURL := migratedManagedSandboxEndpoint(
+		document,
+		"COCOLA_SANDBOX_PROJECT_BROKER_URL",
+		fmt.Sprintf("http://host.docker.internal:%d", gatewayPort),
+		managedSandboxGatewayURL,
+		managed,
+	)
+	sandboxSkillBrokerURL, replaceSandboxSkillBrokerURL := migratedManagedSandboxEndpoint(
+		document,
+		"COCOLA_SANDBOX_SKILL_BROKER_URL",
+		fmt.Sprintf("http://host.docker.internal:%d", gatewayPort),
+		managedSandboxGatewayURL,
+		managed,
+	)
 	publicOrigins := environmentValue(
 		document,
 		"COCOLA_PUBLIC_ORIGINS",
@@ -528,6 +549,12 @@ func migrateEnvironmentWithOptions(
 	sandboxCloneURL := environmentValue(
 		document, "COCOLA_FORGEJO_CLONE_URL", state.InternalSCM.SandboxCloneURL,
 	)
+	legacySandboxCloneURL := fmt.Sprintf("http://host.docker.internal:%d", internalSCMPort)
+	replaceSandboxCloneURL := false
+	if managed && (strings.TrimSpace(sandboxCloneURL) == "" || sandboxCloneURL == legacySandboxCloneURL) {
+		sandboxCloneURL = defaultInternalSCMAPIURL
+		_, replaceSandboxCloneURL = document.values["COCOLA_FORGEJO_CLONE_URL"]
+	}
 	if strings.TrimSpace(sandboxCloneURL) == "" && !managed {
 		return nil, derivedEnvironment{}, errors.New(
 			"COCOLA_FORGEJO_CLONE_URL is required when OpenSandbox is externally managed",
@@ -542,9 +569,7 @@ func migrateEnvironmentWithOptions(
 		internalSCM.APIURL = defaultInternalSCMAPIURL
 	}
 	if strings.TrimSpace(internalSCM.SandboxCloneURL) == "" {
-		internalSCM.SandboxCloneURL = fmt.Sprintf(
-			"http://host.docker.internal:%d", internalSCM.HostPort,
-		)
+		internalSCM.SandboxCloneURL = defaultInternalSCMAPIURL
 	}
 	if err := validateInternalSCMEndpoint(internalSCM); err != nil {
 		return nil, derivedEnvironment{}, err
@@ -587,7 +612,7 @@ func migrateEnvironmentWithOptions(
 		{"COCOLA_LLM_HOST_PORT", strconv.Itoa(llmPort)},
 		{"COCOLA_OPENSANDBOX_MANAGED", managedValue},
 		{"COCOLA_OPENSANDBOX_URL", opensandboxURL},
-		{"COCOLA_SANDBOX_LLM_BASE_URL", fmt.Sprintf("http://host.docker.internal:%d", llmPort)},
+		{"COCOLA_SANDBOX_LLM_BASE_URL", sandboxLLMBaseURL},
 		{"COCOLA_AUTH_SECRET", generated.auth},
 		{"AUTH_SECRET", generated.authJS},
 		{"COCOLA_ADMIN_KEY", generated.admin},
@@ -606,8 +631,8 @@ func migrateEnvironmentWithOptions(
 		{"COCOLA_FORGEJO_CLONE_URL", internalSCM.SandboxCloneURL},
 		{"COCOLA_SCM_SECRET_KEY", generated.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
-		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", gatewayPort)},
-		{"COCOLA_SANDBOX_SKILL_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", gatewayPort)},
+		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", sandboxProjectBrokerURL},
+		{"COCOLA_SANDBOX_SKILL_BROKER_URL", sandboxSkillBrokerURL},
 		{"COCOLA_SKILL_PUBLISH_ENABLED", "false"},
 		{"COCOLA_PROJECT_MAX_REPOSITORY_MB", "512"},
 		{"COCOLA_FEATURE_LOCAL_PROJECTS", "true"},
@@ -626,8 +651,16 @@ func migrateEnvironmentWithOptions(
 		{"COCOLA_BOOTSTRAP_ADMIN_PASSWORD", password},
 		{"COCOLA_BOOTSTRAP_ADMIN_RESET", "false"},
 	}
+	managedEndpointReplacements := map[string]bool{
+		"COCOLA_SANDBOX_LLM_BASE_URL":       replaceSandboxLLMBaseURL,
+		"COCOLA_FORGEJO_CLONE_URL":          replaceSandboxCloneURL,
+		"COCOLA_SANDBOX_PROJECT_BROKER_URL": replaceSandboxProjectBrokerURL,
+		"COCOLA_SANDBOX_SKILL_BROKER_URL":   replaceSandboxSkillBrokerURL,
+	}
 	for _, item := range values {
 		if migrationReplacesValue(item[0]) {
+			document.set(item[0], item[1])
+		} else if managedEndpointReplacements[item[0]] {
 			document.set(item[0], item[1])
 		} else {
 			document.ensure(item[0], item[1])
@@ -642,6 +675,30 @@ func migrateEnvironmentWithOptions(
 		internalSCM:        internalSCM,
 		managedOpenSandbox: managed,
 	}, nil
+}
+
+// migratedManagedSandboxEndpoint moves only Cocola's legacy host-published
+// defaults onto the dedicated Docker network. Operator-owned endpoints remain
+// untouched, while missing values receive the correct default for the selected
+// OpenSandbox ownership mode.
+func migratedManagedSandboxEndpoint(
+	document *environmentDocument,
+	key string,
+	legacyManagedValue string,
+	managedValue string,
+	managed bool,
+) (string, bool) {
+	value, exists := document.values[key]
+	if !exists || strings.TrimSpace(value) == "" {
+		if managed {
+			return managedValue, exists
+		}
+		return legacyManagedValue, exists
+	}
+	if managed && value == legacyManagedValue {
+		return managedValue, true
+	}
+	return value, false
 }
 
 func migrationReplacesValue(key string) bool {

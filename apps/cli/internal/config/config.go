@@ -21,7 +21,7 @@ import (
 // CurrentSchemaVersion versions the CLI-owned deployment files independently
 // from the Cocola release. Every incompatible config change must add an
 // explicit migration before this value is incremented.
-const CurrentSchemaVersion = 5
+const CurrentSchemaVersion = 6
 
 const (
 	defaultAgentRuntimeID       = "claude-code"
@@ -32,6 +32,8 @@ const (
 	defaultSandboxTokenTTL      = "604800"
 	defaultInternalSCMAPIURL    = "http://forgejo:3000"
 	defaultInternalSCMHostPort  = 3001
+	managedSandboxLLMBaseURL    = "http://llm-gateway:8080"
+	managedSandboxGatewayURL    = "http://gateway:8080"
 )
 
 var ErrAlreadyInstalled = errors.New("cocola is already installed in this directory")
@@ -66,7 +68,7 @@ type Options struct {
 // InternalSCMEndpoint keeps the three network views of the embedded source
 // control service together. APIURL is container-internal, HostPort is the
 // loopback binding owned by Compose, and SandboxCloneURL is the address a task
-// sandbox can actually reach.
+// sandbox can reach through the dedicated sandbox-services network.
 type InternalSCMEndpoint struct {
 	APIURL          string `json:"api_url"`
 	HostPort        int    `json:"host_port"`
@@ -275,7 +277,7 @@ func (o Options) resolvedInternalSCM() InternalSCMEndpoint {
 		value.HostPort = defaultInternalSCMHostPort
 	}
 	if strings.TrimSpace(value.SandboxCloneURL) == "" && o.ManagedOpenSandbox {
-		value.SandboxCloneURL = fmt.Sprintf("http://host.docker.internal:%d", value.HostPort)
+		value.SandboxCloneURL = defaultInternalSCMAPIURL
 	}
 	return value
 }
@@ -459,7 +461,15 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 	}
 	sandboxLLMBaseURL := o.SandboxLLMBaseURL
 	if sandboxLLMBaseURL == "" {
-		sandboxLLMBaseURL = fmt.Sprintf("http://host.docker.internal:%d", o.LLMPort)
+		if o.ManagedOpenSandbox {
+			sandboxLLMBaseURL = managedSandboxLLMBaseURL
+		} else {
+			sandboxLLMBaseURL = fmt.Sprintf("http://host.docker.internal:%d", o.LLMPort)
+		}
+	}
+	sandboxGatewayURL := fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)
+	if o.ManagedOpenSandbox {
+		sandboxGatewayURL = managedSandboxGatewayURL
 	}
 	publicOrigin, _ := o.PublicOrigin()
 	internalSCM := o.resolvedInternalSCM()
@@ -503,8 +513,8 @@ func renderEnvironment(paths Paths, o Options, s secrets, password string) strin
 		{"COCOLA_FORGEJO_CLONE_URL", internalSCM.SandboxCloneURL},
 		{"COCOLA_SCM_SECRET_KEY", s.scm},
 		{"COCOLA_SCM_SECRET_KEY_FILE", ""},
-		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)},
-		{"COCOLA_SANDBOX_SKILL_BROKER_URL", fmt.Sprintf("http://host.docker.internal:%d", o.GatewayPort)},
+		{"COCOLA_SANDBOX_PROJECT_BROKER_URL", sandboxGatewayURL},
+		{"COCOLA_SANDBOX_SKILL_BROKER_URL", sandboxGatewayURL},
 		{"COCOLA_SKILL_PUBLISH_ENABLED", "false"},
 		{"COCOLA_PROJECT_MAX_REPOSITORY_MB", "512"},
 		{"COCOLA_FEATURE_LOCAL_PROJECTS", "true"},
