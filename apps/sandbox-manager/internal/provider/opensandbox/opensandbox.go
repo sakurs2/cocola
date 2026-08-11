@@ -164,10 +164,10 @@ type Provider struct {
 	// useServerProxy controls how the execd endpoint is reached. When true
 	// (the default), Exec asks the server for a server-proxied endpoint URL
 	// (`{server}/sandboxes/{id}/proxy/{port}`), which is reachable by any client
-	// that can reach the server. When false the server returns the sandbox's
-	// direct endpoint (e.g. host.docker.internal:PORT), which is only reachable
-	// from inside the sandbox network -- appropriate only when sandbox-manager is
-	// co-located with the sandboxes.
+	// that can reach the server, provided the server itself can reach the sandbox
+	// network. When false the server returns the Docker host-mapped endpoint
+	// (e.g. host.docker.internal:PORT), appropriate for callers co-located on the
+	// same Docker host even when Compose and sandbox bridge networks are isolated.
 	useServerProxy bool
 	http           *http.Client // bounded client for lifecycle REST calls
 
@@ -214,8 +214,9 @@ func WithBaseURL(u string) Option { return func(p *Provider) { p.baseURL = strin
 func WithAPIKey(k string) Option { return func(p *Provider) { p.apiKey = k } }
 
 // WithServerProxy controls whether Exec reaches execd via the server proxy
-// (true, default) or the sandbox's direct endpoint (false). Direct only works
-// when the caller shares the sandbox network.
+// (true, default) or the runtime's direct endpoint (false). Docker direct
+// endpoints are published through the host gateway; other runtimes may impose
+// different reachability constraints.
 func WithServerProxy(v bool) Option { return func(p *Provider) { p.useServerProxy = v } }
 
 // WithExecUser overrides the OS user Exec drops to (default "cocola"). An empty
@@ -276,9 +277,10 @@ func New(opts ...Option) (*Provider, error) {
 		// minutes, so per-exec connection setup is noise).
 		stream: &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
 		ids:    map[string]string{},
-		// Default to the always-reachable server-proxy endpoint. Opt out via
-		// COCOLA_OPENSANDBOX_DIRECT_EXEC=1 (or WithServerProxy(false)) only when
-		// sandbox-manager runs inside the sandbox network.
+		// Default to the server-proxy endpoint. Docker Compose deployments opt out
+		// via COCOLA_OPENSANDBOX_DIRECT_EXEC=1 because Linux isolates the Compose
+		// network from sibling containers on Docker's built-in bridge; the direct
+		// endpoint is reachable through host.docker.internal instead.
 		useServerProxy: !envTruthy("COCOLA_OPENSANDBOX_DIRECT_EXEC"),
 		// Drop privileges to the brain image's non-root user by default so the
 		// in-sandbox claude CLI accepts --dangerously-skip-permissions. Override
@@ -1532,8 +1534,9 @@ func (p *Provider) resolveEndpoint(ctx context.Context, osbID string, port int) 
 	path := fmt.Sprintf("/sandboxes/%s/endpoints/%d", osbID, port)
 	if p.useServerProxy {
 		// Ask for a server-proxied URL ({server}/sandboxes/{id}/proxy/{port}),
-		// reachable by any client that can reach the server -- unlike the direct
-		// endpoint, which resolves to an in-network host (e.g. host.docker.internal).
+		// reachable by clients that can reach the server when the server can also
+		// reach the sandbox network. Docker direct endpoints instead resolve through
+		// the host gateway (e.g. host.docker.internal:PORT).
 		path += "?use_server_proxy=true"
 	}
 	if err := p.do(ctx, http.MethodGet, path, nil, &ep); err != nil {

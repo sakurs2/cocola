@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cocola-project/cocola/apps/sandbox-manager/internal/provider"
@@ -43,10 +44,23 @@ func (c Config) withDefaults() Config {
 // or invalid var falls back to the package default via withDefaults().
 func ConfigFromEnv() Config {
 	return Config{
-		LeaseTTL:    envSecs("COCOLA_SANDBOX_LEASE_TTL_SECS", DefaultLeaseTTL),
+		LeaseTTL:    leaseTTLFromEnv(),
 		LockTTL:     envSecs("COCOLA_SANDBOX_LOCK_TTL_SECS", DefaultLockTTL),
 		ReaperEvery: envSecs("COCOLA_SANDBOX_REAPER_SECS", DefaultReaperEvery),
 	}
+}
+
+func leaseTTLFromEnv() time.Duration {
+	if value := strings.TrimSpace(os.Getenv("COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES")); value != "" {
+		minutes, err := strconv.Atoi(value)
+		if err == nil && minutes >= minSandboxIdleTimeoutMinutes && minutes <= maxSandboxIdleTimeoutMinutes {
+			return time.Duration(minutes) * time.Minute
+		}
+		return DefaultLeaseTTL
+	}
+	// Preserve the older seconds-based override for custom deployments that set
+	// it directly. Managed Compose uses the clearer minutes-based setting above.
+	return envSecs("COCOLA_SANDBOX_LEASE_TTL_SECS", DefaultLeaseTTL)
 }
 
 func envSecs(k string, def time.Duration) time.Duration {
@@ -65,6 +79,11 @@ type Binder struct {
 	kv  rds.KV
 	p   provider.SandboxProvider
 	cfg Config
+
+	// leaseTTLSource supplies the Admin-configurable idle timeout. It must be a
+	// cheap, concurrency-safe read; the PostgreSQL-backed implementation keeps
+	// the latest validated value in an atomic rather than querying per heartbeat.
+	leaseTTLSource func() time.Duration
 
 	// net is the egress policy injected into every provider.Create. The zero
 	// value (nil allowlist) leaves each provider on its own default; callers
@@ -99,7 +118,26 @@ func NewBinder(kv rds.KV, p provider.SandboxProvider, cfg Config) *Binder {
 }
 
 // EffectiveConfig returns the binder's config after defaults have been applied.
-func (b *Binder) EffectiveConfig() Config { return b.cfg }
+func (b *Binder) EffectiveConfig() Config {
+	cfg := b.cfg
+	cfg.LeaseTTL = b.currentLeaseTTL()
+	return cfg
+}
+
+// WithLeaseTTLSource applies a runtime-updatable Sandbox idle timeout.
+func (b *Binder) WithLeaseTTLSource(source func() time.Duration) *Binder {
+	b.leaseTTLSource = source
+	return b
+}
+
+func (b *Binder) currentLeaseTTL() time.Duration {
+	if b.leaseTTLSource != nil {
+		if ttl := b.leaseTTLSource(); ttl > 0 {
+			return ttl
+		}
+	}
+	return b.cfg.LeaseTTL
+}
 
 // WithMetrics attaches a metrics sink. Returns the binder for chaining.
 func (b *Binder) WithMetrics(m *Metrics) *Binder {
@@ -554,7 +592,7 @@ func (b *Binder) bind(ctx context.Context, m meta, lock *distLock) (int64, error
 	if err != nil {
 		return bindExists, err
 	}
-	leaseSecs := int(b.cfg.LeaseTTL.Seconds())
+	leaseSecs := int(b.currentLeaseTTL().Seconds())
 	lockMillis := max(1, b.cfg.LockTTL.Milliseconds())
 	// KEYS: conv, rev, meta, lease, lock
 	// ARGV: sandboxID, sessionID, metaJSON, leaseTTL, lockToken, lockTTLMillis
@@ -605,7 +643,7 @@ func (b *Binder) putMeta(ctx context.Context, m meta) error {
 func (b *Binder) renewLease(ctx context.Context, sandboxID string) error {
 	// Re-create rather than EXPIRE: a sandbox briefly past its lease (but not
 	// yet reaped) must still be renewable on a fresh request.
-	return b.kv.Set(ctx, leaseKey(sandboxID), "1", b.cfg.LeaseTTL)
+	return b.kv.Set(ctx, leaseKey(sandboxID), "1", b.currentLeaseTTL())
 }
 
 // Release explicitly unbinds and destroys a session's sandbox immediately,

@@ -582,6 +582,33 @@ func TestExec_BridgesSSEStream(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_DirectUsesRuntimeMappedAddress(t *testing.T) {
+	var endpointQuery string
+	p := newStub(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/sandboxes/sbx-1"):
+			return jsonResp(http.StatusOK, `{"id":"sbx-1","status":{"state":"Running"}}`), nil
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/8080"):
+			endpointQuery = r.URL.RawQuery
+			return jsonResp(http.StatusOK, `{"endpoint":"host.docker.internal:47050/proxy/8080"}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+			return nil, nil
+		}
+	}, WithServerProxy(false))
+
+	ep, err := p.ResolveEndpoint(context.Background(), "sbx-1", 8080)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if endpointQuery != "" {
+		t.Fatalf("direct endpoint query = %q, want no use_server_proxy flag", endpointQuery)
+	}
+	if got, want := ep.URL, "http://host.docker.internal:47050/proxy/8080"; got != want {
+		t.Fatalf("direct endpoint URL = %q, want %q", got, want)
+	}
+}
+
 func TestExec_NegativeTimeoutHasNoDeadline(t *testing.T) {
 	var commandBody string
 	var commandHadDeadline bool

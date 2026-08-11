@@ -74,6 +74,24 @@ func main() {
 	binder := orchestrator.NewBinder(kv, p, cfg).
 		WithMetrics(bm).
 		WithNetworking(networking)
+	runtimeSettings, settingsErr := orchestrator.NewRuntimeSettingsFromEnv(ctx, cfg.LeaseTTL)
+	if settingsErr != nil {
+		log.Sugar().Warnw("runtime settings unavailable; using environment defaults", "err", settingsErr)
+	} else if runtimeSettings != nil {
+		refreshCtx, refreshCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := runtimeSettings.Refresh(refreshCtx); err != nil {
+			log.Sugar().Warnw("initial runtime settings refresh failed; using last valid values", "err", err)
+		}
+		refreshCancel()
+		binder.WithLeaseTTLSource(runtimeSettings.SandboxLeaseTTL)
+		defer func() {
+			cancel()
+			runtimeSettings.Close()
+		}()
+		go runtimeSettings.Run(ctx, func(err error) {
+			log.Sugar().Warnw("runtime settings refresh failed; keeping last valid values", "err", err)
+		})
+	}
 	capGuard, capErr := orchestrator.NewCapacityGuardFromEnv()
 	if capErr != nil {
 		log.Sugar().Fatalf("init sandbox capacity guard: %v", capErr)

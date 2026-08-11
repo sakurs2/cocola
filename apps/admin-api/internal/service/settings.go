@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	SettingAgentMaxTurns       = "execution.agent_max_turns"
-	SettingToolStepTimeoutSecs = "execution.tool_step_timeout_secs"
+	SettingAgentMaxTurns             = "execution.agent_max_turns"
+	SettingToolStepTimeoutSecs       = "execution.tool_step_timeout_secs"
+	SettingSandboxIdleTimeoutMinutes = "execution.sandbox_idle_timeout_minutes"
 
 	SettingSchedulerEnabled          = "scheduler.enabled"
 	SettingSchedulerPollSecs         = "scheduler.poll_secs"
@@ -67,6 +68,11 @@ func settingDefinitions() []SystemSettingDefinition {
 			Key: SettingToolStepTimeoutSecs, Group: "Execution", Label: "Tool Maximum Runtime",
 			Description: "Hard runtime limit in seconds for one tool execution in the next new Agent Run. Quiet commands remain running until this limit or an explicit Stop.",
 			Kind:        "int", Env: "COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS", Default: 3600, Editable: true, Min: 30, Max: 86400,
+		},
+		{
+			Key: SettingSandboxIdleTimeoutMinutes, Group: "Execution", Label: "Sandbox Idle Timeout (minutes)",
+			Description: "Minutes of inactivity before a Sandbox is reclaimed. Active leases adopt changes within about one minute.",
+			Kind:        "int", Env: "COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES", Default: 30, Editable: true, Min: 5, Max: 1440,
 		},
 		{
 			Key: SettingSchedulerEnabled, Group: "Scheduler", Label: "Scheduler Enabled",

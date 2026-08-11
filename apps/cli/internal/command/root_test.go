@@ -221,6 +221,9 @@ func TestRepeatedInstallPreparesUpgradeWithoutPromptingOrReplacingSecrets(t *tes
 		strings.Contains(output.String(), "Target version") || strings.Contains(output.String(), "Current version") {
 		t.Fatalf("upgrade preparation uses misleading version copy: %q", output.String())
 	}
+	if !strings.HasSuffix(strings.TrimSpace(output.String()), "$ cocola start --ghcr-endpoint ghcr.nju.edu.cn") {
+		t.Fatalf("upgrade output must end with the Mainland China GHCR hint: %q", output.String())
+	}
 	after, err := os.ReadFile(filepath.Join(home, "config.env"))
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +283,7 @@ func TestInstallSummaryHighlightsConfigurationAndNextStep(t *testing.T) {
 		"/tmp/cocola/config.env",
 		"Review the generated configuration file",
 		"$ cocola start",
+		"$ cocola start --ghcr-endpoint ghcr.nju.edu.cn",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("install summary missing %q: %q", expected, output.String())
@@ -287,6 +291,14 @@ func TestInstallSummaryHighlightsConfigurationAndNextStep(t *testing.T) {
 	}
 	if !strings.Contains(errors.String(), "shown only once") {
 		t.Fatalf("install warning missing: %q", errors.String())
+	}
+}
+
+func TestUpToDateInstallSummaryEndsWithChinaProxyHint(t *testing.T) {
+	var output bytes.Buffer
+	printUpgradeSummary(ui.Printer{Out: &output, Err: &bytes.Buffer{}}, config.UpgradeResult{})
+	if !strings.HasSuffix(strings.TrimSpace(output.String()), "$ cocola start --ghcr-endpoint ghcr.nju.edu.cn") {
+		t.Fatalf("up-to-date install output must end with the Mainland China GHCR hint: %q", output.String())
 	}
 }
 

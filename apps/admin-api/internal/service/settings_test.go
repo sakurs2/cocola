@@ -26,12 +26,13 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	if poll.Source != "env" || poll.Value != 45 {
 		t.Fatalf("poll setting = source %q value %#v, want env 45", poll.Source, poll.Value)
 	}
-	if len(settings) != 9 {
-		t.Fatalf("settings count = %d, want 9 runtime settings", len(settings))
+	if len(settings) != 10 {
+		t.Fatalf("settings count = %d, want 10 runtime settings", len(settings))
 	}
 	expected := map[string]bool{
 		SettingAgentMaxTurns:             true,
 		SettingToolStepTimeoutSecs:       true,
+		SettingSandboxIdleTimeoutMinutes: true,
 		SettingSchedulerEnabled:          true,
 		SettingSchedulerPollSecs:         true,
 		SettingSchedulerRunTimeoutSecs:   true,
@@ -48,9 +49,35 @@ func TestSystemSettingsListOnlyIncludesRuntimeSettingsAndReadsEnvDefaults(t *tes
 	if toolTimeout.Source != "env" || toolTimeout.Value != 900 || !toolTimeout.Editable {
 		t.Fatalf("tool timeout setting = %+v, want editable env 900", toolTimeout)
 	}
+	sandboxIdleTimeout := settingByKey(t, settings, SettingSandboxIdleTimeoutMinutes)
+	if sandboxIdleTimeout.Source != "default" || sandboxIdleTimeout.Value != 30 || !sandboxIdleTimeout.Editable {
+		t.Fatalf("sandbox idle timeout setting = %+v, want editable default 30 minutes", sandboxIdleTimeout)
+	}
 	for _, setting := range settings {
 		if !expected[setting.Key] {
 			t.Fatalf("startup-only setting leaked into runtime settings: %s", setting.Key)
+		}
+	}
+}
+
+func TestSandboxIdleTimeoutSettingIsEditableAndBounded(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, time.Now)
+
+	updated, err := svc.UpdateSystemSetting(ctx, SettingSandboxIdleTimeoutMinutes, SystemSettingUpdateInput{
+		Value: 60, Actor: "admin@example.com",
+	})
+	if err != nil {
+		t.Fatalf("update sandbox idle timeout: %v", err)
+	}
+	if updated.Source != "db" || updated.Value != 60 {
+		t.Fatalf("sandbox idle timeout = %+v, want db 60 minutes", updated)
+	}
+	for _, invalid := range []int{4, 1441} {
+		if _, err := svc.UpdateSystemSetting(ctx, SettingSandboxIdleTimeoutMinutes, SystemSettingUpdateInput{
+			Value: invalid, ExpectedVersion: updated.Version,
+		}); !errors.Is(err, ErrInvalidArg) {
+			t.Fatalf("sandbox idle timeout %d error = %v, want invalid argument", invalid, err)
 		}
 	}
 }

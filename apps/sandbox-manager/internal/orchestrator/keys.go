@@ -20,7 +20,7 @@ const keyPrefix = "cocola:sb:"
 //   - lockTTL:        safety cap on the per-session create lock so a crashed
 //     holder cannot wedge a session forever.
 const (
-	DefaultLeaseTTL = 10 * time.Minute
+	DefaultLeaseTTL = 30 * time.Minute
 	// OpenSandbox create calls may spend up to four minutes pulling an image and
 	// waiting for Kubernetes. CAS binding remains the final fencing boundary, but
 	// a five-minute lock avoids routinely creating a loser during a cold start.

@@ -146,6 +146,7 @@ func printUpgradeSummary(printer ui.Printer, result config.UpgradeResult) {
 		printer.Success("Cocola deployment configuration is already up to date.")
 		printer.Info("Start or resume Cocola with:")
 		printer.Command("cocola start")
+		printChinaGHCRHint(printer)
 		return
 	}
 	printer.Success("Cocola deployment update is ready.")
@@ -165,6 +166,7 @@ func printUpgradeSummary(printer ui.Printer, result config.UpgradeResult) {
 	printer.Info("Your ports, administrator account, secrets, and custom settings were preserved.")
 	printer.Info("Apply the deployment update and run health checks with:")
 	printer.Command("cocola start")
+	printChinaGHCRHint(printer)
 }
 
 func (a *application) runInstallForm(options *config.Options) error {
@@ -266,6 +268,10 @@ func printInstallSummary(printer ui.Printer, result installResult) {
 	printer.Path(result.ConfigFile)
 	printer.Info("When you are ready, start all services with:")
 	printer.Command("cocola start")
+	printChinaGHCRHint(printer)
+}
+
+func printChinaGHCRHint(printer ui.Printer) {
 	printer.Info("Mainland China users can accelerate GHCR downloads with:")
 	printer.Command("cocola start --ghcr-endpoint ghcr.nju.edu.cn")
 }

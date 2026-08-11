@@ -118,6 +118,34 @@ func TestComposeConfiguresGatewayTerminalResolver(t *testing.T) {
 	}
 }
 
+func TestComposeUsesHostMappedOpenSandboxEndpoints(t *testing.T) {
+	sandboxStart := bytes.Index(Compose, []byte("  sandbox-manager:\n"))
+	sandboxEnd := bytes.Index(Compose, []byte("  host-agent:\n"))
+	if sandboxStart < 0 || sandboxEnd <= sandboxStart {
+		t.Fatal("production compose sandbox-manager service block is missing")
+	}
+	sandboxManager := Compose[sandboxStart:sandboxEnd]
+	for _, required := range [][]byte{
+		[]byte(`COCOLA_OPENSANDBOX_DIRECT_EXEC: "1"`),
+		[]byte(`COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES: "${COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES:-30}"`),
+		[]byte("host.docker.internal:host-gateway"),
+	} {
+		if !bytes.Contains(sandboxManager, required) {
+			t.Fatalf("sandbox-manager must use the Docker host-mapped OpenSandbox endpoint: missing %q", required)
+		}
+	}
+
+	gatewayStart := bytes.Index(Compose, []byte("  gateway:\n"))
+	gatewayEnd := bytes.Index(Compose, []byte("  web:\n"))
+	if gatewayStart < 0 || gatewayEnd <= gatewayStart {
+		t.Fatal("production compose gateway service block is missing")
+	}
+	gateway := Compose[gatewayStart:gatewayEnd]
+	if !bytes.Contains(gateway, []byte("host.docker.internal:host-gateway")) {
+		t.Fatal("gateway must resolve host-mapped OpenSandbox Preview and Terminal endpoints")
+	}
+}
+
 func TestComposeAuthenticatesPostgreSQLHealthChecks(t *testing.T) {
 	for _, required := range [][]byte{
 		[]byte("PGPASSWORD=$$POSTGRES_PASSWORD"),

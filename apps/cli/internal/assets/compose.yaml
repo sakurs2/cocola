@@ -203,8 +203,14 @@ services:
       COCOLA_OPENSANDBOX_URL: "${COCOLA_OPENSANDBOX_URL}"
       COCOLA_OPENSANDBOX_HTTP_TIMEOUT: "240s"
       COCOLA_OPENSANDBOX_EXEC_TIMEOUT: "1h"
+      # OpenSandbox creates sibling containers on Docker's built-in bridge,
+      # while this control plane runs on the Compose network. Linux isolates
+      # those networks, so use the host-mapped endpoint instead
+      # of asking the server proxy to dial the sandbox's private bridge IP.
+      COCOLA_OPENSANDBOX_DIRECT_EXEC: "1"
       COCOLA_SANDBOX_ROOT: "${COCOLA_SANDBOX_ROOT}"
       COCOLA_SANDBOX_VOLUME_BACKEND: host
+      COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES: "${COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES:-30}"
       COCOLA_SESSION_VOLUME_SIZE: "${COCOLA_SESSION_VOLUME_SIZE}"
       COCOLA_SANDBOX_IMAGE: "${COCOLA_IMAGE_REGISTRY}/cocola-sandbox-runtime:${COCOLA_VERSION}"
       COCOLA_SANDBOX_PROFILE: "${COCOLA_SANDBOX_PROFILE:-coding}"
@@ -318,6 +324,7 @@ services:
       COCOLA_SESSION_VOLUME_SIZE: "${COCOLA_SESSION_VOLUME_SIZE}"
       COCOLA_AGENT_MAX_TURNS: "${COCOLA_AGENT_MAX_TURNS:-200}"
       COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS: "${COCOLA_AGENT_TOOL_STEP_TIMEOUT_SECS:-600}"
+      COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES: "${COCOLA_SANDBOX_IDLE_TIMEOUT_MINUTES:-30}"
       COCOLA_BOOTSTRAP_ADMIN_USERNAME: "${COCOLA_BOOTSTRAP_ADMIN_USERNAME}"
       COCOLA_BOOTSTRAP_ADMIN_EMAIL: "${COCOLA_BOOTSTRAP_ADMIN_EMAIL}"
       COCOLA_BOOTSTRAP_ADMIN_PASSWORD: "${COCOLA_BOOTSTRAP_ADMIN_PASSWORD}"
@@ -420,6 +427,10 @@ services:
       COCOLA_SKILL_PUBLISH_ENABLED: "${COCOLA_SKILL_PUBLISH_ENABLED:-false}"
     volumes:
       - "${COCOLA_HOME}/secrets:/run/secrets:ro"
+    # Direct OpenSandbox endpoints use the portable host-gateway alias. This
+    # covers Preview and Terminal in addition to sandbox-manager Exec calls.
+    extra_hosts:
+      - host.docker.internal:host-gateway
     ports:
       - "${COCOLA_GATEWAY_HOST_PORT}:8080"
     healthcheck:
