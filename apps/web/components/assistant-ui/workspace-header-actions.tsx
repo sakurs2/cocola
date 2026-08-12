@@ -1,19 +1,23 @@
 "use client";
 
 import { Button, Tooltip } from "@heroui/react";
+import { useTranslations } from "next-intl";
 
 import { WorkspaceThemeToggle } from "@/components/assistant-ui/workspace-theme-toggle";
+import { LanguageMenu } from "@/components/i18n/language-menu";
 
 const COCOLA_GITHUB_URL = "https://github.com/sakurs2/cocola";
-const GITHUB_LINK_LABEL = "Go to GitHub page";
-
 export function WorkspaceHeaderActions() {
+  const t = useTranslations("common");
+  const githubLabel = t("githubPage");
+
   return (
     <div className="flex shrink-0 items-center gap-1">
+      <LanguageMenu />
       <Tooltip delay={0}>
         <Button
           isIconOnly
-          aria-label={GITHUB_LINK_LABEL}
+          aria-label={githubLabel}
           className="shrink-0"
           size="sm"
           variant="ghost"
@@ -21,7 +25,7 @@ export function WorkspaceHeaderActions() {
         >
           <GitHubIcon className="size-4" />
         </Button>
-        <Tooltip.Content placement="bottom end">{GITHUB_LINK_LABEL}</Tooltip.Content>
+        <Tooltip.Content placement="bottom end">{githubLabel}</Tooltip.Content>
       </Tooltip>
       <WorkspaceThemeToggle />
     </div>

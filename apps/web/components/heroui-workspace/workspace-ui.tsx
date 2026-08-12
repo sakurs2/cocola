@@ -5,6 +5,7 @@ import { Button, Card, SearchField } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
 export function WorkspacePageFrame({ children }: { children: ReactNode }) {
@@ -196,12 +197,13 @@ export function WorkspaceEntitySheet({
   title?: string;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("common.dialog");
   return (
     <Sheet isOpen={isOpen} placement="right" onOpenChange={onOpenChange}>
       <Sheet.Backdrop>
         <Sheet.Content className="w-full md:w-[480px]">
           <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close details" />
+            <Sheet.CloseTrigger aria-label={t("closeDetails")} />
             <Sheet.Header>
               <Sheet.Heading>{title}</Sheet.Heading>
               {description ? <p className="text-muted text-sm leading-6">{description}</p> : null}

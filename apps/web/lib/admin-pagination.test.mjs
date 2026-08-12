@@ -18,11 +18,11 @@ const sandboxesSource = readFileSync(
 );
 test("admin collections use the shared visible pagination control", () => {
   assert.match(adminUISource, /export function AdminPagination/);
-  assert.match(adminUISource, /Previous page of \$\{label\}/);
-  assert.match(adminUISource, /Next page of \$\{label\}/);
-  assert.match(skillsSource, /<AdminPagination[\s\S]*label="skills"/);
-  assert.match(runsSource, /<AdminPagination[\s\S]*label="runs"/);
-  assert.match(storageSource, /<AdminPagination[\s\S]*label="volumes"/);
+  assert.match(adminUISource, /aria-label=\{t\("previousAria", \{ label \}\)\}/);
+  assert.match(adminUISource, /aria-label=\{t\("nextAria", \{ label \}\)\}/);
+  assert.match(skillsSource, /<AdminPagination[\s\S]*label=\{t\("pagination"\)\}/);
+  assert.match(runsSource, /<AdminPagination[\s\S]*label=\{t\("paginationLabel"\)\}/);
+  assert.match(storageSource, /<AdminPagination[\s\S]*label=\{t\("sessions\.paginationLabel"\)\}/);
 });
 
 test("admin Skills and Session Storage request bounded server pages", () => {
@@ -31,7 +31,10 @@ test("admin Skills and Session Storage request bounded server pages", () => {
   assert.match(storageSource, /const SESSION_STORAGE_PAGE_SIZE = 25/);
   assert.match(storageSource, /offset: String\(volumePage \* SESSION_STORAGE_PAGE_SIZE\)/);
   assert.match(storageSource, /requested_bytes/);
-  assert.match(storageSource, /<AdminPagination[\s\S]*total=\{volumeTotal\}[\s\S]*label="volumes"/);
+  assert.match(
+    storageSource,
+    /<AdminPagination[\s\S]*total=\{volumeTotal\}[\s\S]*label=\{t\("sessions\.paginationLabel"\)\}/,
+  );
 });
 
 test("Agent Runs fetch one lookahead row so exact full pages cannot open an empty next page", () => {
@@ -49,10 +52,13 @@ test("destructive admin actions use product dialogs instead of browser confirmat
 
 test("Session Storage supports explicit row cleanup and safe bulk orphan deletion", () => {
   assert.match(storageSource, /volume\.delete_allowed && !missing/);
-  assert.match(storageSource, /label: missing \? "Clean stale binding" : "Delete orphan volume"/);
+  assert.match(
+    storageSource,
+    /label: missing \? t\("actions\.cleanBinding"\) : t\("actions\.deleteOrphanVolume"\)/,
+  );
   assert.match(storageSource, /if \(action === "delete"\) setPendingDelete\(volume\)/);
   assert.match(storageSource, /fetch\("\/api\/admin\/session-storage\/orphans"/);
-  assert.match(storageSource, /Delete orphans \(\{orphanCount\}\)/);
-  assert.match(storageSource, /Active Session Volumes are not affected/);
+  assert.match(storageSource, /t\("actions\.deleteOrphans", \{ count: orphanCount \}\)/);
+  assert.match(storageSource, /t\("confirm\.bulkDescription"\)/);
   assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed/);
 });

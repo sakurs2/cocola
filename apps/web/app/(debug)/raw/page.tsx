@@ -14,9 +14,11 @@
 // a raw event log. The real UI is a later milestone.
 
 import { useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { parseFrames, type AgentEvent } from "@/lib/sse";
 
 export default function Home() {
+  const t = useTranslations("common.rawDebug");
   const [token, setToken] = useState("");
   const [prompt, setPrompt] = useState("hello from cocola");
   const [sessionId, setSessionId] = useState("s1");
@@ -40,7 +42,7 @@ export default function Home() {
         body: JSON.stringify({ prompt, session_id: sessionId }),
         signal: ctrl.signal,
       });
-      if (!res.body) throw new Error("no response body");
+      if (!res.body) throw new Error(t("noResponseBody"));
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -69,24 +71,22 @@ export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-6 py-10">
       <header>
-        <h1 className="text-2xl font-semibold">cocola — chat test tool</h1>
-        <p className="text-sm text-neutral-500">
-          Dev-only client for the gateway SSE path. Not the product UI.
-        </p>
+        <h1 className="text-2xl font-semibold">{t("title")}</h1>
+        <p className="text-sm text-neutral-500">{t("description")}</p>
       </header>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="flex flex-col text-sm">
-          <span className="text-neutral-600">Bearer token</span>
+          <span className="text-neutral-600">{t("bearerToken")}</span>
           <input
             className="rounded border border-neutral-300 px-2 py-1 font-mono text-xs"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            placeholder="cocola-issued token (blank if auth disabled)"
+            placeholder={t("tokenPlaceholder")}
           />
         </label>
         <label className="flex flex-col text-sm">
-          <span className="text-neutral-600">Session ID</span>
+          <span className="text-neutral-600">{t("sessionId")}</span>
           <input
             className="rounded border border-neutral-300 px-2 py-1 font-mono text-xs"
             value={sessionId}
@@ -96,7 +96,7 @@ export default function Home() {
       </div>
 
       <label className="flex flex-col text-sm">
-        <span className="text-neutral-600">Prompt</span>
+        <span className="text-neutral-600">{t("prompt")}</span>
         <textarea
           className="min-h-20 rounded border border-neutral-300 px-2 py-1"
           value={prompt}
@@ -110,21 +110,21 @@ export default function Home() {
           onClick={send}
           disabled={running}
         >
-          {running ? "Streaming…" : "Send"}
+          {running ? t("streaming") : t("send")}
         </button>
         <button
           className="rounded border border-neutral-300 px-4 py-1.5 text-sm disabled:opacity-50"
           onClick={stop}
           disabled={!running}
         >
-          Stop
+          {t("stop")}
         </button>
       </div>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-neutral-600">Event stream</h2>
+        <h2 className="text-sm font-medium text-neutral-600">{t("eventStream")}</h2>
         {events.length === 0 ? (
-          <p className="text-sm text-neutral-400">No events yet.</p>
+          <p className="text-sm text-neutral-400">{t("noEvents")}</p>
         ) : (
           <ol className="flex flex-col gap-1">
             {events.map((ev, i) => (
@@ -145,6 +145,7 @@ export default function Home() {
 // Render the most useful field per event kind; fall back to raw JSON so unknown
 // kinds are still observable (the whole point of a test tool).
 function EventBody({ ev }: { ev: AgentEvent }) {
+  const t = useTranslations("common.rawDebug");
   const d = ev.data ?? {};
   if (ev.kind === "text") return <span>{d.text}</span>;
   if (ev.kind === "thinking") return <span className="text-neutral-500 italic">{d.thinking}</span>;
@@ -152,7 +153,7 @@ function EventBody({ ev }: { ev: AgentEvent }) {
   if (ev.kind === "sandbox")
     return (
       <span className="text-neutral-600 font-mono text-xs">
-        {d.sandbox_id} ({d.endpoint}) reused={d.reused}
+        {d.sandbox_id} ({d.endpoint}) {t("reused")}={d.reused}
       </span>
     );
   if (Object.keys(d).length === 0) return null;

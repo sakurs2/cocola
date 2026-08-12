@@ -3,6 +3,7 @@
 import { Button, Card } from "@heroui/react";
 import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import {
   WorkspacePageFrame,
@@ -20,12 +21,14 @@ type GitHubConnection = {
 type ConnectionLoadState = "checking" | "ready" | "failed";
 
 export default function ConnectorsPage() {
+  const t = useTranslations("connectors");
+  const copy = connectorCopy(t);
   const [connection, setConnection] = useState<GitHubConnection | null>(null);
   const [loadState, setLoadState] = useState<ConnectionLoadState>("checking");
   const [busy, setBusy] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [error, setError] = useState("");
-  const displayState = githubConnectionState(connection, loadState);
+  const displayState = githubConnectionState(connection, loadState, copy);
 
   const load = useCallback(async () => {
     setLoadState("checking");
@@ -61,7 +64,7 @@ export default function ConnectorsPage() {
         manifest?: Record<string, unknown>;
       };
       if (!result.registration_url || !result.state || !result.manifest) {
-        throw new Error("GitHub registration response was incomplete");
+        throw new Error(t("registrationIncomplete"));
       }
       sessionStorage.setItem("cocola.github.manifest.state", result.state);
       const form = document.createElement("form");
@@ -103,14 +106,15 @@ export default function ConnectorsPage() {
     register,
     disconnect,
     setDisconnectOpen,
+    copy,
   });
 
   return (
     <WorkspacePageFrame>
       <WorkspacePageHeader
-        description="Connect external services to power your agents."
+        description={t("description")}
         icon={<ShieldCheck className="size-5" />}
-        title="Connectors"
+        title={t("title")}
       />
 
       {error ? (
@@ -127,7 +131,7 @@ export default function ConnectorsPage() {
               <span className="min-w-0">
                 <span className="text-foreground block font-semibold">GitHub</span>
                 <span className="text-muted mt-1 block truncate text-sm">
-                  Repositories and agent tools
+                  {t("githubDescription")}
                 </span>
               </span>
             </div>
@@ -151,12 +155,12 @@ export default function ConnectorsPage() {
 
       <ActionConfirmDialog
         busy={busy}
-        confirmLabel="Disconnect GitHub"
-        description="Existing Projects remain available, but Cocola will no longer be able to access their GitHub repositories. You can reconnect the GitHub App later."
+        confirmLabel={t("disconnectConfirm")}
+        description={t("disconnectDescription")}
         error={error || null}
         icon={Trash2}
         open={disconnectOpen}
-        title="Disconnect GitHub?"
+        title={t("disconnectTitle")}
         tone="danger"
         onConfirm={() => void disconnect()}
         onOpenChange={setDisconnectOpen}
@@ -173,6 +177,7 @@ function connectorAction({
   register,
   disconnect,
   setDisconnectOpen,
+  copy,
 }: {
   busy: boolean;
   connection: GitHubConnection | null;
@@ -181,12 +186,13 @@ function connectorAction({
   register: () => Promise<void>;
   disconnect: () => Promise<void>;
   setDisconnectOpen: (open: boolean) => void;
+  copy: ConnectorCopy;
 }) {
   if (!connection && loadState === "checking") {
     return {
       disabled: true,
       icon: <Loader2 className="size-4 animate-spin" />,
-      label: "Checking…",
+      label: copy.checking,
       onPress: undefined,
       outline: false,
     };
@@ -195,27 +201,33 @@ function connectorAction({
     return {
       disabled: false,
       icon: <RefreshCw className="size-4" />,
-      label: "Retry",
+      label: copy.retry,
       onPress: () => void load(),
       outline: true,
     };
   }
   if (connection?.status === "disabled") {
-    return { disabled: true, icon: null, label: "Unavailable", onPress: undefined, outline: false };
+    return {
+      disabled: true,
+      icon: null,
+      label: copy.unavailable,
+      onPress: undefined,
+      outline: false,
+    };
   }
   if (connection?.status === "installation_required") {
     return connection.installation_url
       ? {
           disabled: false,
           icon: <ExternalLink className="size-4" />,
-          label: "Continue on GitHub",
+          label: copy.continueGithub,
           onPress: () => window.location.assign(connection.installation_url!),
           outline: false,
         }
       : {
           disabled: true,
           icon: null,
-          label: "Installation unavailable",
+          label: copy.installationUnavailable,
           onPress: undefined,
           outline: false,
         };
@@ -224,7 +236,7 @@ function connectorAction({
     return {
       disabled: busy,
       icon: busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />,
-      label: `Disconnect${connection.external_login ? ` @${connection.external_login}` : ""}`,
+      label: `${copy.disconnect}${connection.external_login ? ` @${connection.external_login}` : ""}`,
       onPress: () => setDisconnectOpen(true),
       outline: true,
     };
@@ -233,7 +245,7 @@ function connectorAction({
     return {
       disabled: busy,
       icon: busy ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon className="size-4" />,
-      label: "Reconnect",
+      label: copy.reconnect,
       onPress: () => void register(),
       outline: false,
     };
@@ -242,7 +254,7 @@ function connectorAction({
     return {
       disabled: busy,
       icon: busy ? <Loader2 className="size-4 animate-spin" /> : <GitHubIcon className="size-4" />,
-      label: "Register on GitHub",
+      label: copy.registerGithub,
       onPress: () => void register(),
       outline: false,
     };
@@ -250,7 +262,7 @@ function connectorAction({
   return {
     disabled: busy,
     icon: <RefreshCw className="size-4" />,
-    label: "Refresh",
+    label: copy.refresh,
     onPress: () => void load(),
     outline: true,
   };
@@ -259,35 +271,68 @@ function connectorAction({
 function githubConnectionState(
   connection: GitHubConnection | null,
   loadState: ConnectionLoadState,
+  copy: ConnectorCopy,
 ) {
   if (!connection) {
     return loadState === "failed"
-      ? { label: "Connection check failed", dot: "bg-danger", text: "text-danger" }
-      : { label: "Checking connection", dot: "bg-warning animate-pulse", text: "text-foreground" };
+      ? { label: copy.connectionCheckFailed, dot: "bg-danger", text: "text-danger" }
+      : {
+          label: copy.checkingConnection,
+          dot: "bg-warning animate-pulse",
+          text: "text-foreground",
+        };
   }
   const states: Record<string, { label: string; dot: string; text: string }> = {
-    disabled: { label: "Unavailable", dot: "bg-surface-secondary", text: "text-muted" },
+    disabled: { label: copy.unavailable, dot: "bg-surface-secondary", text: "text-muted" },
     not_configured: {
-      label: "Not connected",
+      label: copy.notConnected,
       dot: "bg-surface-secondary",
       text: "text-foreground",
     },
-    error: { label: "Connection error", dot: "bg-danger", text: "text-danger" },
-    installation_required: { label: "Setup required", dot: "bg-warning", text: "text-foreground" },
-    ready: { label: "Connected", dot: "bg-success", text: "text-success" },
+    error: { label: copy.connectionError, dot: "bg-danger", text: "text-danger" },
+    installation_required: {
+      label: copy.setupRequired,
+      dot: "bg-warning",
+      text: "text-foreground",
+    },
+    ready: { label: copy.connected, dot: "bg-success", text: "text-success" },
     reauthorization_required: {
-      label: "Reconnect required",
+      label: copy.reconnectRequired,
       dot: "bg-warning",
       text: "text-foreground",
     },
   };
   return (
     states[connection.status] ?? {
-      label: "Status unavailable",
+      label: copy.statusUnavailable,
       dot: "bg-surface-secondary",
       text: "text-muted",
     }
   );
+}
+
+type ConnectorCopy = ReturnType<typeof connectorCopy>;
+
+function connectorCopy(t: ReturnType<typeof useTranslations<"connectors">>) {
+  return {
+    checking: t("checking"),
+    retry: t("retry"),
+    unavailable: t("unavailable"),
+    continueGithub: t("continueGithub"),
+    installationUnavailable: t("installationUnavailable"),
+    disconnect: t("disconnect"),
+    reconnect: t("reconnect"),
+    registerGithub: t("registerGithub"),
+    refresh: t("refresh"),
+    connectionCheckFailed: t("connectionCheckFailed"),
+    checkingConnection: t("checkingConnection"),
+    notConnected: t("notConnected"),
+    connectionError: t("connectionError"),
+    setupRequired: t("setupRequired"),
+    connected: t("connected"),
+    reconnectRequired: t("reconnectRequired"),
+    statusUnavailable: t("statusUnavailable"),
+  };
 }
 
 function GitHubIcon({ className }: { className?: string }) {

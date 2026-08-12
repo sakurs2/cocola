@@ -51,11 +51,9 @@ export type AdminThemeKey =
   | "violet";
 
 export type AdminSection = {
-  description: string;
   icon: LucideIcon;
   iconClassName: string;
   id: AdminSectionId;
-  label: string;
   path: string;
   theme: AdminThemeKey;
 };
@@ -85,8 +83,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "overview",
     path: "",
-    label: "Overview",
-    description: "Health, attention queue, and recent control-plane activity.",
     icon: ShieldCheck,
     iconClassName: "text-blue-600",
     theme: "blue",
@@ -94,8 +90,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "users",
     path: "users",
-    label: "Users",
-    description: "Whitelist accounts, roles, teams, and account state.",
     icon: Users,
     iconClassName: "text-blue-600",
     theme: "blue",
@@ -103,8 +97,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "models",
     path: "models",
-    label: "Models",
-    description: "Providers, routes, credentials, and default models.",
     icon: Cpu,
     iconClassName: "text-violet-600",
     theme: "violet",
@@ -112,8 +104,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "skills",
     path: "skills",
-    label: "Skills",
-    description: "Shared capabilities installed for agents.",
     icon: Sparkles,
     iconClassName: "text-amber-500",
     theme: "amber",
@@ -121,8 +111,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "mcps",
     path: "mcps",
-    label: "MCP Servers",
-    description: "Runtime tool servers and transport availability.",
     icon: Plug,
     iconClassName: "text-orange-600",
     theme: "orange",
@@ -130,8 +118,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "toolbox",
     path: "toolbox",
-    label: "Toolbox",
-    description: "Small global controls, including the system prompt.",
     icon: Wrench,
     iconClassName: "text-cyan-600",
     theme: "cyan",
@@ -139,8 +125,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "tasks",
     path: "scheduled-tasks",
-    label: "Tasks",
-    description: "Schedules, ownership, and recent task outcomes.",
     icon: Clock3,
     iconClassName: "text-green-600",
     theme: "green",
@@ -148,8 +132,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "runs",
     path: "audit",
-    label: "Agent Runs",
-    description: "Conversation runs, traces, timing, and failures.",
     icon: FileText,
     iconClassName: "text-indigo-600",
     theme: "indigo",
@@ -157,8 +139,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "usage",
     path: "token-usage",
-    label: "Token Usage",
-    description: "Token totals, trends, ranked users, and exports.",
     icon: BarChart3,
     iconClassName: "text-rose-600",
     theme: "rose",
@@ -166,8 +146,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "sandboxes",
     path: "sandboxes",
-    label: "Sandboxes",
-    description: "Active sandboxes, owners, bindings, and lifecycle.",
     icon: Layers,
     iconClassName: "text-teal-600",
     theme: "teal",
@@ -175,8 +153,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "nodes",
     path: "sandbox-nodes",
-    label: "Nodes",
-    description: "Node health, pod capacity, and placement controls.",
     icon: Server,
     iconClassName: "text-sky-600",
     theme: "sky",
@@ -184,8 +160,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "storage",
     path: "storage",
-    label: "Storage",
-    description: "Disk headroom, session volumes, and orphan cleanup.",
     icon: HardDrive,
     iconClassName: "text-purple-600",
     theme: "purple",
@@ -193,8 +167,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "architecture",
     path: "architecture",
-    label: "Architecture",
-    description: "Service topology, dependencies, and component health.",
     icon: Database,
     iconClassName: "text-fuchsia-600",
     theme: "fuchsia",
@@ -202,8 +174,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "logs",
     path: "component-logs",
-    label: "Service Logs",
-    description: "Recent output from Cocola runtime services.",
     icon: SquareTerminal,
     iconClassName: "text-slate-600",
     theme: "slate",
@@ -211,8 +181,6 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
     id: "settings",
     path: "settings",
-    label: "Settings",
-    description: "Configuration sources and hot-reloadable controls.",
     icon: Settings,
     iconClassName: "text-slate-500",
     theme: "slate",
@@ -220,14 +188,17 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
 ] as const;
 
 export const ADMIN_GROUPS = [
-  { label: "Configuration", sectionIds: ["users", "models", "skills", "mcps", "toolbox"] },
-  { label: "Operations", sectionIds: ["tasks", "runs", "usage"] },
   {
-    label: "Infrastructure",
+    id: "configuration",
+    sectionIds: ["users", "models", "skills", "mcps", "toolbox"],
+  },
+  { id: "operations", sectionIds: ["tasks", "runs", "usage"] },
+  {
+    id: "infrastructure",
     sectionIds: ["sandboxes", "nodes", "storage", "architecture", "logs"],
   },
 ] as const satisfies readonly {
-  label: string;
+  id: "configuration" | "operations" | "infrastructure";
   sectionIds: readonly AdminSectionId[];
 }[];
 

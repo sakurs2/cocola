@@ -1,0 +1,1068 @@
+{
+  "shell": {
+    "title": "cocola admin",
+    "subtitle": "control plane",
+    "topbar": "Control plane",
+    "navigation": "Cocola admin navigation",
+    "mobileNavigation": "Cocola admin mobile navigation",
+    "overviewNavigation": "Admin overview",
+    "settingsNavigation": "Admin settings",
+    "workspaceNavigation": "Workspace navigation",
+    "backToWorkspace": "Back to workspace"
+  },
+  "groups": {
+    "configuration": "Configuration",
+    "operations": "Operations",
+    "infrastructure": "Infrastructure"
+  },
+  "overview": { "open": "Open" },
+  "shared": {
+    "horizontalScrollbar": "Horizontal table scrollbar",
+    "copyValue": "Copy {value}",
+    "copiedValue": "{value} copied",
+    "operationFailed": "Operation failed",
+    "operationFailedDescription": "Cocola could not complete the requested admin operation.",
+    "tryAgain": "Try again",
+    "close": "Close"
+  },
+  "sections": {
+    "overview": {
+      "label": "Overview",
+      "description": "Health, attention queue, and recent control-plane activity."
+    },
+    "users": {
+      "label": "Users",
+      "description": "Whitelist accounts, roles, teams, and account state."
+    },
+    "models": {
+      "label": "Models",
+      "description": "Providers, routes, credentials, and default models."
+    },
+    "skills": { "label": "Skills", "description": "Shared capabilities installed for agents." },
+    "mcps": {
+      "label": "MCP Servers",
+      "description": "Runtime tool servers and transport availability."
+    },
+    "toolbox": {
+      "label": "Toolbox",
+      "description": "Small global controls, including the system prompt."
+    },
+    "tasks": { "label": "Tasks", "description": "Schedules, ownership, and recent task outcomes." },
+    "runs": {
+      "label": "Agent Runs",
+      "description": "Conversation runs, traces, timing, and failures."
+    },
+    "usage": {
+      "label": "Token Usage",
+      "description": "Token totals, trends, ranked users, and exports."
+    },
+    "sandboxes": {
+      "label": "Sandboxes",
+      "description": "Active sandboxes, owners, bindings, and lifecycle."
+    },
+    "nodes": {
+      "label": "Nodes",
+      "description": "Node health, pod capacity, and placement controls."
+    },
+    "storage": {
+      "label": "Storage",
+      "description": "Disk headroom, session volumes, and orphan cleanup."
+    },
+    "architecture": {
+      "label": "Architecture",
+      "description": "Service topology, dependencies, and component health."
+    },
+    "logs": {
+      "label": "Service Logs",
+      "description": "Recent output from Cocola runtime services."
+    },
+    "settings": {
+      "label": "Settings",
+      "description": "Configuration sources and hot-reloadable controls."
+    }
+  },
+  "pagination": {
+    "range": "{start}–{end} of {total} {label}",
+    "rangeUnknown": "{start}–{end} {label}",
+    "page": "Page {page}",
+    "pageOf": "Page {page} of {total}",
+    "previous": "Previous",
+    "next": "Next",
+    "previousAria": "Previous page of {label}",
+    "nextAria": "Next page of {label}"
+  },
+  "architecture": {
+    "title": "Architecture",
+    "description": "System topology and health states for the current Cocola deployment.",
+    "refresh": "Refresh",
+    "loadFailed": "Could not load architecture",
+    "generated": "Generated {time}",
+    "loadingGraph": "Loading graph",
+    "loading": "Loading architecture…",
+    "other": "Other",
+    "closeDetails": "Close component details",
+    "componentStatus": "Component status",
+    "close": "Close",
+    "currentStatus": "Current status",
+    "openAdmin": "Open in admin",
+    "externalConsole": "External console",
+    "layers": {
+      "Client / UI": "Client / UI",
+      "Control Plane": "Control Plane",
+      "Runtime Plane": "Runtime Plane",
+      "Sandbox Plane": "Sandbox Plane",
+      "Infrastructure": "Infrastructure"
+    },
+    "status": {
+      "healthy": "Healthy",
+      "degraded": "Degraded",
+      "unhealthy": "Unhealthy",
+      "unknown": "Unknown"
+    }
+  },
+  "logs": {
+    "title": "Service Logs",
+    "description": "Recent output from Cocola's core runtime services",
+    "refresh": "Refresh component logs",
+    "refreshAction": "Refresh",
+    "service": "Service",
+    "noServices": "No component logs",
+    "lines": "Lines",
+    "load": "Load",
+    "loadFailed": "Could not load component logs",
+    "logs": "Logs",
+    "lineCount": "{count, plural, one {# line} other {# lines}}",
+    "loading": "Loading",
+    "copyLoaded": "Copy loaded logs",
+    "copy": "Copy logs",
+    "copied": "Copied",
+    "empty": "No component log lines"
+  },
+  "runs": {
+    "title": "Agent Runs",
+    "description": "One safe metadata record for every user–agent run. Chat content stays in its conversation.",
+    "refresh": "Refresh",
+    "searchAria": "Search conversation runs",
+    "searchPlaceholder": "Search user, conversation, or trace ID",
+    "resultFilter": "Run result",
+    "sourceFilter": "Run source",
+    "from": "From",
+    "until": "Until",
+    "loadFailed": "Could not load agent runs",
+    "tableAria": "Agent runs",
+    "paginationLabel": "runs",
+    "untitled": "Untitled conversation",
+    "defaultModel": "Default",
+    "open": "Open",
+    "columns": {
+      "started": "Started",
+      "user": "User",
+      "conversation": "Conversation",
+      "source": "Source",
+      "model": "Model",
+      "latency": "Latency",
+      "result": "Result",
+      "traceId": "Trace ID"
+    },
+    "copy": {
+      "user": "user",
+      "conversationTitle": "conversation title",
+      "conversationId": "conversation ID",
+      "model": "model name",
+      "errorCode": "error code",
+      "traceId": "trace ID"
+    },
+    "sources": {
+      "all": "All sources",
+      "interactive": "Interactive",
+      "scheduled": "Scheduled task",
+      "scheduledShort": "Scheduled"
+    },
+    "statuses": {
+      "all": "All",
+      "running": "Running",
+      "success": "Success",
+      "error": "Error",
+      "cancelled": "Cancelled",
+      "interrupted": "Interrupted",
+      "unknown": "Unknown"
+    },
+    "latency": { "total": "Total {duration}" },
+    "empty": {
+      "loadingTitle": "Loading agent runs",
+      "title": "No agent runs found",
+      "loadingDescription": "Fetching run metadata…",
+      "description": "Conversation runs will appear after a user sends a message or a scheduled task executes."
+    }
+  },
+  "settingsPage": {
+    "title": "Settings",
+    "description": "Runtime settings with environment defaults and database overrides",
+    "refresh": "Refresh settings",
+    "refreshAction": "Refresh",
+    "operationFailed": "Settings operation failed",
+    "loading": "Loading settings",
+    "settingCount": "{count, plural, one {# setting} other {# settings}}",
+    "saved": "{setting} saved",
+    "resetDone": "{setting} reset to startup default",
+    "defaultValue": "Default: {value}",
+    "fieldValue": "{label} value",
+    "fieldUnit": "{label} unit",
+    "saveNamed": "Save {setting}",
+    "save": "Save",
+    "saveTooltip": "Save this value as a database override",
+    "revertNamed": "Revert {setting}",
+    "resetNamed": "Reset {setting}",
+    "revert": "Revert",
+    "reset": "Reset",
+    "revertTooltip": "Discard the unsaved change",
+    "resetTooltip": "Remove the database override",
+    "readOnly": "Read only",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "groups": {
+      "execution": "Execution",
+      "scheduler": "Scheduler",
+      "storage": "Storage",
+      "observability": "Observability"
+    },
+    "source": { "db": "DB override", "env": "Environment", "default": "Default" },
+    "copy": { "settingKey": "setting key", "environmentVariable": "environment variable" },
+    "confirmReset": {
+      "title": "Reset override?",
+      "description": "{setting} will return to its startup default. The expected version is checked before reset.",
+      "thisSetting": "This setting",
+      "action": "Reset override"
+    },
+    "definitions": {
+      "agentMaxTurns": {
+        "label": "Agent Max Turns",
+        "description": "Maximum model turns for the next new Agent Run. Client requests may choose a lower value."
+      },
+      "toolMaximumRuntime": {
+        "label": "Tool Maximum Runtime",
+        "description": "Hard runtime limit in seconds for one tool execution in the next new Agent Run. Quiet commands remain running until this limit or an explicit Stop."
+      },
+      "sandboxIdleTimeout": {
+        "label": "Sandbox Idle Timeout (minutes)",
+        "description": "Minutes of inactivity before a Sandbox is reclaimed. Active leases adopt changes within about one minute."
+      },
+      "schedulerEnabled": {
+        "label": "Scheduler Enabled",
+        "description": "Pause or resume due-task execution while the scheduler worker is running."
+      },
+      "pollInterval": {
+        "label": "Poll Interval",
+        "description": "Seconds between due-task scans."
+      },
+      "runTimeout": {
+        "label": "Run Timeout",
+        "description": "Maximum seconds allowed for a scheduled task run."
+      },
+      "heartbeatInterval": {
+        "label": "Heartbeat Interval",
+        "description": "Seconds between running-task lease heartbeats."
+      },
+      "leaseTimeout": {
+        "label": "Lease Timeout",
+        "description": "Seconds after which a running task without heartbeat is marked expired."
+      },
+      "sessionVolumeRequest": {
+        "label": "Session Volume Request",
+        "description": "Soft capacity request for the next new local Workspace. Existing volumes are unchanged."
+      },
+      "traceRetention": {
+        "label": "Trace Retention",
+        "description": "Days to retain detailed conversation spans. Conversation audit summaries are kept."
+      }
+    }
+  },
+  "storagePage": {
+    "title": "Storage",
+    "description": "Inspect physical node headroom and measure individual Session Volumes without starting their Sandboxes.",
+    "refresh": "Refresh",
+    "operationFailed": "Storage operation failed",
+    "accountDisabled": "Account disabled",
+    "detached": "Detached volume",
+    "noBinding": "No database binding",
+    "measuring": "Measuring…",
+    "usageCounts": "{files, plural, one {# file} other {# files}} · {directories, plural, one {# directory} other {# directories}}",
+    "measuredAt": "Measured {time}",
+    "justNow": "just now",
+    "notMeasured": "Not measured",
+    "columns": {
+      "sessionUser": "Session / User",
+      "node": "Node",
+      "volume": "Volume",
+      "requested": "Requested",
+      "actualUsage": "Actual usage",
+      "actions": "Actions"
+    },
+    "copy": {
+      "sessionId": "session ID",
+      "userId": "user ID",
+      "nodeName": "node name",
+      "pvcName": "PVC name"
+    },
+    "states": {
+      "missing": "Missing",
+      "orphan": "Orphan",
+      "staleBinding": "Stale binding can be cleaned",
+      "freshNextRun": "A fresh volume is created on the next run"
+    },
+    "actions": {
+      "measure": "Measure usage",
+      "measureAgain": "Measure again",
+      "measureUnavailable": "Measurement unavailable",
+      "cleanBinding": "Clean stale binding",
+      "deleteOrphanVolume": "Delete orphan volume",
+      "deleteOrphan": "Delete orphan",
+      "forVolume": "Actions for {volume}",
+      "measurePage": "Measure page",
+      "deleteOrphans": "Delete orphans ({count})"
+    },
+    "toast": {
+      "measuring": "Measuring volume usage…",
+      "measured": "Measured {size} · {count, plural, one {# file} other {# files}}",
+      "measuringPage": "Measuring {count} volumes on this page…",
+      "measureFailed": "Measured {measured} volumes; {failed} measurements failed.",
+      "measuredPage": "Measured {count} volumes on this page",
+      "bindingRemoved": "Stale storage binding removed",
+      "orphanDeleted": "Orphan volume deleted",
+      "deleteFailed": "Deleted {deleted} orphan storage items; {failed} could not be deleted.",
+      "deleted": "Deleted {count} orphan storage items"
+    },
+    "metrics": {
+      "probes": "Storage probes",
+      "nodesReporting": "nodes reporting",
+      "available": "Available capacity",
+      "ofTotal": "of {total}"
+    },
+    "unsupported": {
+      "title": "Node-local storage is not configured",
+      "description": "Start Cocola with the k3s runtime profile to enable storage visibility."
+    },
+    "nodes": {
+      "title": "Node filesystems",
+      "description": "Physical usage is read from the filesystem backing Cocola Session storage. It can include non-Session data on the same filesystem.",
+      "loading": "Loading storage",
+      "loadingDescription": "Reading node filesystem capacity…",
+      "empty": "No storage nodes found",
+      "emptyDescription": "Storage nodes will appear after the runtime is connected."
+    },
+    "sessions": {
+      "title": "Session Storage",
+      "description": "Requested values are soft limits. Measurements stay on this page until refresh.",
+      "tableAria": "Session storage",
+      "loading": "Loading storage",
+      "empty": "No Session Volumes",
+      "emptyDescription": "Session storage will appear after a workspace is created.",
+      "paginationLabel": "volumes"
+    },
+    "confirm": {
+      "cleanTitle": "Clean missing storage record?",
+      "deleteTitle": "Delete orphan Session Volume?",
+      "cleanDescription": "The volume is already missing. This removes its stale database binding so it is not listed again.",
+      "deleteDescription": "This permanently deletes {volume}. Active Session Volumes are not affected.",
+      "bulkTitle": "Delete {count} orphan storage items?",
+      "bulkDescription": "This deletes only orphan volumes and stale Missing bindings. Active Session Volumes are not affected.",
+      "bulkAction": "Delete orphans"
+    },
+    "nodeCard": {
+      "unavailable": "Probe unavailable",
+      "notReporting": "Storage probe is not reporting from this node.",
+      "nodeName": "node name",
+      "availableOf": "{available} available of {total}",
+      "used": "{used} filesystem used",
+      "availablePercent": "{percent} available"
+    }
+  },
+  "modelsPage": {
+    "title": "Models",
+    "description": "Connect model providers and decide which routes are available to each Agent Runtime.",
+    "refresh": "Refresh",
+    "operationFailed": "Model configuration operation failed",
+    "configuration": "Model configuration",
+    "routeCount": "Model routes · {count}",
+    "providerCount": "Providers · {count}",
+    "addModel": "Add model",
+    "addProvider": "Add provider",
+    "findModel": "Find a model route",
+    "findProvider": "Find a provider",
+    "saveChanges": "Save changes",
+    "apiKey": "API key",
+    "baseUrl": "Base URL",
+    "keepKeyHint": "Leave blank to keep the current key.",
+    "keepCurrentKey": "Keep current key",
+    "keepCurrentKeyWithHint": "Keep current key ({hint})",
+    "enterApiKey": "Enter API key",
+    "advanced": "Advanced",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "provider": {
+      "addTitle": "Add provider",
+      "editTitle": "Edit provider",
+      "description": "Connect an Anthropic Messages-compatible provider.",
+      "name": "Name",
+      "namePlaceholder": "Production provider",
+      "status": "Status",
+      "enabled": "Provider enabled",
+      "requestPath": "Request path",
+      "requestDescription": "This route uses the native Anthropic Messages API.",
+      "id": "Provider ID",
+      "idHint": "Generated from the provider name when left blank; it cannot be changed later.",
+      "label": "Provider",
+      "select": "Select provider"
+    },
+    "model": {
+      "editEmbedding": "Edit embedding model",
+      "editRoute": "Edit model route",
+      "embeddingDescription": "Add an OpenAI-compatible embedding model for Memory and future knowledge sources.",
+      "chatDescription": "Connect a user-visible model to one provider and upstream model ID.",
+      "type": "Model type",
+      "chat": "Chat model",
+      "chatPurpose": "For Agent conversations.",
+      "embedding": "Embedding model",
+      "embeddingPurpose": "For Memory and knowledge.",
+      "name": "Model name",
+      "testConnection": "Test connection",
+      "connected": "Connected · {dimension} dimensions · {latency} ms",
+      "connectionFailed": "Embedding connection failed",
+      "compatibleWith": "Compatible with {runtime}",
+      "platformServices": "Platform services",
+      "upstreamId": "Upstream model ID",
+      "enabled": "Enabled",
+      "visible": "Visible to users",
+      "protocolDefault": "Protocol default",
+      "priority": "Display priority",
+      "priorityHint": "Lower numbers appear first."
+    },
+    "delete": {
+      "providerTitle": "Delete provider?",
+      "modelTitle": "Delete model?",
+      "providerDescription": "Delete {name}? Providers with model routes cannot be deleted.",
+      "modelDescription": "Delete {name}? Historical run records will remain available.",
+      "thisRoute": "this model route",
+      "action": "Delete"
+    },
+    "icon": {
+      "title": "Icon",
+      "brandIcon": "Brand icon",
+      "uploadImage": "Upload image",
+      "formatError": "Choose a PNG, JPEG, or WebP image.",
+      "sizeError": "Model icons must be 1 MB or smaller.",
+      "replace": "Replace image",
+      "choose": "Choose image",
+      "requirements": "PNG, JPEG or WebP · up to 1 MB",
+      "providerRequired": "Choose an image for this provider icon.",
+      "modelRequired": "Choose an image for this model icon.",
+      "uploadFailed": "The uploaded image did not return a usable icon."
+    },
+    "list": {
+      "columns": {
+        "model": "Model",
+        "upstreamApi": "Upstream API",
+        "provider": "Provider",
+        "availability": "Availability",
+        "actions": "Actions",
+        "endpoint": "Endpoint",
+        "credential": "Credential",
+        "models": "Models"
+      },
+      "copy": {
+        "model": "model name",
+        "provider": "provider name",
+        "providerId": "provider ID",
+        "endpoint": "provider endpoint"
+      },
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "visible": "Visible",
+      "hidden": "Hidden",
+      "routesAria": "Model routes",
+      "loadingRoutes": "Loading model routes",
+      "emptyRoutes": "No model routes",
+      "emptyRoutesDescription": "Add a route after connecting at least one provider.",
+      "providersAria": "Model providers",
+      "loadingProviders": "Loading providers",
+      "emptyProviders": "No providers connected",
+      "emptyProvidersDescription": "Connect the API endpoint that will serve your first model."
+    },
+    "menu": {
+      "open": "Open actions",
+      "resource": "Resource actions",
+      "edit": "Edit",
+      "setDefault": "Set as protocol default",
+      "delete": "Delete"
+    }
+  },
+  "sandboxesPage": {
+    "title": "Sandboxes",
+    "description": "Runtime state for session-bound sandboxes",
+    "refresh": "Refresh",
+    "refreshed": "Sandbox runtime state refreshed",
+    "deleted": "Sandbox {id} deleted",
+    "operationFailed": "Sandbox operation failed",
+    "tableAria": "Sandboxes",
+    "unassigned": "Unassigned",
+    "columns": {
+      "sandbox": "Sandbox",
+      "status": "Status",
+      "owner": "Owner",
+      "created": "Created",
+      "node": "Node",
+      "actions": "Actions"
+    },
+    "status": {
+      "running": "Running",
+      "ready": "Ready",
+      "starting": "Starting",
+      "pending_reclaim": "Pending reclaim",
+      "stale_metadata": "Stale metadata",
+      "stopped": "Stopped",
+      "orphan": "Orphan",
+      "unknown": "Unknown"
+    },
+    "copy": {
+      "sandboxId": "sandbox ID",
+      "sessionId": "session ID",
+      "username": "username",
+      "userId": "user ID",
+      "nodeName": "node name",
+      "image": "runtime image",
+      "podName": "pod name"
+    },
+    "actions": {
+      "forSandbox": "Actions for sandbox {id}",
+      "details": "View details",
+      "deleteRunning": "Delete running sandbox",
+      "delete": "Delete sandbox"
+    },
+    "empty": {
+      "loading": "Loading sandboxes",
+      "title": "No sandboxes found",
+      "loadingDescription": "Fetching sandbox runtime state…",
+      "description": "Session-bound sandboxes will appear here once they are provisioned."
+    },
+    "confirm": {
+      "title": "Delete sandbox?",
+      "description": "This removes {sandbox} and its runtime metadata. This action cannot be undone.",
+      "thisSandbox": "this sandbox",
+      "action": "Delete sandbox"
+    },
+    "details": {
+      "close": "Close sandbox details",
+      "title": "Sandbox details",
+      "description": "Runtime diagnostics for this sandbox.",
+      "sandboxId": "Sandbox ID",
+      "sessionId": "Session ID",
+      "userId": "User ID",
+      "lifecycle": "Lifecycle",
+      "image": "Runtime image",
+      "pod": "Pod",
+      "podPhase": "Pod phase",
+      "paused": "Paused"
+    },
+    "unsupported": {
+      "title": "Sandbox runtime monitoring is not configured",
+      "description": "Start admin-api with shared Redis access to read sandbox-manager binding metadata."
+    }
+  },
+  "nodesPage": {
+    "title": "Nodes",
+    "description": "Runtime capacity and node health for Cocola sandboxes",
+    "refresh": "Refresh",
+    "operationFailed": "Node operation failed",
+    "tableAria": "Sandbox nodes",
+    "offlineRequested": "Node offline requested",
+    "capacityCleared": "Sandbox capacity limit cleared",
+    "capacitySaved": "Sandbox capacity limit saved",
+    "memory": "Memory",
+    "sandboxPods": "{count, plural, one {# sandbox pod} other {# sandbox pods}}",
+    "workspaces": "{count, plural, one {# workspace} other {# workspaces}}",
+    "unlimited": "Unlimited",
+    "columns": {
+      "node": "Node",
+      "status": "Status",
+      "resources": "Resources",
+      "workload": "Workload",
+      "disk": "Disk",
+      "maxPods": "Max pods",
+      "reason": "Reason",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "offline_pending": "Offline pending",
+      "offline": "Offline",
+      "unhealthy": "Unhealthy"
+    },
+    "disk": { "pressure": "Pressure", "normal": "Normal" },
+    "copy": { "nodeName": "node name", "reason": "node reason" },
+    "actions": {
+      "editCapacityFor": "Edit capacity for {node}",
+      "editCapacity": "Edit sandbox capacity",
+      "forNode": "Actions for node {node}",
+      "disable": "Disable scheduling",
+      "restore": "Restore scheduling",
+      "offline": "Node is offline",
+      "takeOffline": "Take node offline"
+    },
+    "empty": {
+      "loading": "Loading nodes",
+      "title": "No nodes found",
+      "loadingDescription": "Fetching cluster capacity…",
+      "description": "Nodes will appear here once they join the k3s cluster."
+    },
+    "unsupported": {
+      "title": "Cluster management is unavailable",
+      "description": "Start Cocola with the k3s runtime profile to enable node operations."
+    },
+    "offline": {
+      "title": "Offline {node}?",
+      "summary": "This node holds {workspaces, plural, one {# local Workspace} other {# local Workspaces}} and runs {pods, plural, one {# sandbox pod} other {# sandbox pods}}.",
+      "workspaceWarning": "Existing conversations cannot resume while this node is offline. No Workspace will be cleared automatically.",
+      "sandboxWarning": "Running sandboxes are not evicted and remain until they stop or are reclaimed.",
+      "action": "Cordon node"
+    },
+    "capacity": {
+      "close": "Close capacity editor",
+      "title": "Edit sandbox capacity",
+      "description": "Configure the maximum number of running sandbox pods allowed on {node}.",
+      "unlimitedHint": "Leave the value empty to allow unlimited sandbox pods.",
+      "zeroHint": "Set 0 to contribute no new sandbox capacity.",
+      "positiveHint": "Set a positive integer to cap concurrent running sandbox pods.",
+      "field": "Max sandbox pods",
+      "unlimited": "Unlimited",
+      "cancel": "Cancel",
+      "continue": "Continue",
+      "confirmTitle": "Confirm sandbox capacity",
+      "apply": "Apply capacity",
+      "invalid": "Max sandbox pods must be a non-negative integer",
+      "effects": {
+        "clearedTitle": "The node limit will be cleared.",
+        "clearedDescription": "Existing sandbox pods keep running, and Cocola may create new sandboxes when the cluster has available capacity.",
+        "zeroTitle": "The node will contribute zero sandbox capacity.",
+        "zeroDescription": "Existing sandbox pods keep running. For strict no-new-pods scheduling, use Disable to cordon the node.",
+        "belowTitle": "The new limit is below current usage.",
+        "belowDescription": "This node currently has {pods} sandbox pods. Existing pods keep running, and this node will not contribute free capacity until usage drops below {max}.",
+        "exactTitle": "The node will be exactly at capacity.",
+        "exactDescription": "Existing sandbox pods keep running, and this node will not contribute free capacity until one of them exits.",
+        "availableTitle": "The node will keep available sandbox capacity.",
+        "availableDescription": "This node currently has {pods} sandbox pods and will allow up to {max}."
+      }
+    }
+  },
+  "usersPage": {
+    "title": "Users",
+    "description": "Manage accounts, roles, and access status.",
+    "new": "New user",
+    "operationFailed": "User operation failed",
+    "notices": {
+      "created": "User created",
+      "updated": "User updated",
+      "disabled": "User disabled",
+      "enabled": "User enabled",
+      "passwordReset": "Password reset",
+      "deleted": "User deleted"
+    },
+    "errors": { "passwordRequired": "Password is required" },
+    "columns": {
+      "user": "User",
+      "role": "Role",
+      "status": "Status",
+      "lastLogin": "Last login",
+      "actions": "Actions"
+    },
+    "copy": { "name": "user name", "identity": "username and email" },
+    "actionsFor": "Actions for {username}",
+    "actions": {
+      "edit": "Edit",
+      "resetPassword": "Reset password",
+      "makeUser": "Make user",
+      "makeAdmin": "Make admin",
+      "disable": "Disable",
+      "enable": "Enable",
+      "delete": "Delete"
+    },
+    "searchAria": "Search users",
+    "searchPlaceholder": "Search username or email",
+    "roleFilter": "Role filter",
+    "allRoles": "All roles",
+    "users": "Users",
+    "admins": "Admins",
+    "statusFilter": "Status filter",
+    "all": "All",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "tableAria": "Users",
+    "empty": {
+      "loading": "Loading users",
+      "filtered": "No users match your filters",
+      "none": "No users found",
+      "loadingDescription": "Fetching account records…",
+      "description": "Create a user or adjust the current filters."
+    },
+    "drawer": {
+      "createTitle": "Create user",
+      "editTitle": "Edit user",
+      "passwordHash": "Passwords are stored as bcrypt hashes.",
+      "cancel": "Cancel",
+      "create": "Create",
+      "save": "Save",
+      "username": "Username",
+      "email": "Email",
+      "role": "Role",
+      "userRole": "user",
+      "adminRole": "admin",
+      "autoPassword": "Auto-generate initial password",
+      "autoPasswordDescription": "A strong password is generated on create and shown once so you can copy it.",
+      "password": "Password"
+    },
+    "reset": {
+      "title": "Reset password",
+      "cancel": "Cancel",
+      "action": "Reset",
+      "auto": "Auto-generate new password",
+      "autoDescription": "A strong password is generated and shown once so you can copy it.",
+      "newPassword": "New password"
+    },
+    "credential": {
+      "title": "Password ready",
+      "description": "Copy this password now — it will not be shown again.",
+      "copyBoth": "Copy both",
+      "done": "Done",
+      "email": "Email",
+      "password": "Password"
+    },
+    "delete": {
+      "title": "Delete user",
+      "description": "Delete {user}? The username and email will remain reserved.",
+      "thisUser": "this user",
+      "action": "Delete"
+    },
+    "roles": { "user": "User", "admin": "Admin" },
+    "status": { "enabled": "Enabled", "disabled": "Disabled" }
+  },
+  "scheduledTasksPage": {
+    "title": "Tasks",
+    "description": "Review scheduled work across all users. Tasks can only be changed by their owners.",
+    "refresh": "Refresh",
+    "operationFailed": "Scheduled task operation failed",
+    "columns": {
+      "task": "Task",
+      "owner": "Owner",
+      "schedule": "Schedule",
+      "nextRun": "Next run",
+      "lastResult": "Last result",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "copy": {
+      "name": "task name",
+      "prompt": "task prompt",
+      "owner": "task owner",
+      "email": "owner email"
+    },
+    "ownerRequired": "Owner required",
+    "actionsFor": "Actions for {name}",
+    "view": "View details",
+    "delete": "Delete",
+    "searchAria": "Search scheduled tasks",
+    "searchPlaceholder": "Search task, prompt, or owner",
+    "statusFilter": "Task status filter",
+    "all": "All",
+    "tableAria": "Scheduled tasks",
+    "status": {
+      "active": "Active",
+      "paused": "Paused",
+      "completed": "Completed",
+      "expired": "Expired"
+    },
+    "empty": {
+      "loading": "Loading tasks",
+      "filtered": "No matching tasks",
+      "none": "No scheduled tasks",
+      "loadingDescription": "Fetching scheduled work…",
+      "filteredDescription": "Try a different search or status filter.",
+      "description": "Tasks created by users will appear here."
+    },
+    "details": {
+      "title": "Task details",
+      "description": "Read-only scheduled task details",
+      "close": "Close",
+      "owner": "Owner",
+      "status": "Status",
+      "schedule": "Schedule",
+      "timezone": "Timezone",
+      "nextRun": "Next run",
+      "lastRun": "Last run",
+      "lastResult": "Last result",
+      "ends": "Ends",
+      "model": "Model",
+      "runs": "Runs",
+      "prompt": "Prompt",
+      "lastError": "Last error:",
+      "attachments": "Attachments",
+      "recentRuns": "Recent runs"
+    },
+    "confirm": {
+      "title": "Delete scheduled task?",
+      "description": "“{name}” will no longer run. Existing conversation history remains with its owner.",
+      "thisTask": "This task",
+      "action": "Delete task"
+    }
+  },
+  "tokenUsagePage": {
+    "title": "Token Usage",
+    "description": "User token consumption from the LLM usage ledger",
+    "refresh": "Refresh",
+    "exportExcel": "Export Excel",
+    "export": "Export",
+    "operationFailed": "Token usage operation failed",
+    "range": "Range",
+    "rangeAria": "Usage range",
+    "custom": "Custom",
+    "from": "From",
+    "to": "To",
+    "trend": "Usage trend",
+    "bucket": { "hour": "Hourly", "day": "Daily", "auto": "Auto" },
+    "loadingTrend": "Loading usage trend",
+    "noTrend": "No usage in this range",
+    "users": "Users",
+    "usersDescription": "Sorted by total token usage",
+    "filterUsers": "Filter users",
+    "tableAria": "Token usage by user",
+    "loadingUsers": "Loading users",
+    "noUsers": "No users in this range",
+    "noUsersDescription": "Usage will appear after users complete model calls.",
+    "columns": {
+      "user": "User",
+      "total": "Total",
+      "input": "Input",
+      "output": "Output",
+      "calls": "Calls",
+      "lastUsed": "Last used"
+    },
+    "copyUser": "user",
+    "unknownUser": "Unknown user",
+    "noUser": "No user selected",
+    "selectUser": "Select a user",
+    "tokens": "Tokens",
+    "calls": "Calls",
+    "noUserTrend": "No user trend data",
+    "dataset": { "total": "Total", "input": "Input", "output": "Output" }
+  },
+  "skillsPage": {
+    "title": "Skills",
+    "description": "Publish shared skills for every user sandbox.",
+    "candidateTitle": "Import candidates",
+    "valid": "{count} valid",
+    "matches": "{count, plural, one {# match} other {# matches}}",
+    "loading": "Loading skills",
+    "noMatch": "No skills match “{query}”.",
+    "empty": "No skills imported yet.",
+    "pagination": "skills",
+    "removeDescription": "{name} will be permanently removed from the shared catalog.",
+    "thisSkill": "This Skill",
+    "manual": "manual"
+  },
+  "mcpsPage": {
+    "title": "MCP Servers",
+    "refresh": "Refresh",
+    "add": "Add server",
+    "operationFailed": "MCP server operation failed",
+    "search": "Search MCP servers",
+    "loading": "Loading MCP servers",
+    "noMatch": "No matching MCP servers",
+    "empty": "No MCP servers configured",
+    "noMatchDescription": "Try another search or clear the active query.",
+    "emptyDescription": "Add a server now; Cocola checks the connection when an agent first uses it.",
+    "validation": {
+      "name": "Name is required.",
+      "command": "Command is required for a stdio server.",
+      "url": "URL is required for an HTTP or SSE server.",
+      "pairFormat": "{field} line {line} must use KEY=value.",
+      "pairKey": "{field} line {line} has an invalid key.",
+      "pairValue": "{field} line {line} has an empty value.",
+      "pairDuplicate": "{field} contains duplicate key {key}."
+    },
+    "savedNotice": "{name} saved. The connection will be checked when an agent uses it.",
+    "editTitle": "Edit {name}",
+    "drawerDescription": "Save the configuration now. Its connection is checked in the first agent session that uses it.",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "save": "Save changes",
+    "fields": {
+      "name": "Name",
+      "transport": "Transport",
+      "stdioHint": "stdio starts a local process, so it uses Command instead of URL.",
+      "remoteHint": "{transport} connects to a remote URL.",
+      "description": "Description",
+      "optional": "optional",
+      "descriptionPlaceholder": "Repository tools for agent sessions",
+      "command": "Command",
+      "arguments": "Arguments",
+      "environment": "Environment",
+      "url": "URL",
+      "headers": "Headers",
+      "onePerLine": "one per line",
+      "keepUrl": "Leave blank to keep the saved URL.",
+      "pasteUrl": "Paste the complete provider URL.",
+      "savedUrl": "Saved URL",
+      "hideUrl": "Hide URL",
+      "showUrl": "Show URL",
+      "urlSecure": "The complete URL is encrypted. Lists only show its scheme, host, and path.",
+      "defaultOn": "Enabled for users by default",
+      "defaultDescription": "Users can still turn this server off for their own agent sessions.",
+      "advanced": "Advanced",
+      "idHint": "Generated from the name when left blank."
+    },
+    "card": {
+      "copyName": "MCP name",
+      "noDescription": "No description",
+      "command": "Command",
+      "copyUrl": "MCP URL",
+      "copyCommand": "MCP command",
+      "remoteSaved": "Remote URL saved",
+      "commandSaved": "Command saved",
+      "defaultOn": "Default on",
+      "edit": "Edit",
+      "disable": "Disable {name}",
+      "enable": "Enable {name}",
+      "remove": "Remove"
+    },
+    "pairs": {
+      "hint": "One KEY=value pair per line.",
+      "cleared": "Saved values will be cleared.",
+      "saved": "Saved: {keys}. Blank keeps them.",
+      "keep": "Keep saved values",
+      "clear": "Clear saved values"
+    },
+    "delete": {
+      "title": "Delete MCP server?",
+      "description": "This permanently removes {name} from future agent sessions.",
+      "thisServer": "this server",
+      "action": "Delete server"
+    }
+  },
+  "toolboxPage": {
+    "title": "Toolbox",
+    "description": "Open lightweight controls that shape how Cocola operates.",
+    "systemPrompt": {
+      "title": "System Prompt",
+      "summary": "Set the global behavior policy applied to new agent turns.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save changes",
+      "loadingPrompt": "Loading system prompt",
+      "retry": "Retry",
+      "globalPrompt": "Global system prompt",
+      "globalPromptDescription": "Saved content is injected server-side and is never copied into trace metadata.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "placeholder": "Write the global behavior policy for agents…",
+      "version": "Version",
+      "characters": "Characters",
+      "unsavedChanges": "Unsaved changes",
+      "upToDate": "Up to date",
+      "loading": "Loading",
+      "unavailable": "Unavailable"
+    },
+    "memory": {
+      "title": "Memory",
+      "summary": "Long-term profile, preferences, entities, and events.",
+      "closeSettings": "Close Memory settings",
+      "description": "Choose the two platform models and enable Memory.",
+      "loading": "Loading Memory",
+      "useMemory": "Use long-term memory",
+      "useMemoryDescription": "Available to users after the checks pass.",
+      "on": "On",
+      "off": "Off",
+      "extractionModel": "Extraction model",
+      "chooseChatModel": "Choose a chat model",
+      "embeddingModel": "Embedding model",
+      "chooseEmbeddingModel": "Choose an embedding model",
+      "serviceHealth": "Service health",
+      "pendingJobs": "{count, plural, one {# pending} other {# pending}}",
+      "failedJobs": "{count, plural, one {# failed} other {# failed}}",
+      "service": "Service",
+      "extraction": "Extraction",
+      "index": "Index",
+      "internalMemory": "Internal Memory v{version}",
+      "dimensions": "{count} dimensions",
+      "resumeReset": "Resume reset",
+      "reset": "Reset Memory",
+      "resetHint": "Required before changing the embedding model.",
+      "close": "Close",
+      "save": "Save",
+      "resetDescription": "Deletes every user's long-term memory and unlocks the embedding model. Conversations are not deleted.",
+      "resetTitle": "Reset all Memory?",
+      "checking": "Checking",
+      "degraded": "Degraded",
+      "ready": "Ready",
+      "incomplete": "Incomplete",
+      "disabled": "Disabled"
+    }
+  },
+  "tracePage": {
+    "eyebrow": "Conversation trace",
+    "agentRun": "Agent run",
+    "refresh": "Refresh",
+    "agentRuns": "Agent Runs",
+    "scheduledTask": "Scheduled task",
+    "interactive": "Interactive",
+    "defaultModel": "Default model",
+    "openConversation": "Open conversation",
+    "loadFailed": "Could not load agent run",
+    "expired": "Trace details expired. The conversation audit summary remains available.",
+    "partial": "Some trace spans could not be recorded. The agent run summary is complete.",
+    "timeline": "Trace timeline",
+    "timelineDescription": "Ordered runtime events for this run.",
+    "live": "Live",
+    "events": "{count, plural, one {# event} other {# events}}",
+    "loading": "Loading trace…",
+    "empty": "No detailed spans were recorded.",
+    "runContext": "Run context",
+    "runContextDescription": "Execution summary from Cocola.",
+    "source": "Source",
+    "model": "Model",
+    "duration": "Duration",
+    "firstToken": "First token",
+    "modelCalls": "Model calls",
+    "toolCalls": "Tool calls",
+    "tokens": "Tokens",
+    "tokenUsage": "{input} in · {output} out",
+    "traceId": "Trace ID",
+    "spanDetails": "Span details",
+    "safeExecutionMetadata": "Safe execution metadata",
+    "selectSpan": "Select a span to inspect its timing and safe metadata.",
+    "run": "Run",
+    "metadata": "Metadata",
+    "started": "Started",
+    "runPosition": "Run position",
+    "service": "Service",
+    "module": "Module",
+    "parentSpan": "Parent span",
+    "root": "Root",
+    "viewLogs": "View related component logs",
+    "noMetadata": "This span has no additional safe metadata.",
+    "safeMetadata": "Safe metadata",
+    "modules": {
+      "request": "Request",
+      "environment": "Environment",
+      "agent": "Agent",
+      "model": "Model",
+      "tool": "Tool",
+      "finalization": "Finalization"
+    },
+    "status": {
+      "success": "Success",
+      "running": "Running",
+      "cancelled": "Cancelled",
+      "interrupted": "Interrupted",
+      "failed": "Failed"
+    }
+  }
+}

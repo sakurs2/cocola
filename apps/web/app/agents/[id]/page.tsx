@@ -4,6 +4,7 @@ import { Archive, ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { Button, Card, Chip, Input, Label, TextArea, TextField } from "@heroui/react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
 import { AgentCapabilitiesEditor } from "@/components/agents/agent-capabilities-editor";
 import { HeroUIAgentModelSelect } from "@/components/agents/heroui-agent-model-select";
@@ -37,6 +38,8 @@ const COLOR_SWATCHES: Record<string, string> = {
 };
 
 export default function AgentPage() {
+  const t = useTranslations("agents.detail");
+  const format = useFormatter();
   const params = useParams<{ id: string }>();
   const agentID = params.id;
   const router = useRouter();
@@ -80,14 +83,14 @@ export default function AgentPage() {
         );
         if (!agentResponse.ok) throw new Error(await agentResponseError(agentResponse));
         if (!modelsResponse.ok || !runtimesResponse.ok || !skillsResponse.ok) {
-          throw new Error("Agent capability configuration is temporarily unavailable.");
+          throw new Error(t("capabilitiesUnavailable"));
         }
         const loaded = (await agentResponse.json()) as AgentProfile;
         const modelRows = normalizeAgentModels(await modelsResponse.json());
         const runtimes = normalizeAgentRuntimes(await runtimesResponse.json());
         const loadedSkillCatalog = normalizeAgentSkillCatalog(await skillsResponse.json());
         const runtime = runtimes.find((item) => item.id === loaded.runtime_id);
-        if (!runtime) throw new Error("This Agent's runtime is no longer available.");
+        if (!runtime) throw new Error(t("runtimeUnavailable"));
         const compatible = modelRows.filter((model) =>
           model.protocols.includes(runtime.modelProtocol),
         );
@@ -106,7 +109,7 @@ export default function AgentPage() {
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
-          const message = cause instanceof Error ? cause.message : "Could not load Agent";
+          const message = cause instanceof Error ? cause.message : t("loadFailed");
           setError(message);
           showError(message);
         }
@@ -115,7 +118,7 @@ export default function AgentPage() {
       }
     })();
     return () => controller.abort();
-  }, [agentID, showError]);
+  }, [agentID, showError, t]);
 
   const selectedModel = useMemo(
     () => models.find((model) => model.id === modelID) ?? null,
@@ -183,9 +186,9 @@ export default function AgentPage() {
       setModelID(updated.model_route_id);
       setSkillIDs(updated.skill_ids);
       setKnowledgeSources(updated.knowledge_sources);
-      showSuccess("Agent saved");
+      showSuccess(t("savedNotice"));
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Could not save Agent";
+      const message = cause instanceof Error ? cause.message : t("saveFailed");
       setError(message);
       showError(message);
     } finally {
@@ -205,10 +208,10 @@ export default function AgentPage() {
       });
       if (!response.ok) throw new Error(await agentResponseError(response));
       setArchiveOpen(false);
-      showSuccess("Agent archived");
+      showSuccess(t("archivedNotice"));
       router.push("/agents");
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Could not archive Agent";
+      const message = cause instanceof Error ? cause.message : t("archiveFailed");
       setError(message);
       showError(message);
     } finally {
@@ -229,14 +232,14 @@ export default function AgentPage() {
       <div className="cocola-web-page mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
         <Button
           isIconOnly
-          aria-label="Back to Agents"
+          aria-label={t("back")}
           variant="ghost"
           onPress={() => router.push("/agents")}
         >
           <ArrowLeft className="size-4" />
         </Button>
         <div className="bg-danger/10 text-danger rounded-2xl p-5 text-sm">
-          {error || "Agent not found"}
+          {error || t("notFound")}
         </div>
       </div>
     );
@@ -248,7 +251,7 @@ export default function AgentPage() {
         <span className="flex min-w-0 items-start gap-3">
           <Button
             isIconOnly
-            aria-label="Back to Agents"
+            aria-label={t("back")}
             variant="ghost"
             onPress={() => router.push("/agents")}
           >
@@ -262,14 +265,12 @@ export default function AgentPage() {
           />
           <span className="min-w-0">
             <span className="text-accent block text-xs font-semibold tracking-[0.12em] uppercase">
-              Assistants
+              {t("eyebrow")}
             </span>
             <h1 className="text-foreground mt-1 truncate text-2xl font-semibold tracking-[-0.03em]">
               {agent.name}
             </h1>
-            <span className="text-muted mt-1 block text-sm">
-              Changes apply to new conversations.
-            </span>
+            <span className="text-muted mt-1 block text-sm">{t("changesApply")}</span>
           </span>
         </span>
         <Button
@@ -281,7 +282,7 @@ export default function AgentPage() {
           onPress={() => void save()}
         >
           {saving ? null : dirty ? <Save className="size-4" /> : <Check className="size-4" />}
-          {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+          {saving ? t("saving") : dirty ? t("save") : t("saved")}
         </Button>
       </header>
 
@@ -291,28 +292,28 @@ export default function AgentPage() {
 
       <Card className="p-5">
         <Card.Header className="p-0">
-          <Card.Title>Identity</Card.Title>
-          <Card.Description>How this Agent appears throughout Cocola and Feishu.</Card.Description>
+          <Card.Title>{t("identity")}</Card.Title>
+          <Card.Description>{t("identityDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-5 p-0">
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField isRequired value={name} variant="secondary" onChange={setName}>
-              <Label>Name</Label>
+              <Label>{t("name")}</Label>
               <Input maxLength={100} />
             </TextField>
             <TextField value={description} variant="secondary" onChange={setDescription}>
-              <Label>Description</Label>
-              <Input maxLength={500} placeholder="What this Agent is best at" />
+              <Label>{t("description")}</Label>
+              <Input maxLength={500} placeholder={t("descriptionPlaceholder")} />
             </TextField>
           </div>
           <div className="grid gap-5">
             <div>
-              <Label>Icon</Label>
-              <div aria-label="Agent icon" className="mt-2 flex flex-wrap gap-2" role="group">
+              <Label>{t("icon")}</Label>
+              <div aria-label={t("iconGroup")} className="mt-2 flex flex-wrap gap-2" role="group">
                 {AGENT_AVATAR_KEYS.map((key) => (
                   <Button
                     key={key}
-                    aria-label={`Use ${key} icon`}
+                    aria-label={t("useIcon", { name: key })}
                     aria-pressed={avatarKey === key}
                     className={`h-auto min-h-0 min-w-0 rounded-2xl p-1.5 ${avatarKey === key ? "bg-accent-soft ring-accent/30 ring-1" : ""}`}
                     variant="ghost"
@@ -329,12 +330,12 @@ export default function AgentPage() {
               </div>
             </div>
             <div>
-              <Label>Color</Label>
-              <div aria-label="Agent color" className="mt-2 flex flex-wrap gap-2" role="group">
+              <Label>{t("color")}</Label>
+              <div aria-label={t("colorGroup")} className="mt-2 flex flex-wrap gap-2" role="group">
                 {AGENT_AVATAR_COLORS.map((color) => (
                   <Button
                     key={color}
-                    aria-label={`Use ${color} color`}
+                    aria-label={t("useColor", { name: color })}
                     aria-pressed={avatarColor === color}
                     className={`grid size-9 min-w-9 place-items-center rounded-full p-0 ring-2 ring-transparent ring-offset-2 ring-offset-background ${avatarColor === color ? "ring-foreground/30" : ""}`}
                     variant="ghost"
@@ -356,40 +357,36 @@ export default function AgentPage() {
       <Card className="p-5">
         <Card.Header className="flex-row items-start justify-between gap-4 p-0">
           <span>
-            <Card.Title>Instructions</Card.Title>
-            <Card.Description>
-              Define the Agent&apos;s role and working rules. Platform and administrator policies
-              still take precedence.
-            </Card.Description>
+            <Card.Title>{t("instructions")}</Card.Title>
+            <Card.Description>{t("instructionsDescription")}</Card.Description>
           </span>
           <Chip color={instructionsTooLarge ? "danger" : "accent"} size="sm" variant="soft">
-            {instructionsBytes.toLocaleString()} / {MAX_INSTRUCTIONS_BYTES.toLocaleString()} bytes
+            {t("bytes", {
+              used: format.number(instructionsBytes),
+              limit: format.number(MAX_INSTRUCTIONS_BYTES),
+            })}
           </Chip>
         </Card.Header>
         <Card.Content className="p-0">
           <TextField variant="secondary">
-            <Label className="sr-only">Agent Instructions</Label>
+            <Label className="sr-only">{t("instructionsAria")}</Label>
             <TextArea
               className="min-h-64 resize-y font-mono text-sm leading-6"
-              placeholder="Describe the Agent's role and working rules…"
+              placeholder={t("instructionsPlaceholder")}
               value={instructions}
               onChange={(event) => setInstructions(event.target.value)}
             />
           </TextField>
           {instructionsTooLarge ? (
-            <p className="text-danger mt-2 text-xs">
-              Instructions exceed the 32KB limit and cannot be saved.
-            </p>
+            <p className="text-danger mt-2 text-xs">{t("tooLarge")}</p>
           ) : null}
         </Card.Content>
       </Card>
 
       <Card className="p-5">
         <Card.Header className="p-0">
-          <Card.Title>Model</Card.Title>
-          <Card.Description>
-            Conversations using this Agent always use this compatible model.
-          </Card.Description>
+          <Card.Title>{t("model")}</Card.Title>
+          <Card.Description>{t("modelDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
           <HeroUIAgentModelSelect
@@ -398,7 +395,7 @@ export default function AgentPage() {
             value={modelID}
             onChange={setModelID}
           />
-          <p className="text-muted mt-3 text-xs">Only compatible models are available.</p>
+          <p className="text-muted mt-3 text-xs">{t("compatibleModels")}</p>
         </Card.Content>
       </Card>
 
@@ -415,10 +412,8 @@ export default function AgentPage() {
       <Card className="border-danger/20 bg-danger/[0.025] p-5">
         <Card.Header className="flex-row items-center justify-between gap-4 p-0">
           <span>
-            <Card.Title>Archive Agent</Card.Title>
-            <Card.Description>
-              It will disappear from new chats. Existing conversation history remains.
-            </Card.Description>
+            <Card.Title>{t("archive")}</Card.Title>
+            <Card.Description>{t("archiveDescription")}</Card.Description>
           </span>
           <Button
             variant="danger-soft"
@@ -427,23 +422,23 @@ export default function AgentPage() {
               setArchiveOpen(true);
             }}
           >
-            <Archive className="size-4" /> Archive
+            <Archive className="size-4" /> {t("archiveAction")}
           </Button>
         </Card.Header>
       </Card>
 
       <p className="text-muted text-right text-xs tabular-nums">
-        Agent version {agent.version} · Knowledge revision {agent.knowledge_revision}
+        {t("version", { version: agent.version, revision: agent.knowledge_revision })}
       </p>
 
       <ActionConfirmDialog
         busy={archiving}
-        confirmLabel="Archive Agent"
-        description="Disconnect its Feishu bot first. Existing conversations stay in history, but this Agent cannot start or continue turns after it is archived."
+        confirmLabel={t("archive")}
+        description={t("archiveConfirmDescription")}
         error={error || null}
         icon={Archive}
         open={archiveOpen}
-        title="Archive this Agent?"
+        title={t("archiveTitle")}
         tone="danger"
         onConfirm={() => void archive()}
         onOpenChange={setArchiveOpen}

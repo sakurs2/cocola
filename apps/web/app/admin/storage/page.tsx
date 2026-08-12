@@ -7,6 +7,7 @@ import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import {
   AdminConfirmDialog,
   AdminDataGrid,
@@ -59,6 +60,8 @@ type StorageMeasurement = {
 const SESSION_STORAGE_PAGE_SIZE = 25;
 
 export default function StoragePage() {
+  const t = useTranslations("admin.storagePage");
+  const format = useFormatter();
   const [nodes, setNodes] = useState<NodeFilesystem[]>([]);
   const [volumes, setVolumes] = useState<SessionVolume[]>([]);
   const [volumePage, setVolumePage] = useState(0);
@@ -149,7 +152,7 @@ export default function StoragePage() {
     );
     if (isAccountDisabledResponse(res)) {
       await signOut({ callbackUrl: "/login?error=account_disabled" });
-      throw new Error("Account disabled");
+      throw new Error(t("accountDisabled"));
     }
     if (!res.ok) throw new Error(await responseError(res));
     return (await res.json()) as StorageMeasurement;
@@ -178,12 +181,15 @@ export default function StoragePage() {
     const key = volumeKey(volume);
     setError("");
     setVolumesMeasuring([key], true);
-    setToast({ message: "Measuring volume usage…", tone: "loading" });
+    setToast({ message: t("toast.measuring"), tone: "loading" });
     try {
       const result = await requestMeasurement(volume);
       recordMeasurement(volume, result);
       setToast({
-        message: `Measured ${formatBytes(result.allocated_bytes)} · ${result.file_count} files`,
+        message: t("toast.measured", {
+          size: formatBytes(result.allocated_bytes),
+          count: result.file_count,
+        }),
         tone: "success",
       });
     } catch (err) {
@@ -200,7 +206,7 @@ export default function StoragePage() {
     if (targets.length === 0) return;
     setError("");
     setBulkMeasuring(true);
-    setToast({ message: `Measuring ${targets.length} volumes on this page…`, tone: "loading" });
+    setToast({ message: t("toast.measuringPage", { count: targets.length }), tone: "loading" });
     let measured = 0;
     let failed = 0;
     try {
@@ -231,9 +237,9 @@ export default function StoragePage() {
       }
       if (failed > 0) {
         setToast(null);
-        setError(`Measured ${measured} volumes; ${failed} measurements failed.`);
+        setError(t("toast.measureFailed", { measured, failed }));
       } else {
-        setToast({ message: `Measured ${measured} volumes on this page`, tone: "success" });
+        setToast({ message: t("toast.measuredPage", { count: measured }), tone: "success" });
       }
     } finally {
       setBulkMeasuring(false);
@@ -261,9 +267,7 @@ export default function StoragePage() {
       if (!res.ok) throw new Error(await responseError(res));
       setPendingDelete(null);
       setToast({
-        message: isMissingVolume(volume)
-          ? "Stale storage binding removed"
-          : "Orphan volume deleted",
+        message: isMissingVolume(volume) ? t("toast.bindingRemoved") : t("toast.orphanDeleted"),
         tone: "success",
       });
       await refresh();
@@ -293,9 +297,9 @@ export default function StoragePage() {
       const failed = typeof result.failed === "number" ? result.failed : 0;
       setBulkDeleteOpen(false);
       if (failed > 0) {
-        setError(`Deleted ${deleted} orphan storage items; ${failed} could not be deleted.`);
+        setError(t("toast.deleteFailed", { deleted, failed }));
       } else {
-        setToast({ message: `Deleted ${deleted} orphan storage items`, tone: "success" });
+        setToast({ message: t("toast.deleted", { count: deleted }), tone: "success" });
       }
       await refresh();
     } catch (err) {
@@ -305,42 +309,49 @@ export default function StoragePage() {
     }
   };
 
+  const measurementTime = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? t("justNow")
+      : format.dateTime(date, { hour: "2-digit", minute: "2-digit" });
+  };
+
   const columns: DataGridColumn<SessionVolume>[] = [
     {
       id: "session",
-      header: "Session / User",
+      header: t("columns.sessionUser"),
       isRowHeader: true,
       width: 260,
       cell: (volume) => (
         <span className="block min-w-0">
           <AdminTruncatedValue
             className="max-w-[190px] font-mono text-xs font-medium"
-            copyLabel="session ID"
-            value={volume.session_id || "Detached volume"}
+            copyLabel={t("copy.sessionId")}
+            value={volume.session_id || t("detached")}
           />
           <AdminTruncatedValue
             className="text-muted max-w-[190px] text-xs"
-            copyLabel="user ID"
-            value={volume.user_id || "No database binding"}
+            copyLabel={t("copy.userId")}
+            value={volume.user_id || t("noBinding")}
           />
         </span>
       ),
     },
     {
       id: "node",
-      header: "Node",
+      header: t("columns.node"),
       width: 160,
       cell: (volume) => (
         <AdminTruncatedValue
           className="max-w-[110px] font-mono text-xs"
-          copyLabel="node name"
+          copyLabel={t("copy.nodeName")}
           value={volume.node_name || "—"}
         />
       ),
     },
     {
       id: "volume",
-      header: "Volume",
+      header: t("columns.volume"),
       width: 280,
       cell: (volume) => {
         const missing = isMissingVolume(volume);
@@ -348,7 +359,7 @@ export default function StoragePage() {
           <span className="block min-w-0">
             <AdminTruncatedValue
               className="max-w-[210px] font-mono text-xs"
-              copyLabel="PVC name"
+              copyLabel={t("copy.pvcName")}
               value={volume.pvc_name}
             />
             <span className="mt-1 flex flex-wrap items-center gap-1">
@@ -356,17 +367,15 @@ export default function StoragePage() {
                 tone={missing ? "red" : isAttachedVolume(volume) ? "green" : "amber"}
                 dot
               >
-                {missing ? "Missing" : volume.pvc_phase}
+                {missing ? t("states.missing") : volume.pvc_phase}
               </AdminStatusBadge>
               {volume.delete_allowed && !missing ? (
-                <AdminStatusBadge tone="red">Orphan</AdminStatusBadge>
+                <AdminStatusBadge tone="red">{t("states.orphan")}</AdminStatusBadge>
               ) : null}
             </span>
             {missing ? (
               <span className="text-muted mt-1 block text-[11px]">
-                {volume.delete_allowed
-                  ? "Stale binding can be cleaned"
-                  : "A fresh volume is created on the next run"}
+                {volume.delete_allowed ? t("states.staleBinding") : t("states.freshNextRun")}
               </span>
             ) : null}
           </span>
@@ -375,7 +384,7 @@ export default function StoragePage() {
     },
     {
       id: "requested",
-      header: "Requested",
+      header: t("columns.requested"),
       minWidth: 130,
       cell: (volume) => (
         <span className="font-mono text-xs tabular-nums">
@@ -385,7 +394,7 @@ export default function StoragePage() {
     },
     {
       id: "usage",
-      header: "Actual usage",
+      header: t("columns.actualUsage"),
       minWidth: 170,
       cell: (volume) => {
         const key = volumeKey(volume);
@@ -393,7 +402,7 @@ export default function StoragePage() {
         return measuringKeys.has(key) ? (
           <span className="text-muted flex items-center gap-2 text-xs">
             <LoaderCircle className="size-3.5 animate-spin" />
-            Measuring…
+            {t("measuring")}
           </span>
         ) : measurement ? (
           <span>
@@ -401,20 +410,23 @@ export default function StoragePage() {
               {formatBytes(measurement.allocated_bytes)}
             </span>
             <span className="text-muted block text-xs">
-              {measurement.file_count} files · {measurement.directory_count} dirs
+              {t("usageCounts", {
+                files: measurement.file_count,
+                directories: measurement.directory_count,
+              })}
             </span>
             <span className="text-muted mt-0.5 block text-[11px]">
-              Measured {formatMeasurementTime(measurement.measured_at)}
+              {t("measuredAt", { time: measurementTime(measurement.measured_at) })}
             </span>
           </span>
         ) : (
-          <span className="text-muted">Not measured</span>
+          <span className="text-muted">{t("notMeasured")}</span>
         );
       },
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       width: 72,
       cell: (volume) => {
@@ -426,9 +438,9 @@ export default function StoragePage() {
             id: "measure",
             label: attached
               ? volume.measurement
-                ? "Measure again"
-                : "Measure usage"
-              : "Measurement unavailable",
+                ? t("actions.measureAgain")
+                : t("actions.measure")
+              : t("actions.measureUnavailable"),
             icon: <Gauge className="size-4" />,
             disabled: !attached || bulkMeasuring || bulkDeleting || measuringKeys.size > 0,
           },
@@ -436,7 +448,7 @@ export default function StoragePage() {
             ? [
                 {
                   id: "delete",
-                  label: missing ? "Clean stale binding" : "Delete orphan volume",
+                  label: missing ? t("actions.cleanBinding") : t("actions.deleteOrphanVolume"),
                   icon: <Trash2 className="size-4" />,
                   destructive: true,
                   disabled:
@@ -447,7 +459,7 @@ export default function StoragePage() {
         ];
         return (
           <AdminRowActions
-            label={`Actions for ${volume.pvc_name}`}
+            label={t("actions.forVolume", { volume: volume.pvc_name })}
             busy={measuringKeys.has(key) || deleting === key}
             actions={actions}
             onAction={(action) => {
@@ -463,8 +475,8 @@ export default function StoragePage() {
   return (
     <AdminPage className="admin-theme-purple">
       <AdminPageHeader
-        title="Storage"
-        description="Inspect physical node headroom and measure individual Session Volumes without starting their Sandboxes."
+        title={t("title")}
+        description={t("description")}
         icon={<StoragePageIcon className="size-5" />}
         actions={
           <AdminRefreshButton
@@ -473,14 +485,14 @@ export default function StoragePage() {
             disabled={loading}
             refreshing={loading}
           >
-            Refresh
+            {t("refresh")}
           </AdminRefreshButton>
         }
       />
 
       <AdminErrorDialog
         error={error}
-        title="Storage operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
@@ -493,15 +505,15 @@ export default function StoragePage() {
       {!unsupported && nodes.length > 0 ? (
         <section className="grid gap-3 sm:grid-cols-2">
           <AdminMetric
-            label="Storage probes"
+            label={t("metrics.probes")}
             value={`${totals.measuredCount}/${totals.nodeCount}`}
-            detail="nodes reporting"
+            detail={t("metrics.nodesReporting")}
             tone={totals.measuredCount === totals.nodeCount ? "green" : "amber"}
           />
           <AdminMetric
-            label="Available capacity"
+            label={t("metrics.available")}
             value={formatBytes(totals.availableBytes)}
-            detail={`of ${formatBytes(totals.totalBytes)}`}
+            detail={t("metrics.ofTotal", { total: formatBytes(totals.totalBytes) })}
             tone="violet"
           />
         </section>
@@ -514,10 +526,8 @@ export default function StoragePage() {
               <EmptyState.Media variant="icon">
                 <HardDrive className="text-purple-500" />
               </EmptyState.Media>
-              <EmptyState.Title>Node-local storage is not configured</EmptyState.Title>
-              <EmptyState.Description>
-                Start Cocola with the k3s runtime profile to enable storage visibility.
-              </EmptyState.Description>
+              <EmptyState.Title>{t("unsupported.title")}</EmptyState.Title>
+              <EmptyState.Description>{t("unsupported.description")}</EmptyState.Description>
             </EmptyState.Header>
           </EmptyState>
         </Card>
@@ -525,11 +535,8 @@ export default function StoragePage() {
         <>
           <section className="space-y-3">
             <div>
-              <h2 className="text-sm font-semibold">Node filesystems</h2>
-              <p className="mt-0.5 text-xs text-muted">
-                Physical usage is read from the filesystem backing Cocola Session storage. It can
-                include non-Session data on the same filesystem.
-              </p>
+              <h2 className="text-sm font-semibold">{t("nodes.title")}</h2>
+              <p className="mt-0.5 text-xs text-muted">{t("nodes.description")}</p>
             </div>
             {loading && nodes.length === 0 ? (
               <Card className="p-6">
@@ -538,10 +545,8 @@ export default function StoragePage() {
                     <EmptyState.Media variant="icon">
                       <LoaderCircle className="animate-spin text-purple-500" />
                     </EmptyState.Media>
-                    <EmptyState.Title>Loading storage</EmptyState.Title>
-                    <EmptyState.Description>
-                      Reading node filesystem capacity…
-                    </EmptyState.Description>
+                    <EmptyState.Title>{t("nodes.loading")}</EmptyState.Title>
+                    <EmptyState.Description>{t("nodes.loadingDescription")}</EmptyState.Description>
                   </EmptyState.Header>
                 </EmptyState>
               </Card>
@@ -552,10 +557,8 @@ export default function StoragePage() {
                     <EmptyState.Media variant="icon">
                       <HardDrive className="text-purple-500" />
                     </EmptyState.Media>
-                    <EmptyState.Title>No storage nodes found</EmptyState.Title>
-                    <EmptyState.Description>
-                      Storage nodes will appear after the runtime is connected.
-                    </EmptyState.Description>
+                    <EmptyState.Title>{t("nodes.empty")}</EmptyState.Title>
+                    <EmptyState.Description>{t("nodes.emptyDescription")}</EmptyState.Description>
                   </EmptyState.Header>
                 </EmptyState>
               </Card>
@@ -571,10 +574,8 @@ export default function StoragePage() {
           <section className="space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-sm font-semibold">Session Storage</h2>
-                <p className="mt-0.5 text-xs text-muted">
-                  Requested values are soft limits. Measurements stay on this page until refresh.
-                </p>
+                <h2 className="text-sm font-semibold">{t("sessions.title")}</h2>
+                <p className="mt-0.5 text-xs text-muted">{t("sessions.description")}</p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Button
@@ -595,7 +596,7 @@ export default function StoragePage() {
                   ) : (
                     <Gauge className="size-3.5" />
                   )}
-                  Measure page
+                  {t("actions.measurePage")}
                 </Button>
                 {orphanCount > 0 ? (
                   <Button
@@ -611,7 +612,7 @@ export default function StoragePage() {
                     onPress={() => setBulkDeleteOpen(true)}
                   >
                     <Trash2 className="size-3.5" />
-                    Delete orphans ({orphanCount})
+                    {t("actions.deleteOrphans", { count: orphanCount })}
                   </Button>
                 ) : null}
               </div>
@@ -619,7 +620,7 @@ export default function StoragePage() {
 
             <div className="min-w-0">
               <AdminDataGrid
-                aria-label="Session storage"
+                aria-label={t("sessions.tableAria")}
                 columns={columns}
                 contentClassName="min-w-[940px]"
                 data={volumes}
@@ -633,10 +634,10 @@ export default function StoragePage() {
                         <HardDrive className="text-purple-500" />
                       </EmptyState.Media>
                       <EmptyState.Title>
-                        {loading ? "Loading storage" : "No Session Volumes"}
+                        {loading ? t("sessions.loading") : t("sessions.empty")}
                       </EmptyState.Title>
                       <EmptyState.Description>
-                        Session storage will appear after a workspace is created.
+                        {t("sessions.emptyDescription")}
                       </EmptyState.Description>
                     </EmptyState.Header>
                   </EmptyState>
@@ -648,7 +649,7 @@ export default function StoragePage() {
                 count={volumes.length}
                 total={volumeTotal}
                 loading={loading}
-                label="volumes"
+                label={t("sessions.paginationLabel")}
                 onPageChange={setVolumePage}
                 variant="embedded"
               />
@@ -663,18 +664,20 @@ export default function StoragePage() {
         }}
         title={
           pendingDelete && isMissingVolume(pendingDelete)
-            ? "Clean missing storage record?"
-            : "Delete orphan Session Volume?"
+            ? t("confirm.cleanTitle")
+            : t("confirm.deleteTitle")
         }
         description={
           pendingDelete
             ? isMissingVolume(pendingDelete)
-              ? `The volume is already missing. This removes its stale database binding so it is not listed again.`
-              : `This permanently deletes ${pendingDelete.pvc_name}. Active Session Volumes are not affected.`
+              ? t("confirm.cleanDescription")
+              : t("confirm.deleteDescription", { volume: pendingDelete.pvc_name })
             : ""
         }
         confirmLabel={
-          pendingDelete && isMissingVolume(pendingDelete) ? "Clean stale binding" : "Delete orphan"
+          pendingDelete && isMissingVolume(pendingDelete)
+            ? t("actions.cleanBinding")
+            : t("actions.deleteOrphan")
         }
         busy={deleting !== null}
         destructive
@@ -683,9 +686,9 @@ export default function StoragePage() {
       <AdminConfirmDialog
         open={bulkDeleteOpen}
         onOpenChange={setBulkDeleteOpen}
-        title={`Delete ${orphanCount} orphan storage items?`}
-        description="This deletes only orphan volumes and stale Missing bindings. Active Session Volumes are not affected."
-        confirmLabel="Delete orphans"
+        title={t("confirm.bulkTitle", { count: orphanCount })}
+        description={t("confirm.bulkDescription")}
+        confirmLabel={t("confirm.bulkAction")}
         busy={bulkDeleting}
         destructive
         onConfirm={() => void deleteAllOrphanVolumes()}
@@ -695,6 +698,8 @@ export default function StoragePage() {
 }
 
 function NodeStorageCard({ node }: { node: NodeFilesystem }) {
+  const t = useTranslations("admin.storagePage.nodeCard");
+  const format = useFormatter();
   if (!node.available) {
     return (
       <Card className="p-5">
@@ -702,12 +707,10 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
           <div className="flex items-center justify-between gap-3">
             <div className="font-mono text-sm font-medium">{node.node_name}</div>
             <AdminStatusBadge tone="amber" dot>
-              Probe unavailable
+              {t("unavailable")}
             </AdminStatusBadge>
           </div>
-          <p className="text-muted mt-3 text-xs">
-            {node.error || "Storage probe is not reporting from this node."}
-          </p>
+          <p className="text-muted mt-3 text-xs">{node.error || t("notReporting")}</p>
         </Card.Content>
       </Card>
     );
@@ -722,11 +725,14 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
           <div className="min-w-0">
             <AdminTruncatedValue
               className="font-mono text-sm font-medium"
-              copyLabel="node name"
+              copyLabel={t("nodeName")}
               value={node.node_name}
             />
             <div className="text-muted mt-1 text-xs">
-              {formatBytes(node.available_bytes)} available of {formatBytes(node.total_bytes)}
+              {t("availableOf", {
+                available: formatBytes(node.available_bytes),
+                total: formatBytes(node.total_bytes),
+              })}
             </div>
           </div>
         </div>
@@ -742,7 +748,7 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
           />
         </div>
         <div className="text-muted mt-2 flex justify-between text-[11px]">
-          <span>{formatBytes(node.used_bytes)} filesystem used</span>
+          <span>{t("used", { used: formatBytes(node.used_bytes) })}</span>
           <span
             className={cn(
               "font-medium",
@@ -751,7 +757,12 @@ function NodeStorageCard({ node }: { node: NodeFilesystem }) {
               tone === "green" && "text-emerald-700 dark:text-emerald-300",
             )}
           >
-            {formatPercent(availableRatio)} available
+            {t("availablePercent", {
+              percent: format.number(availableRatio, {
+                style: "percent",
+                maximumFractionDigits: 0,
+              }),
+            })}
           </span>
         </div>
       </Card.Content>
@@ -782,22 +793,12 @@ function isMissingVolume(volume: Pick<SessionVolume, "pvc_phase">) {
   return volume.pvc_phase === "Missing";
 }
 
-function formatMeasurementTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "just now";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
 function capacityTone(available: number, total: number): "green" | "amber" | "red" {
   if (total <= 0) return "amber";
   const ratio = available / total;
   if (ratio < 0.1) return "red";
   if (ratio < 0.2) return "amber";
   return "green";
-}
-
-function formatPercent(value: number) {
-  return `${Math.round(Math.min(Math.max(value, 0), 1) * 100)}%`;
 }
 
 function formatBytes(value: number) {

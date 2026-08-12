@@ -1,0 +1,136 @@
+{
+  "workspace": {
+    "title": "Wiki",
+    "refresh": "Refresh Wiki",
+    "search": "Search this Wiki",
+    "parentFolder": "Parent folder",
+    "folderPath": "Wiki folder path",
+    "allFiles": "All files",
+    "noMatches": "No matching pages",
+    "loadingTree": "Loading your Wiki…",
+    "emptyTree": "Create your first page or upload a file.",
+    "folder": "Folder",
+    "page": "Page",
+    "upload": "Upload",
+    "fileLimit": "{size} max per file",
+    "resizeSidebar": "Resize Wiki sidebar",
+    "dismiss": "Dismiss",
+    "untitledFilename": "Untitled.md",
+    "fileTooLarge": "{name} exceeds the {limit} file limit.",
+    "dialog": {
+      "close": "Close Wiki action",
+      "createFolder": "Create folder",
+      "createMarkdown": "Create Markdown page",
+      "renameItem": "Rename item",
+      "folderDescription": "Add a folder to the current Wiki location.",
+      "markdownDescription": "Create an editable Markdown page in the current Wiki location.",
+      "renameDescription": "Choose a new name. The file type must stay supported by Wiki.",
+      "folderName": "Folder name",
+      "filename": "Filename",
+      "newName": "New name",
+      "name": "Name",
+      "cancel": "Cancel",
+      "rename": "Rename",
+      "create": "Create"
+    },
+    "delete": {
+      "action": "Delete",
+      "folderTitle": "Delete folder?",
+      "fileTitle": "Delete file?",
+      "folderDescription": "{name} and everything inside it will be permanently deleted.",
+      "fileDescription": "{name} will be permanently deleted.",
+      "thisFile": "This file"
+    },
+    "discard": {
+      "title": "Discard unsaved changes?",
+      "description": "This page has changes that have not been saved. Continue only if you do not need them.",
+      "confirm": "Discard and continue",
+      "cancel": "Keep editing"
+    },
+    "actions": {
+      "download": "Download",
+      "downloadNamed": "Download {name}",
+      "rename": "Rename",
+      "renameNamed": "Rename {name}",
+      "delete": "Delete",
+      "deleteNamed": "Delete {name}"
+    },
+    "folderView": {
+      "items": "{count, plural, one {# item} other {# items}}",
+      "folder": "Folder",
+      "empty": "This folder is empty."
+    },
+    "fileView": {
+      "office": {
+        "title": "Ready for Agent reading",
+        "description": "Cocola preserves the original Office file. Reference it with @ in a chat and the Agent can extract its document, slide, or spreadsheet content. Web preview and online Office editing are not included.",
+        "download": "Download original"
+      },
+      "saving": "Saving…",
+      "save": "Save",
+      "loading": "Loading page…",
+      "loadError": "Couldn’t open this page",
+      "tryAgain": "Try again",
+      "conflict": "This page changed in another tab. Reload before continuing to avoid overwriting it.",
+      "reload": "Reload",
+      "status": {
+        "loading": "Loading…",
+        "load-error": "Load failed",
+        "saved": "Saved",
+        "dirty": "Unsaved",
+        "saving": "Saving…",
+        "conflict": "Edit conflict",
+        "error": "Save failed"
+      }
+    },
+    "welcome": {
+      "title": "Build your working Wiki",
+      "description": "Organize durable context in folders, write Markdown with source fidelity, and reference exact files in any Agent conversation with @.",
+      "newMarkdown": "New Markdown",
+      "upload": "Upload files"
+    }
+  },
+  "editor": {
+    "placeholder": "Start writing your page…",
+    "richAria": "Markdown page editor",
+    "sourceAria": "Markdown source editor",
+    "sourceWarning": "This page uses Markdown syntax that the rich-text editor cannot safely preserve. Edit the source directly to keep all content intact.",
+    "checking": "Checking Markdown compatibility…",
+    "toolbar": "Page formatting",
+    "buttons": {
+      "bold": "Bold (Cmd+B)",
+      "italic": "Italic (Cmd+I)",
+      "underline": "Underline (Cmd+U)",
+      "strikethrough": "Strikethrough",
+      "highlight": "Highlight",
+      "inlineCode": "Inline code",
+      "heading1": "Heading 1",
+      "heading2": "Heading 2",
+      "heading3": "Heading 3",
+      "bulletList": "Bullet list",
+      "orderedList": "Ordered list",
+      "taskList": "Task list",
+      "blockquote": "Blockquote",
+      "codeBlock": "Code block",
+      "link": "Insert or edit link",
+      "image": "Insert image by URL",
+      "rule": "Horizontal rule",
+      "clear": "Clear formatting",
+      "undo": "Undo (Cmd+Z)",
+      "redo": "Redo (Cmd+Shift+Z)"
+    },
+    "url": {
+      "imageError": "Use an http(s) or site-relative image URL.",
+      "linkError": "Use an http(s), mailto, tel, or site-relative URL.",
+      "imageTitle": "Insert image",
+      "linkTitle": "Add link",
+      "imageDescription": "Add an image using a secure remote or site-relative URL.",
+      "linkDescription": "Link the selected text to a web page, email address, phone number, or Wiki URL.",
+      "imageLabel": "Image URL",
+      "linkLabel": "Link URL",
+      "insertImage": "Insert image",
+      "applyLink": "Apply link",
+      "removeLink": "Remove link"
+    }
+  }
+}

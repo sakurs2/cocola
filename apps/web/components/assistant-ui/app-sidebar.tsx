@@ -22,6 +22,7 @@ import {
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { CocolaLogo } from "@/components/cocola-logo";
 import {
@@ -38,7 +39,12 @@ import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 // (conversation persistence, route A); secondary areas remain lightweight
 // product shells until their backing features land.
 
-type NavItem = { icon: PhosphorIcon; label: string; href?: string; iconClassName?: string };
+type NavItem = {
+  icon: PhosphorIcon;
+  labelKey: "tasks" | "agents" | "skills" | "mcps" | "wiki" | "connectors" | "admin";
+  href?: string;
+  iconClassName?: string;
+};
 type SidebarSection = "actions" | "navigation" | "projects" | "folders" | "chats" | "account";
 
 type PrimaryNavItem = NavItem & {
@@ -48,49 +54,49 @@ type PrimaryNavItem = NavItem & {
 const PRIMARY_NAV: PrimaryNavItem[] = [
   {
     icon: CalendarDots,
-    label: "Tasks",
+    labelKey: "tasks",
     href: "/tasks",
     section: "navigation",
     iconClassName: "text-blue-600",
   },
   {
     icon: Bot,
-    label: "Agents",
+    labelKey: "agents",
     href: "/agents",
     section: "navigation",
     iconClassName: "text-cyan-600",
   },
   {
     icon: Sparkle,
-    label: "Skills",
+    labelKey: "skills",
     href: "/skills",
     section: "navigation",
     iconClassName: "text-violet-600",
   },
   {
     icon: PlugsConnected,
-    label: "MCP",
+    labelKey: "mcps",
     href: "/mcps",
     section: "navigation",
     iconClassName: "text-orange-600",
   },
   {
     icon: BookOpenText,
-    label: "Wiki",
+    labelKey: "wiki",
     href: "/wiki",
     section: "navigation",
     iconClassName: "text-blue-600",
   },
   {
     icon: Cable,
-    label: "Connectors",
+    labelKey: "connectors",
     href: "/connectors",
     section: "navigation",
     iconClassName: "text-emerald-600",
   },
   {
     icon: ShieldCheck,
-    label: "Admin",
+    labelKey: "admin",
     href: "/admin",
     section: "navigation",
     iconClassName: "text-slate-500",
@@ -105,6 +111,7 @@ export function AppSidebar({
   onToggleImmersive?: () => void;
 } = {}) {
   const { data: session } = useSession();
+  const t = useTranslations("navigation");
   const pathname = usePathname();
   const router = useRouter();
   const { showError, showSuccess } = useWorkspaceToast();
@@ -135,8 +142,8 @@ export function AppSidebar({
     unreadCompletedSessionIds,
   } = useCocola();
   const isAdmin = session?.user?.role === "admin";
-  const userLabel = session?.user?.name || session?.user?.email || "User";
-  const userSubtitle = session?.user?.role;
+  const userLabel = session?.user?.name || session?.user?.email || t("user");
+  const userSubtitle = session?.user?.role === "admin" ? t("admin") : t("workspaceMember");
   const userInitial = userLabel.trim().slice(0, 1).toUpperCase() || "U";
   const visiblePrimaryNav = PRIMARY_NAV.filter(
     (item) => !item.href?.startsWith("/admin") || isAdmin,
@@ -210,7 +217,7 @@ export function AppSidebar({
     try {
       await renameConversation(id, title);
     } catch (error) {
-      showError(error instanceof Error ? error.message : "Rename failed. Please try again.");
+      showError(error instanceof Error ? error.message : t("renameFailed"));
     }
   };
 
@@ -227,7 +234,7 @@ export function AppSidebar({
       await deleteConversation(deleteTarget.id);
       setDeleteTarget(null);
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Delete failed. Please try again.");
+      setDeleteError(error instanceof Error ? error.message : t("deleteFailed"));
     } finally {
       setDeleting(false);
     }
@@ -237,11 +244,11 @@ export function AppSidebar({
     try {
       await moveConversation(conversationId, folderId);
       const destination = folderId
-        ? folders.find((folder) => folder.id === folderId)?.name || "folder"
-        : "Chats";
-      showSuccess(`Moved to ${destination}`);
+        ? folders.find((folder) => folder.id === folderId)?.name || t("folder")
+        : "";
+      showSuccess(folderId ? t("movedFolder", { name: destination }) : t("movedChats"));
     } catch (error) {
-      showError(error instanceof Error ? error.message : "Could not move conversation");
+      showError(error instanceof Error ? error.message : t("deleteFailed"));
     }
   };
 
@@ -256,7 +263,7 @@ export function AppSidebar({
                 cocola
               </span>
               <span className="block truncate text-xs font-medium text-foreground/70">
-                agent workspace
+                {t("agentWorkspace")}
               </span>
             </div>
           </div>
@@ -264,8 +271,8 @@ export function AppSidebar({
             <button
               type="button"
               onClick={onToggleImmersive}
-              title={immersive ? "Exit immersive mode" : "Enter immersive mode"}
-              aria-label={immersive ? "Exit immersive mode" : "Enter immersive mode"}
+              title={immersive ? t("exitImmersive") : t("enterImmersive")}
+              aria-label={immersive ? t("exitImmersive") : t("enterImmersive")}
               aria-pressed={immersive}
               className="grid size-8 shrink-0 place-items-center rounded-xl text-foreground/65 transition-colors hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
             >
@@ -278,19 +285,19 @@ export function AppSidebar({
           <SidebarSectionPanel refSetter={setSectionRef("actions")}>
             <button
               type="button"
-              title="New Chat"
+              title={t("newChat")}
               onClick={openNewChat}
               className="cocola-web-new-chat flex h-11 w-full items-center justify-start gap-2.5 rounded-2xl px-2.5 text-[13.5px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
             >
               <span className="cocola-web-new-chat-icon grid size-7 shrink-0 place-items-center rounded-xl">
                 <PlusCircle className="size-4" />
               </span>
-              <span>New Chat</span>
+              <span>{t("newChat")}</span>
             </button>
           </SidebarSectionPanel>
 
           <SidebarSectionPanel refSetter={setSectionRef("navigation")}>
-            {visiblePrimaryNav.map(({ icon: Icon, label, href, iconClassName }) => {
+            {visiblePrimaryNav.map(({ icon: Icon, labelKey, href, iconClassName }) => {
               const active = href
                 ? href === "/"
                   ? pathname === "/"
@@ -298,13 +305,13 @@ export function AppSidebar({
                 : false;
               return (
                 <SidebarExpandedRow
-                  key={label}
-                  title={label}
+                  key={labelKey}
+                  title={t(labelKey)}
                   active={active}
                   onClick={href ? () => navigateTo(href) : undefined}
                 >
                   <Icon className={cn("size-4 shrink-0", iconClassName ?? "text-foreground")} />
-                  <span className="truncate">{label}</span>
+                  <span className="truncate">{t(labelKey)}</span>
                 </SidebarExpandedRow>
               );
             })}
@@ -325,13 +332,13 @@ export function AppSidebar({
                 className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
               >
                 <FolderGit2 className="size-4 shrink-0 text-indigo-500" />
-                <span className="truncate">Projects</span>
+                <span className="truncate">{t("projects")}</span>
               </Link>
               <Link
                 href="/projects/new"
                 onClick={guardLinkNavigation}
-                aria-label="Create or import project"
-                title="Create or import project"
+                aria-label={t("createItem", { name: t("projects") })}
+                title={t("createItem", { name: t("projects") })}
                 className="grid size-7 place-items-center rounded-lg text-foreground/65 transition hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
               >
                 <PlusCircle className="size-4" />
@@ -354,13 +361,13 @@ export function AppSidebar({
                 className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch"
               >
                 <Folder className="size-4 shrink-0 text-amber-500" />
-                <span className="truncate">Folders</span>
+                <span className="truncate">{t("folders")}</span>
               </Link>
               <Link
                 href="/folders?new=1"
                 onClick={guardLinkNavigation}
-                aria-label="Create folder"
-                title="Create folder"
+                aria-label={t("createItem", { name: t("folders") })}
+                title={t("createItem", { name: t("folders") })}
                 className="grid size-7 place-items-center rounded-lg text-foreground/65 transition hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
               >
                 <PlusCircle className="size-4" />
@@ -369,9 +376,9 @@ export function AppSidebar({
           </SidebarSectionPanel>
 
           <SidebarSectionPanel refSetter={setSectionRef("chats")}>
-            <SectionLabel>Chats</SectionLabel>
+            <SectionLabel>{t("chats")}</SectionLabel>
             {recentConversations.length === 0 ? (
-              <div className="px-2.5 py-1 text-xs text-foreground/50">No conversations yet</div>
+              <div className="px-2.5 py-1 text-xs text-foreground/50">{t("recentChats")}</div>
             ) : (
               <div className="flex flex-col gap-0.5">
                 {recentConversations.map((c) => (
@@ -391,8 +398,8 @@ export function AppSidebar({
                     onOpen={() => {
                       openConversation(c);
                     }}
-                    onRename={() => startRename(c.id, c.title || "Untitled")}
-                    onDelete={() => openDeleteDialog(c.id, c.title || "Untitled")}
+                    onRename={() => startRename(c.id, c.title || t("untitled"))}
+                    onDelete={() => openDeleteDialog(c.id, c.title || t("untitled"))}
                     onMove={(folderId) => void moveChat(c.id, folderId)}
                     onDraftChange={setDraftTitle}
                     onCommitRename={() => void commitRename(c.id)}
@@ -408,7 +415,7 @@ export function AppSidebar({
           <Link
             href="/profile"
             onClick={guardLinkNavigation}
-            title="Profile"
+            title={t("profile")}
             className="group flex min-w-0 items-center gap-2 rounded-2xl px-2 py-1.5 text-foreground/90 transition-colors hover:bg-default hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/45"
           >
             <div className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-[11px] font-medium text-accent-foreground">
@@ -429,13 +436,10 @@ export function AppSidebar({
 
       <DeleteConfirmDialog
         open={deleteTarget !== null}
-        title="Delete conversation?"
-        description={
-          <>
-            <span className="font-medium text-foreground">{deleteTarget?.title}</span> will be
-            permanently deleted. Stop its running answer first.
-          </>
-        }
+        title={t("deleteConversationTitle")}
+        description={t("deleteConversationDescription", {
+          title: deleteTarget?.title ?? t("untitled"),
+        })}
         busy={deleting}
         error={deleteError}
         onOpenChange={(open) => {
@@ -520,7 +524,8 @@ function ChatHistoryItem({
   onCommitRename: () => void;
   onCancelRename: () => void;
 }) {
-  const title = conversation.title || "Untitled";
+  const t = useTranslations("navigation");
+  const title = conversation.title || t("untitled");
   return (
     <div
       className={cn(
@@ -568,14 +573,14 @@ function ChatHistoryItem({
       {running ? (
         <SpinnerGap
           className="size-3.5 shrink-0 animate-spin text-foreground/70"
-          aria-label="Agent is answering"
+          aria-label={t("agentAnswering")}
         />
       ) : !editing ? (
         <div className="flex shrink-0 items-center gap-0.5">
           {unread ? (
             <CheckCircle
               className="size-3.5 text-emerald-500 transition-opacity group-hover:hidden"
-              aria-label="Answer completed"
+              aria-label={t("answerCompleted")}
             />
           ) : null}
           <ConversationActionsMenu

@@ -75,10 +75,10 @@ test("Quantity settings separate the numeric value from MB and GB", () => {
 });
 
 test("Missing storage uses the stale cleanup flow without offering a rebuild action", () => {
-  assert.match(storageSource, /Stale binding can be cleaned/);
-  assert.match(storageSource, /A fresh volume is created on the next run/);
-  assert.match(storageSource, /Clean stale binding/);
-  assert.match(storageSource, /Delete orphan volume/);
+  assert.match(storageSource, /t\("states\.staleBinding"\)/);
+  assert.match(storageSource, /t\("states\.freshNextRun"\)/);
+  assert.match(storageSource, /t\("actions\.cleanBinding"\)/);
+  assert.match(storageSource, /t\("actions\.deleteOrphanVolume"\)/);
   assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed/);
   assert.doesNotMatch(storageSource, /Rebuild empty Volume|Recreate Volume/);
 });
@@ -87,25 +87,25 @@ test("Storage measurement reports progress and results in a centered HeroUI card
   assert.match(adminUISource, /export function AdminToast[\s\S]*?<Card/);
   assert.match(
     storageSource,
-    /setToast\(\{ message: "Measuring volume usage…", tone: "loading" \}\)/,
+    /setToast\(\{ message: t\("toast\.measuring"\), tone: "loading" \}\)/,
   );
   assert.match(storageSource, /method: "POST"/);
-  assert.match(storageSource, /Measured \$\{formatBytes\(result\.allocated_bytes\)\}/);
+  assert.match(storageSource, /t\("toast\.measured"/);
   assert.match(storageSource, /measurement: result/);
   assert.match(storageSource, /const measurement = volume\.measurement/);
   assert.match(storageSource, /groupVolumesByNode\(targets\)/);
   assert.match(storageSource, /for \(const volume of group\)/);
   assert.match(storageSource, /index \+= 4/);
-  assert.match(storageSource, /Measure page/);
+  assert.match(storageSource, /t\("actions\.measurePage"\)/);
   assert.match(storageSource, /<AdminToast/);
   assert.doesNotMatch(storageSource, /Session requests|No cleanup needed/);
 });
 
 test("Session storage exposes safe orphan deletion without ambiguous cleanup copy", () => {
   assert.match(storageSource, /orphan_count\?: number/);
-  assert.match(storageSource, /Delete orphans \(\{orphanCount\}\)/);
+  assert.match(storageSource, /t\("actions\.deleteOrphans", \{ count: orphanCount \}\)/);
   assert.match(storageSource, /fetch\("\/api\/admin\/session-storage\/orphans"/);
-  assert.match(storageSource, /Active Session Volumes are not affected/);
+  assert.match(storageSource, /t\("confirm\.bulkDescription"\)/);
   assert.doesNotMatch(storageSource, /Clean up all|No cleanup needed/);
 });
 
@@ -113,15 +113,8 @@ test("Session storage keeps only user-facing operational columns", () => {
   assert.doesNotMatch(storageSource, /header: "Generation"/);
   assert.doesNotMatch(storageSource, /header: "Last reset"/);
   assert.match(storageSource, /contentClassName="min-w-\[940px\]"/);
-  for (const header of [
-    "Session / User",
-    "Node",
-    "Volume",
-    "Requested",
-    "Actual usage",
-    "Actions",
-  ]) {
-    assert.match(storageSource, new RegExp(`header: "${header}"`));
+  for (const key of ["sessionUser", "node", "volume", "requested", "actualUsage", "actions"]) {
+    assert.match(storageSource, new RegExp(`header: t\\("columns\\.${key}"\\)`));
   }
 });
 
@@ -131,28 +124,28 @@ test("Admin runtime surfaces keep feedback compact and omit inapplicable Compose
   assert.match(nodesSource, /const composeOnly =/);
   assert.match(nodesSource, /column\.id !== "capacity" && column\.id !== "actions"/);
   assert.match(nodesSource, /formatMemoryQuantity\(node\.memory_allocatable\)/);
-  assert.match(storageSource, /\{formatPercent\(availableRatio\)\} available/);
+  assert.match(storageSource, /t\("availablePercent"/);
   assert.doesNotMatch(storageSource, /formatPercent\(occupiedRatio\)\} unavailable/);
 });
 
 test("Sandbox rows keep one-line summaries and move diagnostics into a centered details modal", () => {
-  for (const header of ["Sandbox", "Status", "Owner", "Node", "Created", "Actions"]) {
-    assert.match(sandboxesSource, new RegExp('header: "' + header + '"'));
+  for (const key of ["sandbox", "status", "owner", "node", "created", "actions"]) {
+    assert.match(sandboxesSource, new RegExp(`header: t\\("columns\\.${key}"\\)`));
   }
   assert.doesNotMatch(
     sandboxesSource,
     /header: "Session \/ User"|header: "Runtime"|header: "Node \/ Pod"/,
   );
-  assert.match(sandboxesSource, /label: "View details"/);
+  assert.match(sandboxesSource, /label: t\("actions\.details"\)/);
   assert.match(sandboxesSource, /<Modal\.Container placement="center"/);
-  assert.match(sandboxesSource, /label="Runtime image"/);
-  assert.match(sandboxesSource, /label="Session ID"/);
+  assert.match(sandboxesSource, /label=\{t\("details\.image"\)\}/);
+  assert.match(sandboxesSource, /label=\{t\("details\.sessionId"\)\}/);
 });
 
 test("Empty MCP state has one create action and no redundant search control", () => {
   assert.match(mcpsSource, /loading \|\| mcps\.length > 0/);
   assert.match(mcpsSource, /<AdminToast message=\{notice\}/);
-  assert.match(mcpsSource, /No MCP servers configured/);
+  assert.match(mcpsSource, /t\("empty"\)/);
 });
 
 test("Truncated Admin table values share tooltip, navigation, and visible copy affordances", () => {

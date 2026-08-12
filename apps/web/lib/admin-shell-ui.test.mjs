@@ -101,8 +101,8 @@ test("Admin utility pages keep stable HeroUI controls and visible architecture c
   assert.match(architectureSource, /<Card[\s\S]*?admin-architecture-node-card group h-28 w-full/);
   assert.match(architectureSource, /<button[\s\S]*?aria-pressed=\{selected\}/);
   assert.match(architectureSource, /<ChevronRight/);
-  assert.match(componentLogsSource, /<Label>Service<\/Label>/);
-  assert.match(componentLogsSource, /lines\.length === 1 \? "line" : "lines"/);
+  assert.match(componentLogsSource, /<Label>\{t\("service"\)\}<\/Label>/);
+  assert.match(componentLogsSource, /t\("lineCount", \{ count: lines\.length \}\)/);
   assert.match(componentLogsSource, /max-h-\[32rem\] min-h-32/);
   assert.match(globalStyles, /\.admin-architecture-node-card:hover/);
   assert.match(globalStyles, /transform: translateY\(-2px\)/);

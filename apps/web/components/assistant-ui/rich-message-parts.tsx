@@ -29,6 +29,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   type QuestionAnswer,
@@ -49,13 +50,6 @@ import {
   resultRecord,
 } from "@/lib/structured-result-view";
 import { cn } from "@/lib/utils";
-
-const QUESTION_STATUS_LABELS: Record<QuestionStatus, string> = {
-  pending: "Waiting for you",
-  answering: "Continuing",
-  answered: "Answered",
-  cancelled: "Cancelled",
-};
 
 const QUESTION_STATUS_VIEW: Record<
   QuestionStatus,
@@ -91,6 +85,7 @@ export function QuestionCard({
   onAnswer?: (question: UiQuestionPart, answer: QuestionAnswer) => Promise<void>;
   onCancel?: (question: UiQuestionPart) => Promise<void>;
 }) {
+  const t = useTranslations("chat.question");
   const [selectedOptionId, setSelectedOptionId] = useState(question.answer?.optionId ?? "");
   const [customAnswer, setCustomAnswer] = useState(question.answer?.text ?? "");
   const [action, setAction] = useState<"answer" | "cancel" | null>(null);
@@ -114,11 +109,7 @@ export function QuestionCard({
         ...(customAnswer.trim() ? { text: customAnswer.trim() } : {}),
       });
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Could not continue the conversation. Try again.",
-      );
+      setError(requestError instanceof Error ? requestError.message : t("continueFailed"));
     } finally {
       setAction(null);
     }
@@ -131,9 +122,7 @@ export function QuestionCard({
     try {
       await onCancel(question);
     } catch (requestError) {
-      setError(
-        requestError instanceof Error ? requestError.message : "Could not cancel the question.",
-      );
+      setError(requestError instanceof Error ? requestError.message : t("cancelFailed"));
     } finally {
       setAction(null);
     }
@@ -156,12 +145,10 @@ export function QuestionCard({
           </span>
           <div className="min-w-0">
             <Card.Title id={titleId} className="text-base tracking-[-0.02em]">
-              {question.status === "pending" ? "Your input is needed" : "Question"}
+              {question.status === "pending" ? t("inputNeeded") : t("title")}
             </Card.Title>
             <Card.Description className="mt-0.5 text-xs">
-              {question.status === "pending"
-                ? "Choose an option or write a response."
-                : QUESTION_STATUS_LABELS[question.status]}
+              {question.status === "pending" ? t("choose") : t(`status.${question.status}`)}
             </Card.Description>
           </div>
         </div>
@@ -171,7 +158,7 @@ export function QuestionCard({
           ) : (
             <StatusIcon className="size-3.5" aria-hidden="true" />
           )}
-          {QUESTION_STATUS_LABELS[question.status]}
+          {t(`status.${question.status}`)}
         </Chip>
       </Card.Header>
 
@@ -215,11 +202,11 @@ export function QuestionCard({
             variant="secondary"
             onChange={setCustomAnswer}
           >
-            <Label className="sr-only">Your answer</Label>
+            <Label className="sr-only">{t("answerLabel")}</Label>
             <TextArea
               className="min-h-20 resize-y"
               maxLength={16 * 1024}
-              placeholder="Write your own answer…"
+              placeholder={t("answerPlaceholder")}
               rows={3}
             />
           </TextField>
@@ -229,7 +216,7 @@ export function QuestionCard({
           </div>
         ) : null}
         {question.status === "cancelled" ? (
-          <p className="text-xs text-muted">This question is no longer active.</p>
+          <p className="text-xs text-muted">{t("inactive")}</p>
         ) : null}
         {error ? (
           <p role="alert" className="bg-danger-soft text-danger rounded-xl px-3 py-2 text-xs">
@@ -249,7 +236,7 @@ export function QuestionCard({
               variant="outline"
               onPress={() => void cancel()}
             >
-              Cancel question
+              {t("cancel")}
             </Button>
             <Button
               isDisabled={busy || (!selectedOptionId && !customAnswer.trim())}
@@ -257,7 +244,7 @@ export function QuestionCard({
               size="sm"
               onPress={() => void submit()}
             >
-              Answer and continue
+              {t("answer")}
             </Button>
           </Card.Footer>
         </>
@@ -266,19 +253,12 @@ export function QuestionCard({
   );
 }
 
-const RUN_STATUS_LABELS: Record<RunSummaryStatus, string> = {
-  success: "Completed",
-  waiting_input: "Waiting for input",
-  cancelled: "Stopped",
-  error: "Failed",
-  interrupted: "Interrupted",
-};
-
 export const RunSummaryPart: FC<DataMessagePartProps<Omit<UiRunSummaryPart, "type">>> = ({
   data,
 }) => <RunSummary summary={{ ...data, type: "run-summary" }} />;
 
 export function RunSummary({ summary }: { summary: UiRunSummaryPart }) {
+  const t = useTranslations("chat.runSummary");
   const actions = summary.toolCallCount;
   return (
     <details className="group my-2 text-xs text-muted">
@@ -287,20 +267,18 @@ export function RunSummary({ summary }: { summary: UiRunSummaryPart }) {
           <Activity className="size-4 shrink-0" aria-hidden="true" />
         </span>
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="font-medium text-foreground">{RUN_STATUS_LABELS[summary.status]}</span>
+          <span className="font-medium text-foreground">{t(`status.${summary.status}`)}</span>
           {summary.modelLabel ? <span>· {summary.modelLabel}</span> : null}
           {summary.durationMs > 0 ? <span>· {formatAgentDuration(summary.durationMs)}</span> : null}
-          <span>
-            · {actions} {actions === 1 ? "action" : "actions"}
-          </span>
+          <span>· {t("actions", { count: actions })}</span>
           <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
         </span>
       </summary>
       <div className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2.5">
         <div className="col-start-2 flex flex-wrap gap-x-4 gap-y-1 pb-1.5">
-          <span>{summary.llmCallCount} LLM calls</span>
-          <span>{summary.toolCallCount} tool calls</span>
-          {summary.errorCode ? <span>Error code: {summary.errorCode}</span> : null}
+          <span>{t("llmCalls", { count: summary.llmCallCount })}</span>
+          <span>{t("toolCalls", { count: summary.toolCallCount })}</span>
+          {summary.errorCode ? <span>{t("errorCode", { code: summary.errorCode })}</span> : null}
         </div>
       </div>
     </details>
@@ -320,22 +298,26 @@ function GenericJSON({ data }: { data: unknown }) {
 }
 
 const RESULT_META = {
-  summary: { label: "Summary result", icon: FileText },
-  table: { label: "Table result", icon: Table2 },
-  list: { label: "List result", icon: List },
-  metrics: { label: "Metrics result", icon: BarChart3 },
+  summary: { icon: FileText },
+  table: { icon: Table2 },
+  list: { icon: List },
+  metrics: { icon: BarChart3 },
 } as const;
 
 export function StructuredResultCard({ result }: { result: UiStructuredResultPart }) {
+  const t = useTranslations("chat.result");
   const [copied, setCopied] = useState(false);
   const supported =
     result.rendererVersion === 1 &&
     ["summary", "table", "list", "metrics"].includes(result.renderer);
   const root = resultRecord(result.data);
-  const title = result.title || (typeof root?.title === "string" ? root.title : "Result");
-  const meta = Object.prototype.hasOwnProperty.call(RESULT_META, result.renderer)
-    ? RESULT_META[result.renderer as keyof typeof RESULT_META]
-    : { label: "Structured result", icon: Braces };
+  const title = result.title || (typeof root?.title === "string" ? root.title : t("fallbackTitle"));
+  const metaKey = Object.prototype.hasOwnProperty.call(RESULT_META, result.renderer)
+    ? (result.renderer as keyof typeof RESULT_META)
+    : null;
+  const meta = metaKey
+    ? { label: t(metaKey), icon: RESULT_META[metaKey].icon }
+    : { label: t("structured"), icon: Braces };
   const ResultIcon = meta.icon;
 
   const copy = async () => {
@@ -360,18 +342,18 @@ export function StructuredResultCard({ result }: { result: UiStructuredResultPar
         </div>
         <button
           type="button"
-          aria-label={copied ? "JSON copied" : "Copy result JSON"}
+          aria-label={copied ? t("jsonCopied") : t("copyJson")}
           onClick={() => void copy()}
           className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/30"
         >
           {copied ? <Check className="size-3.5" /> : <ClipboardCopy className="size-3.5" />}
-          <span className="hidden sm:inline">{copied ? "Copied" : "Copy JSON"}</span>
+          <span className="hidden sm:inline">{copied ? t("copied") : t("copy")}</span>
         </button>
       </header>
       <div className={cn(supported && result.renderer === "table" ? "p-0" : "p-4 sm:p-5")}>
         {!supported ? (
           <div className="space-y-3">
-            <p className="text-sm font-medium text-muted">Unsupported result format</p>
+            <p className="text-sm font-medium text-muted">{t("unsupported")}</p>
             <GenericJSON data={result.data} />
           </div>
         ) : result.renderer === "table" ? (
@@ -430,6 +412,7 @@ function SummaryResult({ data }: { data: unknown }) {
 }
 
 function TableResult({ data, title }: { data: unknown; title: string }) {
+  const t = useTranslations("chat.result");
   const { columns, rows } = buildTableView(data);
   if (columns.length === 0) {
     return (
@@ -442,7 +425,7 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
     <div
       className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus/30"
       role="region"
-      aria-label={`${title} table`}
+      aria-label={t("tableAria", { title })}
       tabIndex={0}
     >
       <table className="w-max min-w-full border-collapse text-left text-sm">
@@ -466,7 +449,7 @@ function TableResult({ data, title }: { data: unknown; title: string }) {
           {rows.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className="px-5 py-8 text-center text-sm text-muted">
-                No rows
+                {t("noRows")}
               </td>
             </tr>
           ) : (

@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from "@gravity-ui/icons";
 import { Button, Tooltip } from "@heroui/react";
+import { useTranslations } from "next-intl";
 import { useEffect, useSyncExternalStore } from "react";
 
 type ColorMode = "light" | "dark";
@@ -17,6 +18,7 @@ function applyColorMode(mode: ColorMode) {
 }
 
 export function WorkspaceThemeToggle() {
+  const t = useTranslations("common");
   const mode = useSyncExternalStore(
     (subscriber) => {
       subscribers.add(subscriber);
@@ -39,7 +41,7 @@ export function WorkspaceThemeToggle() {
   }, []);
 
   const nextMode: ColorMode = mode === "light" ? "dark" : "light";
-  const label = `Switch to ${nextMode} mode`;
+  const label = t("switchTheme", { mode: t(`themes.${nextMode}`) });
 
   return (
     <Tooltip delay={0}>

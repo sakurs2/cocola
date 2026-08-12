@@ -1,0 +1,203 @@
+{
+  "list": {
+    "title": "Projects",
+    "description": "Long-lived workspaces backed by local or connected repositories.",
+    "new": "New project",
+    "search": "Search projects",
+    "provider": "Project provider",
+    "all": "All",
+    "github": "GitHub",
+    "local": "Local",
+    "allProjects": "All projects",
+    "count": "{count, plural, one {# project} other {# projects}}",
+    "regionLabel": "Projects",
+    "noDescription": "No description",
+    "open": "Open project",
+    "updated": "Updated {time}",
+    "repository": "Cocola repository",
+    "recently": "recently",
+    "noResults": "No projects found",
+    "empty": "No projects yet",
+    "noResultsDescription": "Try another search or provider.",
+    "emptyDescription": "Create a local workspace or connect a GitHub repository.",
+    "clearFilters": "Clear filters",
+    "status": {
+      "ready": "Ready",
+      "provisioning": "Provisioning",
+      "failed": "Failed",
+      "archiving": "Archiving",
+      "archive_failed": "Archive failed",
+      "archived": "Archived"
+    }
+  },
+  "taskBar": { "project": "Project", "mergedReadOnly": "Merged · read-only" },
+  "new": {
+    "title": "New Project",
+    "description": "Choose a source and repository policy.",
+    "back": "Back to Projects",
+    "sources": {
+      "empty": { "title": "Empty Project", "description": "Start from a clean local workspace." },
+      "create": { "title": "Create on GitHub" },
+      "import": { "title": "Import GitHub", "description": "Choose an installed repository" },
+      "connected": "Connected as {account}",
+      "connectorRequired": "Connector required"
+    },
+    "connect": {
+      "title": "Connect your personal GitHub App first",
+      "description": "Empty Projects remain available without GitHub. GitHub create and import use your own private App.",
+      "action": "Open Connectors"
+    },
+    "details": {
+      "title": "Project details",
+      "editable": "Name and description can be changed later.",
+      "imported": "Name and describe the imported workspace."
+    },
+    "fields": {
+      "projectName": "Project name",
+      "projectNamePlaceholder": "My project",
+      "repositoryName": "Repository name",
+      "description": "Description",
+      "optional": "Optional",
+      "visibility": "Visibility"
+    },
+    "visibility": { "private": "Private (recommended)", "public": "Public" },
+    "actions": { "cancel": "Cancel", "create": "Create project" },
+    "repositories": {
+      "title": "GitHub repositories",
+      "description": "Choose an installed repository to import.",
+      "ready": "Ready",
+      "search": "Search repositories",
+      "loadMore": "Load more repositories"
+    },
+    "errors": {
+      "connection": "Could not check GitHub connection",
+      "repositories": "Could not list installed repositories",
+      "projectName": "Project name is required.",
+      "repositoryName": "Repository name is required.",
+      "chooseRepository": "Choose a repository to import.",
+      "create": "Could not create project"
+    }
+  },
+  "detail": {
+    "back": "Back to Projects",
+    "noDescription": "No description",
+    "preparing": "Preparing",
+    "status": {
+      "ready": "Ready",
+      "provisioning": "Provisioning",
+      "failed": "Failed",
+      "archiving": "Archiving",
+      "archive_failed": "Archive failed",
+      "archived": "Archived"
+    },
+    "changeRequest": {
+      "open": "In review",
+      "checks_pending": "Checks pending",
+      "conflict": "Conflict",
+      "merged": "Merged",
+      "closed": "Closed",
+      "failed": "Failed",
+      "working": "Working"
+    },
+    "notFound": {
+      "title": "Project not found",
+      "description": "It may have been archived or belongs to another account."
+    },
+    "limitations": {
+      "both": "Git LFS objects and submodules are not downloaded in phase one.",
+      "lfs": "Git LFS objects are kept as pointer files in phase one.",
+      "submodules": "Git submodules are not initialized in phase one."
+    },
+    "archived": {
+      "title": "Project archived",
+      "description": "New tasks are disabled. Existing tasks and saved Git snapshots remain available."
+    },
+    "failed": {
+      "title": "Project provisioning failed",
+      "description": "Repository provisioning has not completed.",
+      "retry": "Retry reconciliation"
+    },
+    "archive": {
+      "action": "Archive Project",
+      "archiving": "Repository access is being revoked.",
+      "failed": "The repository could not be archived safely.",
+      "retry": "Retry archive",
+      "confirmTitle": "Archive this Project?",
+      "githubDescription": "The GitHub repository will not be deleted.",
+      "cocolaDescription": "The Cocola repository becomes read-only. Existing task history remains available."
+    },
+    "repository": {
+      "title": "Repository",
+      "cocola": "Cocola repository",
+      "provider": "Provider",
+      "defaultBranch": "Default branch",
+      "visibility": "Visibility",
+      "private": "Private"
+    },
+    "activity": {
+      "title": "Project activity",
+      "description": "Current Project state and task history.",
+      "status": "Status",
+      "tasks": "Tasks"
+    },
+    "start": {
+      "preparingTitle": "Preparing Project workspace",
+      "preparingDescription": "Loading tasks and preparing a conversation workspace…",
+      "title": "Start project work",
+      "description": "Choose the starting point and name this task branch. Both are locked when you send the first message.",
+      "invalidBranch": "Choose a valid task branch before sending.",
+      "placeholder": "Ask Cocola to work on {project}…"
+    },
+    "tasks": {
+      "title": "Project tasks",
+      "description": "Project tasks also appear in Chats for quick access.",
+      "modified": "Modified",
+      "untitled": "Untitled task",
+      "open": "Open",
+      "empty": "No Project tasks yet."
+    },
+    "settings": {
+      "open": "Project settings",
+      "close": "Close Project settings",
+      "title": "Project settings",
+      "description": "Update this Project’s name and description.",
+      "name": "Name",
+      "projectDescription": "Description",
+      "save": "Save changes"
+    },
+    "errors": {
+      "notFound": "Project not found",
+      "tasks": "Could not load project tasks",
+      "load": "Could not load project",
+      "reconcile": "Could not reconcile the GitHub repository",
+      "retry": "Retry failed",
+      "save": "Could not save Project settings",
+      "archive": "Could not archive Project",
+      "archiveCode": "Could not archive Project ({code})"
+    }
+  },
+  "branch": {
+    "taskBranch": "Task branch",
+    "editableHint": "Editable until the first message. Cocola keeps the protected task prefix.",
+    "selectBase": "Select base branch",
+    "selectBaseDescription": "Select the branch this new task starts from",
+    "select": "Select branch",
+    "find": "Find a branch…",
+    "notFound": "No branch found.",
+    "default": "Default",
+    "loading": "Loading branches",
+    "loadFailed": "Could not load branches",
+    "tryAgain": "Try again",
+    "loadMore": "Load more branches",
+    "basedOnSha": "Based on {branch} @ {sha}",
+    "basedOn": "Based on {branch}",
+    "currentTaskBranch": "Current project task branch",
+    "loadingBranch": "Loading branch",
+    "errors": {
+      "prefix": "Keep the Cocola task prefix.",
+      "empty": "Enter a branch name.",
+      "tooLong": "Use 48 characters or fewer.",
+      "invalid": "Use lowercase letters, numbers, dots, underscores, or hyphens; start and end with a letter or number."
+    }
+  }
+}

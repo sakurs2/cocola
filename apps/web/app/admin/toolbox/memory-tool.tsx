@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { AdminErrorDialog } from "@/components/admin/admin-ui";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { SelectControl } from "@/components/ui/select-control";
@@ -70,6 +71,7 @@ export function MemoryTool({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("admin.toolboxPage.memory");
   const [config, setConfig] = useState(EMPTY_CONFIG);
   const [models, setModels] = useState<ModelRoute[]>([]);
   const [enabled, setEnabled] = useState(false);
@@ -177,7 +179,7 @@ export function MemoryTool({
     }
   }
 
-  const status = memoryStatusMeta(config.status, Boolean(error), loading);
+  const status = memoryStatusMeta(config.status, Boolean(error), loading, t);
 
   return (
     <>
@@ -186,8 +188,8 @@ export function MemoryTool({
         iconClassName="bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-300"
         onPress={() => onOpenChange(true)}
         status={status.label}
-        summary="Long-term profile, preferences, entities, and events."
-        title="Memory"
+        summary={t("summary")}
+        title={t("title")}
       />
 
       <Modal
@@ -201,32 +203,30 @@ export function MemoryTool({
         <Modal.Backdrop isDismissable={!saving && !resetting}>
           <Modal.Container placement="center" scroll="inside" size="lg">
             <Modal.Dialog>
-              <Modal.CloseTrigger aria-label="Close Memory settings" />
+              <Modal.CloseTrigger aria-label={t("closeSettings")} />
               <Modal.Header className="items-start">
                 <Modal.Icon className="bg-violet-500/10 text-violet-600">
                   <BrainCircuit className="size-5" />
                 </Modal.Icon>
                 <div className="min-w-0">
-                  <Modal.Heading>Memory</Modal.Heading>
-                  <p className="mt-1 text-sm text-muted">
-                    Choose the two platform models and enable.
-                  </p>
+                  <Modal.Heading>{t("title")}</Modal.Heading>
+                  <p className="mt-1 text-sm text-muted">{t("description")}</p>
                 </div>
               </Modal.Header>
               <Modal.Body className="space-y-4">
                 {loading ? (
                   <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted">
                     <LoaderCircle className="size-4 animate-spin" />
-                    Loading Memory
+                    {t("loading")}
                   </div>
                 ) : (
                   <>
                     <Card className="p-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <div className="text-sm font-semibold">Use long-term memory</div>
+                          <div className="text-sm font-semibold">{t("useMemory")}</div>
                           <div className="mt-0.5 text-xs text-muted">
-                            Available to users after the checks pass.
+                            {t("useMemoryDescription")}
                           </div>
                         </div>
                         <Switch
@@ -243,7 +243,7 @@ export function MemoryTool({
                             <Switch.Control>
                               <Switch.Thumb />
                             </Switch.Control>
-                            {enabled ? "On" : "Off"}
+                            {enabled ? t("on") : t("off")}
                           </Switch.Content>
                         </Switch>
                       </div>
@@ -252,18 +252,18 @@ export function MemoryTool({
                     <div className="grid gap-3 md:grid-cols-2">
                       <ModelField
                         icon={<Sparkles className="size-4" />}
-                        label="Extraction model"
+                        label={t("extractionModel")}
                         options={extractionModels}
-                        placeholder="Choose a chat model"
+                        placeholder={t("chooseChatModel")}
                         value={extractionRouteID}
                         disabled={saving || resetting || config.resetting}
                         onChange={setExtractionRouteID}
                       />
                       <ModelField
                         icon={<Database className="size-4" />}
-                        label="Embedding model"
+                        label={t("embeddingModel")}
                         options={embeddingModels}
-                        placeholder="Choose an embedding model"
+                        placeholder={t("chooseEmbeddingModel")}
                         value={embeddingRouteID}
                         disabled={saving || resetting || config.resetting}
                         onChange={setEmbeddingRouteID}
@@ -272,16 +272,16 @@ export function MemoryTool({
 
                     <Card className="p-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold">Service health</div>
+                        <div className="text-sm font-semibold">{t("serviceHealth")}</div>
                         <div className="flex items-center gap-2">
                           {config.pending_capture_jobs > 0 ? (
                             <Chip size="sm" variant="soft">
-                              {config.pending_capture_jobs} pending
+                              {t("pendingJobs", { count: config.pending_capture_jobs })}
                             </Chip>
                           ) : null}
                           {config.dead_capture_jobs > 0 ? (
                             <Chip color="danger" size="sm" variant="soft">
-                              {config.dead_capture_jobs} failed
+                              {t("failedJobs", { count: config.dead_capture_jobs })}
                             </Chip>
                           ) : null}
                           <Chip color={status.color} size="sm" variant="soft">
@@ -290,13 +290,15 @@ export function MemoryTool({
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
-                        <HealthStep label="Service" state={config.openviking_status} />
-                        <HealthStep label="Extraction" state={config.extraction_status} />
-                        <HealthStep label="Index" state={config.embedding_status} />
+                        <HealthStep label={t("service")} state={config.openviking_status} />
+                        <HealthStep label={t("extraction")} state={config.extraction_status} />
+                        <HealthStep label={t("index")} state={config.embedding_status} />
                       </div>
                       <div className="mt-3 flex items-center justify-between text-xs text-muted">
-                        <span>Internal Memory v{config.openviking_version || "0.4.12"}</span>
-                        <span>{config.embedding_dimension} dimensions</span>
+                        <span>
+                          {t("internalMemory", { version: config.openviking_version || "0.4.12" })}
+                        </span>
+                        <span>{t("dimensions", { count: config.embedding_dimension })}</span>
                       </div>
                     </Card>
                   </>
@@ -311,14 +313,14 @@ export function MemoryTool({
                       onPress={() => setResetOpen(true)}
                     >
                       <RotateCcw className="size-4" />
-                      {config.resetting ? "Resume reset" : "Reset Memory"}
+                      {config.resetting ? t("resumeReset") : t("reset")}
                     </Button>
                   </Tooltip.Trigger>
-                  <Tooltip.Content>Required before changing the embedding model.</Tooltip.Content>
+                  <Tooltip.Content>{t("resetHint")}</Tooltip.Content>
                 </Tooltip>
                 <div className="flex gap-2">
                   <Button variant="outline" onPress={() => onOpenChange(false)}>
-                    Close
+                    {t("close")}
                   </Button>
                   <Button
                     isDisabled={!dirty || loading || saving || resetting || config.resetting}
@@ -326,7 +328,7 @@ export function MemoryTool({
                     onPress={() => void save()}
                   >
                     <Save className="size-4" />
-                    Save
+                    {t("save")}
                   </Button>
                 </div>
               </Modal.Footer>
@@ -337,11 +339,11 @@ export function MemoryTool({
 
       <ActionConfirmDialog
         busy={resetting}
-        confirmLabel="Reset Memory"
-        description="Deletes every user's long-term memory and unlocks the embedding model. Conversations are not deleted."
+        confirmLabel={t("reset")}
+        description={t("resetDescription")}
         icon={RotateCcw}
         open={resetOpen}
-        title="Reset all Memory?"
+        title={t("resetTitle")}
         tone="danger"
         onConfirm={() => void resetMemory()}
         onOpenChange={setResetOpen}
@@ -439,12 +441,17 @@ function HealthStep({ label, state }: { label: string; state: string }) {
   );
 }
 
-function memoryStatusMeta(status: MemoryStatus, failed: boolean, loading: boolean) {
-  if (loading) return { label: "Checking", color: "default" as const };
-  if (failed || status === "degraded") return { label: "Degraded", color: "danger" as const };
-  if (status === "ready") return { label: "Ready", color: "success" as const };
-  if (status === "incomplete") return { label: "Incomplete", color: "warning" as const };
-  return { label: "Disabled", color: "default" as const };
+function memoryStatusMeta(
+  status: MemoryStatus,
+  failed: boolean,
+  loading: boolean,
+  t: ReturnType<typeof useTranslations<"admin.toolboxPage.memory">>,
+) {
+  if (loading) return { label: t("checking"), color: "default" as const };
+  if (failed || status === "degraded") return { label: t("degraded"), color: "danger" as const };
+  if (status === "ready") return { label: t("ready"), color: "success" as const };
+  if (status === "incomplete") return { label: t("incomplete"), color: "warning" as const };
+  return { label: t("disabled"), color: "default" as const };
 }
 
 async function readError(response: Response) {

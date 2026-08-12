@@ -4,6 +4,7 @@ import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { AlertTriangle, LoaderCircle, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 
 type DialogTone = "primary" | "warning" | "danger";
 const toneClass: Record<DialogTone, string> = {
@@ -23,7 +24,7 @@ export function ActionConfirmDialog({
   title,
   description,
   confirmLabel,
-  cancelLabel = "Cancel",
+  cancelLabel,
   busy = false,
   error = null,
   tone = "warning",
@@ -47,6 +48,8 @@ export function ActionConfirmDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const t = useTranslations("common");
+  const resolvedCancelLabel = cancelLabel ?? t("actions.cancel");
   const [showBusy, setShowBusy] = useState(false);
   useEffect(() => {
     if (!busy) {
@@ -84,9 +87,7 @@ export function ActionConfirmDialog({
                   </div>
                 ) : (
                   <div className={`${toneClass[tone]} rounded-xl px-3 py-2.5 text-sm`}>
-                    {tone === "danger"
-                      ? "This action cannot be undone."
-                      : "Confirm this operation to continue."}
+                    {tone === "danger" ? t("dialog.cannotUndo") : t("dialog.confirmContinue")}
                   </div>
                 )}
               </AlertDialog.Body>
@@ -100,7 +101,7 @@ export function ActionConfirmDialog({
                   if (!busy) onOpenChange(false);
                 }}
               >
-                {cancelLabel}
+                {resolvedCancelLabel}
               </Button>
               <Button
                 aria-disabled={busy}
@@ -165,6 +166,7 @@ export function TextInputDialog({
   onSubmit: (value: string) => void;
   onSecondary?: () => void;
 }) {
+  const t = useTranslations("common");
   const [value, setValue] = useState(initialValue);
   useEffect(() => {
     if (open) setValue(initialValue);
@@ -179,7 +181,7 @@ export function TextInputDialog({
       <Sheet.Backdrop>
         <Sheet.Content className="w-full md:w-[440px]">
           <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close editor" />
+            <Sheet.CloseTrigger aria-label={t("dialog.closeEditor")} />
             <Sheet.Header>
               <span className="flex items-center gap-3">
                 <span className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-2xl">
@@ -216,7 +218,7 @@ export function TextInputDialog({
                 </Button>
               ) : null}
               <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>
-                Cancel
+                {t("actions.cancel")}
               </Button>
               <Button
                 form="text-muted-sheet-form"

@@ -34,7 +34,7 @@ test("new Project tasks expose an editable safe branch before the first message"
   assert.match(projectSource, /updatePendingProjectTaskBranch/);
   assert.match(projectSource, /disabled=\{Boolean\(projectTaskBranchError\(taskBranchName\)\)\}/);
   assert.match(branchSource, /PROJECT_TASK_BRANCH_PREFIX = "cocola\/task-"/);
-  assert.match(branchSource, /Editable until the first message/);
+  assert.match(branchSource, /t\("editableHint"\)/);
   assert.match(runtimeSource, /project_task_branch: projectTaskBranch/);
   assert.match(runtimeSource, /taskBranch: branchName/);
   assert.doesNotMatch(runtimeSource, /pickerEnabled/);
@@ -91,8 +91,11 @@ test("Project Git review uses a full-width progress rail and centered merge conf
     gitPanelSource,
     /grid-cols-\[auto_minmax\(1rem,1fr\)_auto_minmax\(1rem,1fr\)_auto\]/,
   );
-  assert.match(gitPanelSource, /title="Squash merge this change request\?"/);
-  assert.match(gitPanelSource, /<ActionConfirmDialog[\s\S]*?confirmLabel="Squash merge"/);
+  assert.match(gitPanelSource, /title=\{t\("mergeTitle"\)\}/);
+  assert.match(
+    gitPanelSource,
+    /<ActionConfirmDialog[\s\S]*?confirmLabel=\{t\("actions\.merge"\)\}/,
+  );
   assert.match(gitPanelSource, /groupGitCommitFiles\(files\)/);
   assert.match(gitPanelSource, /group\.directory\.replaceAll\("\/", " \/ "\)/);
   assert.match(gitPanelSource, /text-success">\+\{additions\}/);

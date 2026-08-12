@@ -7,6 +7,7 @@ import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { useCallback, useEffect, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import {
   AdminDataGrid,
   AdminErrorDialog,
@@ -36,6 +37,8 @@ type ConversationRun = {
 const PAGE_SIZE = 50;
 
 export default function AdminAuditPage() {
+  const t = useTranslations("admin.runs");
+  const format = useFormatter();
   const [runs, setRuns] = useState<ConversationRun[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -83,40 +86,48 @@ export default function AdminAuditPage() {
   const columns: DataGridColumn<ConversationRun>[] = [
     {
       id: "started",
-      header: "Started",
+      header: t("columns.started"),
       minWidth: 170,
       cell: (run) => (
-        <span className="text-muted text-xs tabular-nums">{formatDate(run.started_at)}</span>
+        <span className="text-muted text-xs tabular-nums">
+          {format.dateTime(new Date(run.started_at), {
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
+        </span>
       ),
     },
     {
       id: "user",
-      header: "User",
+      header: t("columns.user"),
       minWidth: 210,
       cell: (run) => (
         <AdminTruncatedValue
           className="text-sm font-medium"
-          copyLabel="user"
+          copyLabel={t("copy.user")}
           value={run.user_email || run.user_id || "—"}
         />
       ),
     },
     {
       id: "conversation",
-      header: "Conversation",
+      header: t("columns.conversation"),
       isRowHeader: true,
       minWidth: 280,
       cell: (run) => (
         <span className="block min-w-0">
           <AdminTruncatedValue
             className="text-sm font-semibold"
-            copyLabel="conversation title"
-            value={run.conversation_title || "Untitled conversation"}
+            copyLabel={t("copy.conversationTitle")}
+            value={run.conversation_title || t("untitled")}
           />
           {run.conversation_id ? (
             <AdminTruncatedValue
               className="text-accent font-mono text-xs"
-              copyLabel="conversation ID"
+              copyLabel={t("copy.conversationId")}
               href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
               value={run.conversation_id}
             />
@@ -126,40 +137,42 @@ export default function AdminAuditPage() {
     },
     {
       id: "source",
-      header: "Source",
+      header: t("columns.source"),
       minWidth: 140,
       cell: (run) => (
         <span className="text-muted text-sm">
-          {run.source === "scheduled_task" ? "Scheduled task" : "Interactive"}
+          {run.source === "scheduled_task" ? t("sources.scheduled") : t("sources.interactive")}
         </span>
       ),
     },
     {
       id: "model",
-      header: "Model",
+      header: t("columns.model"),
       minWidth: 160,
       cell: (run) => (
         <AdminTruncatedValue
           className="text-sm"
-          copyLabel="model name"
-          value={run.model_alias || "Default"}
+          copyLabel={t("copy.model")}
+          value={run.model_alias || t("defaultModel")}
         />
       ),
     },
     {
       id: "latency",
-      header: "Latency",
+      header: t("columns.latency"),
       minWidth: 150,
       cell: (run) => (
         <span className="font-mono text-xs">
-          <span className="block">Total {formatDuration(run.duration_ms)}</span>
+          <span className="block">
+            {t("latency.total", { duration: formatDuration(run.duration_ms) })}
+          </span>
           <span className="text-muted block">TTFT {formatDuration(run.ttft_ms)}</span>
         </span>
       ),
     },
     {
       id: "result",
-      header: "Result",
+      header: t("columns.result"),
       minWidth: 150,
       cell: (run) => (
         <span>
@@ -167,7 +180,7 @@ export default function AdminAuditPage() {
           {run.error_code ? (
             <AdminTruncatedValue
               className="text-muted mt-1 font-mono text-xs"
-              copyLabel="error code"
+              copyLabel={t("copy.errorCode")}
               value={run.error_code}
             />
           ) : null}
@@ -176,12 +189,12 @@ export default function AdminAuditPage() {
     },
     {
       id: "trace",
-      header: "Trace ID",
+      header: t("columns.traceId"),
       minWidth: 280,
       cell: (run) => (
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 font-mono text-xs">
-            <AdminTruncatedValue copyLabel="trace ID" value={run.trace_id || "—"} />
+            <AdminTruncatedValue copyLabel={t("copy.traceId")} value={run.trace_id || "—"} />
           </span>
           <Button
             size="sm"
@@ -190,7 +203,7 @@ export default function AdminAuditPage() {
               window.location.href = `/admin/traces/${encodeURIComponent(run.trace_id)}`;
             }}
           >
-            Open
+            {t("open")}
           </Button>
         </span>
       ),
@@ -201,18 +214,18 @@ export default function AdminAuditPage() {
     <AdminPage className="admin-theme-indigo">
       <AdminPageHeader
         icon={<FileText className="size-5" />}
-        title="Agent Runs"
-        description="One safe metadata record for every user–agent run. Chat content stays in its conversation."
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton onClick={() => void load()} refreshing={loading} disabled={loading}>
-            Refresh
+            {t("refresh")}
           </AdminRefreshButton>
         }
       />
 
       <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_auto_auto] xl:items-end">
         <SearchField
-          aria-label="Search conversation runs"
+          aria-label={t("searchAria")}
           className="w-full"
           value={search}
           onChange={(value) => {
@@ -222,35 +235,35 @@ export default function AdminAuditPage() {
         >
           <SearchField.Group>
             <SearchField.SearchIcon />
-            <SearchField.Input placeholder="Search user, conversation, or trace ID" />
+            <SearchField.Input placeholder={t("searchPlaceholder")} />
             <SearchField.ClearButton />
           </SearchField.Group>
         </SearchField>
         <Segment
-          aria-label="Run result"
+          aria-label={t("resultFilter")}
           selectedKey={status || "all"}
           onSelectionChange={(key) => {
             setPage(0);
             setStatus(String(key) === "all" ? "" : String(key));
           }}
         >
-          <Segment.Item id="all">All</Segment.Item>
-          <Segment.Item id="running">Running</Segment.Item>
-          <Segment.Item id="success">Success</Segment.Item>
-          <Segment.Item id="error">Error</Segment.Item>
-          <Segment.Item id="cancelled">Cancelled</Segment.Item>
+          <Segment.Item id="all">{t("statuses.all")}</Segment.Item>
+          <Segment.Item id="running">{t("statuses.running")}</Segment.Item>
+          <Segment.Item id="success">{t("statuses.success")}</Segment.Item>
+          <Segment.Item id="error">{t("statuses.error")}</Segment.Item>
+          <Segment.Item id="cancelled">{t("statuses.cancelled")}</Segment.Item>
         </Segment>
         <Segment
-          aria-label="Run source"
+          aria-label={t("sourceFilter")}
           selectedKey={source || "all"}
           onSelectionChange={(key) => {
             setPage(0);
             setSource(String(key) === "all" ? "" : String(key));
           }}
         >
-          <Segment.Item id="all">All sources</Segment.Item>
-          <Segment.Item id="interactive">Interactive</Segment.Item>
-          <Segment.Item id="scheduled_task">Scheduled</Segment.Item>
+          <Segment.Item id="all">{t("sources.all")}</Segment.Item>
+          <Segment.Item id="interactive">{t("sources.interactive")}</Segment.Item>
+          <Segment.Item id="scheduled_task">{t("sources.scheduledShort")}</Segment.Item>
         </Segment>
       </div>
       <div className="grid max-w-xl gap-3 sm:grid-cols-2">
@@ -262,7 +275,7 @@ export default function AdminAuditPage() {
             setFrom(value);
           }}
         >
-          <Label>From</Label>
+          <Label>{t("from")}</Label>
           <Input type="date" />
         </TextField>
         <TextField
@@ -273,20 +286,20 @@ export default function AdminAuditPage() {
             setUntil(value);
           }}
         >
-          <Label>Until</Label>
+          <Label>{t("until")}</Label>
           <Input type="date" />
         </TextField>
       </div>
 
       <AdminErrorDialog
         error={error}
-        title="Could not load agent runs"
+        title={t("loadFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
 
       <AdminDataGrid
-        aria-label="Agent runs"
+        aria-label={t("tableAria")}
         columns={columns}
         contentClassName="min-w-[1420px]"
         data={runs}
@@ -300,12 +313,10 @@ export default function AdminAuditPage() {
                 <Clock3 className="text-indigo-500" />
               </EmptyState.Media>
               <EmptyState.Title>
-                {loading ? "Loading agent runs" : "No agent runs found"}
+                {loading ? t("empty.loadingTitle") : t("empty.title")}
               </EmptyState.Title>
               <EmptyState.Description>
-                {loading
-                  ? "Fetching run metadata…"
-                  : "Conversation runs will appear after a user sends a message or a scheduled task executes."}
+                {loading ? t("empty.loadingDescription") : t("empty.description")}
               </EmptyState.Description>
             </EmptyState.Header>
           </EmptyState>
@@ -317,7 +328,7 @@ export default function AdminAuditPage() {
         count={runs.length}
         hasNext={hasNext}
         loading={loading}
-        label="runs"
+        label={t("paginationLabel")}
         onPageChange={setPage}
       />
     </AdminPage>
@@ -325,6 +336,7 @@ export default function AdminAuditPage() {
 }
 
 function RunStatus({ status }: { status: string }) {
+  const t = useTranslations("admin.runs.statuses");
   const tone =
     status === "success"
       ? "green"
@@ -335,7 +347,11 @@ function RunStatus({ status }: { status: string }) {
           : "red";
   return (
     <AdminStatusBadge tone={tone} dot>
-      {status || "unknown"}
+      {status === "success" || status === "running" || status === "error" || status === "cancelled"
+        ? t(status)
+        : status === "interrupted"
+          ? t("interrupted")
+          : status || t("unknown")}
     </AdminStatusBadge>
   );
 }
@@ -345,16 +361,6 @@ function formatDuration(ms: number) {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
   return `${(ms / 60_000).toFixed(1)} min`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(value));
 }
 
 async function errorText(response: Response) {

@@ -1,0 +1,196 @@
+{
+  "list": {
+    "title": "项目",
+    "description": "由本地或已连接仓库支持的长期工作区。",
+    "new": "新建项目",
+    "search": "搜索项目",
+    "provider": "项目提供商",
+    "all": "全部",
+    "github": "GitHub",
+    "local": "本地",
+    "allProjects": "全部项目",
+    "count": "{count} 个项目",
+    "regionLabel": "项目",
+    "noDescription": "暂无描述",
+    "open": "打开项目",
+    "updated": "更新于 {time}",
+    "repository": "Cocola 仓库",
+    "recently": "最近",
+    "noResults": "未找到项目",
+    "empty": "暂无项目",
+    "noResultsDescription": "请尝试其他搜索内容或提供商。",
+    "emptyDescription": "创建本地工作区或连接 GitHub 仓库。",
+    "clearFilters": "清除筛选",
+    "status": {
+      "ready": "就绪",
+      "provisioning": "创建中",
+      "failed": "失败",
+      "archiving": "归档中",
+      "archive_failed": "归档失败",
+      "archived": "已归档"
+    }
+  },
+  "taskBar": { "project": "项目", "mergedReadOnly": "已合并 · 只读" },
+  "new": {
+    "title": "新建项目",
+    "description": "选择项目来源和仓库策略。",
+    "back": "返回项目",
+    "sources": {
+      "empty": { "title": "空项目", "description": "从干净的本地工作区开始。" },
+      "create": { "title": "在 GitHub 创建" },
+      "import": { "title": "导入 GitHub", "description": "选择已安装的仓库" },
+      "connected": "已连接为 {account}",
+      "connectorRequired": "需要连接器"
+    },
+    "connect": {
+      "title": "请先连接个人 GitHub App",
+      "description": "不连接 GitHub 也可创建空项目；创建和导入 GitHub 项目会使用你的私有 App。",
+      "action": "打开连接器"
+    },
+    "details": {
+      "title": "项目详情",
+      "editable": "名称和描述之后仍可修改。",
+      "imported": "为导入的工作区设置名称和描述。"
+    },
+    "fields": {
+      "projectName": "项目名称",
+      "projectNamePlaceholder": "我的项目",
+      "repositoryName": "仓库名称",
+      "description": "描述",
+      "optional": "选填",
+      "visibility": "可见性"
+    },
+    "visibility": { "private": "私有（推荐）", "public": "公开" },
+    "actions": { "cancel": "取消", "create": "创建项目" },
+    "repositories": {
+      "title": "GitHub 仓库",
+      "description": "选择要导入的已安装仓库。",
+      "ready": "已就绪",
+      "search": "搜索仓库",
+      "loadMore": "加载更多仓库"
+    },
+    "errors": {
+      "connection": "无法检查 GitHub 连接",
+      "repositories": "无法列出已安装的仓库",
+      "projectName": "请输入项目名称。",
+      "repositoryName": "请输入仓库名称。",
+      "chooseRepository": "请选择要导入的仓库。",
+      "create": "无法创建项目"
+    }
+  },
+  "detail": {
+    "back": "返回项目",
+    "noDescription": "暂无描述",
+    "preparing": "准备中",
+    "status": {
+      "ready": "已就绪",
+      "provisioning": "配置中",
+      "failed": "失败",
+      "archiving": "归档中",
+      "archive_failed": "归档失败",
+      "archived": "已归档"
+    },
+    "changeRequest": {
+      "open": "审核中",
+      "checks_pending": "检查中",
+      "conflict": "存在冲突",
+      "merged": "已合并",
+      "closed": "已关闭",
+      "failed": "失败",
+      "working": "开发中"
+    },
+    "notFound": { "title": "未找到项目", "description": "该项目可能已归档，或属于其他账号。" },
+    "limitations": {
+      "both": "第一阶段不会下载 Git LFS 对象和子模块。",
+      "lfs": "第一阶段会将 Git LFS 对象保留为指针文件。",
+      "submodules": "第一阶段不会初始化 Git 子模块。"
+    },
+    "archived": {
+      "title": "项目已归档",
+      "description": "无法再创建新任务；已有任务和保存的 Git 快照仍可查看。"
+    },
+    "failed": { "title": "项目配置失败", "description": "仓库配置尚未完成。", "retry": "重试同步" },
+    "archive": {
+      "action": "归档项目",
+      "archiving": "正在撤销仓库访问权限。",
+      "failed": "无法安全归档仓库。",
+      "retry": "重试归档",
+      "confirmTitle": "归档此项目？",
+      "githubDescription": "不会删除 GitHub 仓库。",
+      "cocolaDescription": "Cocola 仓库将变为只读，已有任务历史仍会保留。"
+    },
+    "repository": {
+      "title": "仓库",
+      "cocola": "Cocola 仓库",
+      "provider": "提供商",
+      "defaultBranch": "默认分支",
+      "visibility": "可见性",
+      "private": "私有"
+    },
+    "activity": {
+      "title": "项目活动",
+      "description": "当前项目状态和任务历史。",
+      "status": "状态",
+      "tasks": "任务"
+    },
+    "start": {
+      "preparingTitle": "正在准备项目工作区",
+      "preparingDescription": "正在加载任务并准备对话工作区…",
+      "title": "开始项目工作",
+      "description": "选择起点并设置任务分支名；发送第一条消息后两者将锁定。",
+      "invalidBranch": "发送前请选择有效的任务分支。",
+      "placeholder": "让 Cocola 在 {project} 中完成任务…"
+    },
+    "tasks": {
+      "title": "项目任务",
+      "description": "项目任务也会显示在对话列表中，便于快速访问。",
+      "modified": "有修改",
+      "untitled": "未命名任务",
+      "open": "打开",
+      "empty": "暂无项目任务。"
+    },
+    "settings": {
+      "open": "项目设置",
+      "close": "关闭项目设置",
+      "title": "项目设置",
+      "description": "更新项目名称和描述。",
+      "name": "名称",
+      "projectDescription": "描述",
+      "save": "保存更改"
+    },
+    "errors": {
+      "notFound": "未找到项目",
+      "tasks": "无法加载项目任务",
+      "load": "无法加载项目",
+      "reconcile": "无法同步 GitHub 仓库",
+      "retry": "重试失败",
+      "save": "无法保存项目设置",
+      "archive": "无法归档项目",
+      "archiveCode": "无法归档项目（{code}）"
+    }
+  },
+  "branch": {
+    "taskBranch": "任务分支",
+    "editableHint": "可在发送第一条消息前修改；Cocola 会保留受保护的任务前缀。",
+    "selectBase": "选择基线分支",
+    "selectBaseDescription": "选择新任务的起始分支",
+    "select": "选择分支",
+    "find": "查找分支…",
+    "notFound": "未找到分支。",
+    "default": "默认",
+    "loading": "正在加载分支",
+    "loadFailed": "无法加载分支",
+    "tryAgain": "重试",
+    "loadMore": "加载更多分支",
+    "basedOnSha": "基于 {branch} @ {sha}",
+    "basedOn": "基于 {branch}",
+    "currentTaskBranch": "当前项目任务分支",
+    "loadingBranch": "正在加载分支",
+    "errors": {
+      "prefix": "请保留 Cocola 任务前缀。",
+      "empty": "请输入分支名称。",
+      "tooLong": "请控制在 48 个字符以内。",
+      "invalid": "仅使用小写字母、数字、点、下划线或连字符，并以字母或数字开头和结尾。"
+    }
+  }
+}

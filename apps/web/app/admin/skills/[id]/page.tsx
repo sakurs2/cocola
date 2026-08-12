@@ -4,6 +4,7 @@ import { Button, Card, Chip } from "@heroui/react";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { ArrowLeft, FileText, Folder, Hash, LoaderCircle } from "lucide-react";
 import { SkillIcon } from "@/components/ui/skill-icon";
 import { AdminErrorDialog } from "@/components/admin/admin-ui";
@@ -26,6 +27,7 @@ type Skill = {
 };
 
 export default function AdminSkillDetailPage() {
+  const t = useTranslations("skills.detail");
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [skill, setSkill] = useState<Skill | null>(null);
@@ -56,7 +58,7 @@ export default function AdminSkillDetailPage() {
         <header className="flex flex-wrap items-center gap-3">
           <Button
             isIconOnly
-            aria-label="Back to Skills"
+            aria-label={t("back")}
             variant="ghost"
             onPress={() => router.push("/admin/skills")}
           >
@@ -67,7 +69,7 @@ export default function AdminSkillDetailPage() {
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-2xl font-semibold tracking-[-0.03em]">
-              {skill ? displaySkillName(skill) : "Skill"}
+              {skill ? displaySkillName(skill) : t("fallback")}
             </h1>
             <p className="text-muted mt-1 truncate text-sm">
               {skill?.description || skill?.id || id}
@@ -80,7 +82,7 @@ export default function AdminSkillDetailPage() {
         {!skill && !error ? (
           <div className="text-muted flex h-40 items-center justify-center">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading skill
+            {t("loading")}
           </div>
         ) : null}
 
@@ -88,13 +90,13 @@ export default function AdminSkillDetailPage() {
           <>
             <div className="flex flex-wrap items-center gap-2">
               <Chip size="sm" variant="soft">
-                {skill.scope || "admin"}
+                {skill.scope || t("adminScope")}
               </Chip>
               <Chip size="sm" variant="soft">
-                {skill.source_type || "manual"}
+                {skill.source_type || t("manual")}
               </Chip>
               <Chip color={skill.enabled ? "success" : "warning"} size="sm" variant="soft">
-                {skill.enabled ? "Enabled" : "Disabled"}
+                {skill.enabled ? t("enabled") : t("disabled")}
               </Chip>
               {skill.version ? (
                 <Chip size="sm" variant="soft">
@@ -106,17 +108,17 @@ export default function AdminSkillDetailPage() {
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Info
                 icon={<Folder className="size-4" />}
-                label="Source path"
+                label={t("sourcePath")}
                 value={skill.source_path || "—"}
               />
               <Info
                 icon={<FileText className="size-4" />}
-                label="Files"
+                label={t("files")}
                 value={String(skill.file_count ?? 0)}
               />
               <Info
                 icon={<FileText className="size-4" />}
-                label="Size"
+                label={t("size")}
                 value={formatBytes(skill.size_bytes ?? 0)}
               />
               <Info
@@ -129,13 +131,11 @@ export default function AdminSkillDetailPage() {
             <Card className="p-5">
               <Card.Header className="p-0">
                 <Card.Title>SKILL.md</Card.Title>
-                <Card.Description>
-                  Full instructions loaded when the Skill matches a request.
-                </Card.Description>
+                <Card.Description>{t("instructionsDescription")}</Card.Description>
               </Card.Header>
               <Card.Content className="mt-5 p-0">
                 <pre className="bg-surface-secondary max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-2xl p-5 font-mono text-sm leading-7">
-                  {skill.skill_md || "No SKILL.md captured."}
+                  {skill.skill_md || t("noInstructions")}
                 </pre>
               </Card.Content>
             </Card>

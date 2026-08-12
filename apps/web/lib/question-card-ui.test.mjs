@@ -41,7 +41,7 @@ test("conversations waiting for a plan or question confirmation expose a durable
     /requiresUserAction=\{conversation\.requires_user_action === true\}/,
   );
   assert.match(workspaceSidebarSource, /<CircleQuestionFill/);
-  assert.match(workspaceSidebarSource, /Waiting for your confirmation/);
+  assert.match(workspaceSidebarSource, /t\("waitingConfirmation"\)/);
   assert.match(
     workspaceSidebarSource,
     /running \? \([\s\S]*?\) : requiresUserAction \? \([\s\S]*?\) : null/,

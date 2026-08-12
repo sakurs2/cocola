@@ -18,6 +18,7 @@ import { ItemCardGroup } from "@cocola/ui-compat/item-card-group";
 import { ListView } from "@cocola/ui-compat/list-view";
 import { PressableFeedback } from "@cocola/ui-compat/pressable-feedback";
 import { Sheet } from "@cocola/ui-compat/sheet";
+import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
 import { SkillIcon } from "@/components/ui/skill-icon";
 import type { AgentKnowledgeSource, AgentSkillCatalogItem } from "@/lib/agents";
@@ -60,6 +61,7 @@ export function AgentCapabilitiesEditor({
   knowledgeSources,
   onKnowledgeSourcesChange,
 }: Props) {
+  const t = useTranslations("agents.capabilities");
   const [knowledgeURL, setKnowledgeURL] = useState("");
   const [knowledgeLabel, setKnowledgeLabel] = useState("");
   const [wikiPickerOpen, setWikiPickerOpen] = useState(false);
@@ -119,12 +121,12 @@ export function AgentCapabilitiesEditor({
     }
     if (!skill.available) return;
     if (skillIDs.length >= 32) {
-      setSkillMessage("An Agent can select up to 32 Skills.");
+      setSkillMessage(t("skillLimit"));
       return;
     }
     const duplicate = skillIDs.some((id) => catalogByID.get(id)?.runtime_id === skill.runtime_id);
     if (duplicate) {
-      setSkillMessage(`Only one Skill with the runtime ID “${skill.runtime_id}” can be selected.`);
+      setSkillMessage(t("duplicateRuntime", { id: skill.runtime_id }));
       return;
     }
     onSkillIDsChange([...skillIDs, skill.id]);
@@ -132,11 +134,16 @@ export function AgentCapabilitiesEditor({
 
   const addKnowledge = () => {
     setKnowledgeNotice(null);
-    const source = normalizeKnowledgeSource(knowledgeURL, knowledgeLabel);
+    const source = normalizeKnowledgeSource(knowledgeURL, knowledgeLabel, {
+      feishu_doc: t("defaultLabels.document"),
+      feishu_wiki: t("defaultLabels.wiki"),
+      feishu_sheet: t("defaultLabels.sheet"),
+      feishu_base: t("defaultLabels.base"),
+    });
     if (!source) {
       setKnowledgeNotice({
         tone: "error",
-        text: "Use an HTTPS Feishu or Lark Doc, Wiki, Sheet, or Base link from feishu.cn, larkoffice.com, or larksuite.com.",
+        text: t("invalidUrl"),
       });
       return;
     }
@@ -147,10 +154,7 @@ export function AgentCapabilitiesEditor({
     ) {
       setKnowledgeNotice({
         tone: "error",
-        text:
-          knowledgeSources.length >= 10
-            ? "An Agent can have up to 10 Knowledge sources."
-            : "This Knowledge source is already configured.",
+        text: knowledgeSources.length >= 10 ? t("knowledgeLimit") : t("duplicateKnowledge"),
       });
       return;
     }
@@ -166,7 +170,7 @@ export function AgentCapabilitiesEditor({
       if (missing.length > 0) {
         setKnowledgeNotice({
           tone: "error",
-          text: `This source requires ${missing.join(", ")}, but it is not available in your default skills.`,
+          text: t("requiresDefault", { skills: missing.join(", ") }),
         });
         return;
       }
@@ -184,7 +188,7 @@ export function AgentCapabilitiesEditor({
         if (selectedSkills.some((skill) => skill.runtime_id === runtimeID && !skill.available)) {
           setKnowledgeNotice({
             tone: "error",
-            text: `This source requires ${runtimeID}, but the selected Skill is unavailable. Remove it before choosing a replacement.`,
+            text: t("requiresUnavailable", { skill: runtimeID }),
           });
           return;
         }
@@ -196,7 +200,7 @@ export function AgentCapabilitiesEditor({
         if (!candidate) {
           setKnowledgeNotice({
             tone: "error",
-            text: `This source requires ${runtimeID}, but an administrator has made it unavailable.`,
+            text: t("requiresAdmin", { skill: runtimeID }),
           });
           return;
         }
@@ -206,7 +210,7 @@ export function AgentCapabilitiesEditor({
       if (nextIDs.length > 32) {
         setKnowledgeNotice({
           tone: "error",
-          text: "An Agent can select up to 32 Skills.",
+          text: t("skillLimit"),
         });
         return;
       }
@@ -218,10 +222,7 @@ export function AgentCapabilitiesEditor({
     setKnowledgeLabel("");
     setKnowledgeNotice({
       tone: "success",
-      text:
-        skillIDs.length > 0
-          ? "Required Skills were added to this Agent’s custom skill set. Save the Agent to apply them."
-          : "Knowledge added. Save the Agent to apply it.",
+      text: skillIDs.length > 0 ? t("customKnowledgeAdded") : t("knowledgeAdded"),
     });
   };
 
@@ -236,11 +237,11 @@ export function AgentCapabilitiesEditor({
     setWikiError("");
     try {
       const response = await fetch("/api/wiki/tree", { cache: "no-store" });
-      if (!response.ok) throw new Error("Could not load Cocola Wiki.");
+      if (!response.ok) throw new Error(t("wikiLoadFailed"));
       const body = (await response.json()) as { nodes?: AgentWikiNode[] };
       setWikiNodes(Array.isArray(body.nodes) ? body.nodes : []);
     } catch (cause) {
-      setWikiError(cause instanceof Error ? cause.message : "Could not load Cocola Wiki.");
+      setWikiError(cause instanceof Error ? cause.message : t("wikiLoadFailed"));
     } finally {
       setWikiLoading(false);
     }
@@ -260,10 +261,7 @@ export function AgentCapabilitiesEditor({
     ) {
       setKnowledgeNotice({
         tone: "error",
-        text:
-          knowledgeSources.length >= 10
-            ? "An Agent can have up to 10 Knowledge sources."
-            : "This Knowledge source is already configured.",
+        text: knowledgeSources.length >= 10 ? t("knowledgeLimit") : t("duplicateKnowledge"),
       });
       return;
     }
@@ -272,7 +270,7 @@ export function AgentCapabilitiesEditor({
     setWikiQuery("");
     setKnowledgeNotice({
       tone: "success",
-      text: "Cocola Wiki file added. Save the Agent to apply it.",
+      text: t("wikiAdded"),
     });
   };
 
@@ -280,30 +278,27 @@ export function AgentCapabilitiesEditor({
     <>
       <Card className="p-5">
         <Card.Header className="p-0">
-          <Card.Title>Skills</Card.Title>
-          <Card.Description>
-            Leave empty to inherit default Skills. Selecting one switches this Agent to a custom
-            set.
-          </Card.Description>
+          <Card.Title>{t("skills")}</Card.Title>
+          <Card.Description>{t("skillsDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
           <div className="bg-surface-secondary flex flex-wrap items-center justify-between gap-3 rounded-xl px-3 py-2.5">
             <span>
               <span className="block text-sm font-medium">
-                {skillIDs.length === 0 ? "Using default Skills" : "Using a custom Skill set"}
+                {skillIDs.length === 0 ? t("usingDefault") : t("usingCustom")}
               </span>
               <span className="text-muted mt-1 block text-xs">
                 {skillIDs.length === 0
-                  ? "All Skills enabled by default remain available."
-                  : `Only ${skillIDs.length} selected Skill${skillIDs.length === 1 ? "" : "s"} will be available.`}
+                  ? t("defaultAvailable")
+                  : t("selectedAvailable", { count: skillIDs.length })}
               </span>
             </span>
             <Chip color={skillIDs.length === 0 ? "accent" : "success"} size="sm" variant="soft">
-              {skillIDs.length === 0 ? "Default" : `${skillIDs.length} selected`}
+              {skillIDs.length === 0 ? t("default") : t("selected", { count: skillIDs.length })}
             </Chip>
           </div>
           <SearchField
-            aria-label="Search Skills by name"
+            aria-label={t("searchSkills")}
             className="mt-4 w-full"
             value={skillQuery}
             variant="secondary"
@@ -316,7 +311,7 @@ export function AgentCapabilitiesEditor({
               <SearchField.SearchIcon>
                 <Search className="size-4" />
               </SearchField.SearchIcon>
-              <SearchField.Input placeholder="Search Skills by name" />
+              <SearchField.Input placeholder={t("searchSkills")} />
               <SearchField.ClearButton />
             </SearchField.Group>
           </SearchField>
@@ -326,9 +321,11 @@ export function AgentCapabilitiesEditor({
               const disabled = !skill.available && !selected;
               const unavailable = !skill.available;
               const description = unavailable
-                ? unavailableSkillDescription(skill)
+                ? unavailableSkillDescription(skill, t)
                 : skill.description ||
-                  `${skill.source === "personal" ? "Personal" : "Shared"} Skill`;
+                  t("skillFallback", {
+                    source: skill.source === "personal" ? t("personal") : t("shared"),
+                  });
               return (
                 <ItemCard<"button">
                   key={skill.id}
@@ -338,7 +335,7 @@ export function AgentCapabilitiesEditor({
                       {...props}
                       aria-label={
                         unavailable && selected
-                          ? `Remove unavailable ${skill.name} Skill from this Agent`
+                          ? t("removeUnavailable", { name: skill.name })
                           : undefined
                       }
                       aria-pressed={selected}
@@ -357,13 +354,13 @@ export function AgentCapabilitiesEditor({
                     <ItemCard.Description>{description}</ItemCard.Description>
                     <span className="mt-3 flex flex-wrap gap-1.5">
                       <Chip size="sm" variant="soft">
-                        {skill.source === "personal" ? "personal" : "shared"}
+                        {skill.source === "personal" ? t("personal") : t("shared")}
                       </Chip>
                       {unavailable ? (
                         <Chip color="warning" size="sm" variant="soft">
                           {skill.unavailable_reason === "disabled_by_administrator"
-                            ? "Admin disabled"
-                            : "Unavailable"}
+                            ? t("adminDisabled")
+                            : t("unavailable")}
                         </Chip>
                       ) : null}
                     </span>
@@ -372,7 +369,7 @@ export function AgentCapabilitiesEditor({
                     {unavailable && selected ? (
                       <span
                         className="bg-danger-soft text-danger grid size-7 place-items-center rounded-lg"
-                        title="Remove unavailable Skill from this Agent"
+                        title={t("removeUnavailable", { name: skill.name })}
                       >
                         <Trash2 className="size-3.5" />
                       </span>
@@ -391,20 +388,22 @@ export function AgentCapabilitiesEditor({
           {paginatedSkills.length === 0 ? (
             <div className="border-separator text-muted mt-4 flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed text-center">
               <Search className="size-5" />
-              <span className="text-sm">No Skills match this search.</span>
+              <span className="text-sm">{t("noSkills")}</span>
             </div>
           ) : null}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <span className="text-muted text-xs tabular-nums">
-              Showing {filteredSkills.length === 0 ? 0 : skillPageStart + 1}–
-              {Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length)} of{" "}
-              {filteredSkills.length}
+              {t("showing", {
+                start: filteredSkills.length === 0 ? 0 : skillPageStart + 1,
+                end: Math.min(skillPageStart + SKILLS_PER_PAGE, filteredSkills.length),
+                total: filteredSkills.length,
+              })}
             </span>
             <span className="flex items-center gap-2">
               <Tooltip delay={0}>
                 <Button
                   isIconOnly
-                  aria-label="Previous Skills page"
+                  aria-label={t("previousPage")}
                   isDisabled={currentSkillPage === 1}
                   size="sm"
                   variant="outline"
@@ -412,7 +411,7 @@ export function AgentCapabilitiesEditor({
                 >
                   <ChevronLeft className="size-4" />
                 </Button>
-                <Tooltip.Content>Previous page</Tooltip.Content>
+                <Tooltip.Content>{t("previous")}</Tooltip.Content>
               </Tooltip>
               <span className="text-muted min-w-14 text-center text-xs tabular-nums">
                 {currentSkillPage} / {skillPageCount}
@@ -420,7 +419,7 @@ export function AgentCapabilitiesEditor({
               <Tooltip delay={0}>
                 <Button
                   isIconOnly
-                  aria-label="Next Skills page"
+                  aria-label={t("nextPage")}
                   isDisabled={currentSkillPage === skillPageCount}
                   size="sm"
                   variant="outline"
@@ -428,7 +427,7 @@ export function AgentCapabilitiesEditor({
                 >
                   <ChevronRight className="size-4" />
                 </Button>
-                <Tooltip.Content>Next page</Tooltip.Content>
+                <Tooltip.Content>{t("next")}</Tooltip.Content>
               </Tooltip>
             </span>
           </div>
@@ -438,11 +437,8 @@ export function AgentCapabilitiesEditor({
 
       <Card className="p-5">
         <Card.Header className="p-0">
-          <Card.Title>Knowledge</Card.Title>
-          <Card.Description>
-            Add Cocola Wiki files or remote Feishu references. Saved changes apply from the next
-            message.
-          </Card.Description>
+          <Card.Title>{t("knowledge")}</Card.Title>
+          <Card.Description>{t("knowledgeDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="p-0">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_auto] lg:items-end">
@@ -454,7 +450,7 @@ export function AgentCapabilitiesEditor({
                 setKnowledgeNotice(null);
               }}
             >
-              <Label>Feishu or Lark URL</Label>
+              <Label>{t("feishuUrl")}</Label>
               <Input placeholder="https://example.feishu.cn/docx/..." />
             </TextField>
             <TextField
@@ -465,17 +461,17 @@ export function AgentCapabilitiesEditor({
                 setKnowledgeNotice(null);
               }}
             >
-              <Label>Label</Label>
-              <Input maxLength={100} placeholder="Optional" />
+              <Label>{t("label")}</Label>
+              <Input maxLength={100} placeholder={t("optional")} />
             </TextField>
             <Button className="cocola-web-page-primary-action" onPress={addKnowledge}>
               <Plus className="size-4" />
-              Add
+              {t("add")}
             </Button>
           </div>
           <Button className="mt-3" variant="outline" onPress={() => void openWikiPicker()}>
             <BookOpenText className="size-4" />
-            Add from Cocola Wiki
+            {t("addFromWiki")}
           </Button>
           {knowledgeNotice ? (
             <CapabilityFeedback
@@ -485,7 +481,7 @@ export function AgentCapabilitiesEditor({
           ) : null}
           {knowledgeSources.length > 0 ? (
             <ListView
-              aria-label="Agent Knowledge sources"
+              aria-label={t("sourcesAria")}
               className="mt-4"
               items={knowledgeSources.map((source) => ({
                 ...source,
@@ -511,7 +507,7 @@ export function AgentCapabilitiesEditor({
                     <Tooltip delay={0}>
                       <Button
                         isIconOnly
-                        aria-label={`Remove ${source.label}`}
+                        aria-label={t("removeSource", { name: source.label })}
                         size="sm"
                         variant="ghost"
                         onPress={() =>
@@ -524,7 +520,7 @@ export function AgentCapabilitiesEditor({
                       >
                         <Trash2 className="size-4" />
                       </Button>
-                      <Tooltip.Content>Remove source</Tooltip.Content>
+                      <Tooltip.Content>{t("removeSourceTooltip")}</Tooltip.Content>
                     </Tooltip>
                   </ListView.ItemAction>
                 </ListView.Item>
@@ -537,12 +533,11 @@ export function AgentCapabilitiesEditor({
             {knowledgeSources.length === 0 ? (
               <span className="text-muted flex min-w-0 items-center gap-2 text-sm">
                 <BookOpenText className="size-4 shrink-0" />
-                No Knowledge sources yet. Add a Wiki file or Feishu link when this Agent needs fixed
-                context.
+                {t("emptyKnowledge")}
               </span>
             ) : null}
             <p className="text-muted ml-auto text-xs tabular-nums">
-              {knowledgeSources.length} / 10 sources
+              {t("sourceCount", { count: knowledgeSources.length })}
             </p>
           </div>
         </Card.Content>
@@ -558,16 +553,14 @@ export function AgentCapabilitiesEditor({
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[460px]">
             <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close Cocola Wiki picker" />
+              <Sheet.CloseTrigger aria-label={t("closeWiki")} />
               <Sheet.Header>
-                <Sheet.Heading>Add from Cocola Wiki</Sheet.Heading>
-                <p className="text-muted text-sm">
-                  Choose a file that this Agent may use as contextual Knowledge.
-                </p>
+                <Sheet.Heading>{t("addFromWiki")}</Sheet.Heading>
+                <p className="text-muted text-sm">{t("wikiDescription")}</p>
               </Sheet.Header>
               <Sheet.Body>
                 <SearchField
-                  aria-label="Search Cocola Wiki files"
+                  aria-label={t("searchWiki")}
                   value={wikiQuery}
                   variant="secondary"
                   onChange={setWikiQuery}
@@ -576,11 +569,13 @@ export function AgentCapabilitiesEditor({
                     <SearchField.SearchIcon>
                       <Search className="size-4" />
                     </SearchField.SearchIcon>
-                    <SearchField.Input placeholder="Search Wiki files" />
+                    <SearchField.Input placeholder={t("searchWiki")} />
                     <SearchField.ClearButton />
                   </SearchField.Group>
                 </SearchField>
-                {wikiLoading ? <div className="text-muted mt-4 text-sm">Loading Wiki…</div> : null}
+                {wikiLoading ? (
+                  <div className="text-muted mt-4 text-sm">{t("loadingWiki")}</div>
+                ) : null}
                 {wikiError ? (
                   <div className="bg-danger/10 text-danger mt-4 rounded-2xl px-4 py-3 text-sm">
                     {wikiError}
@@ -588,7 +583,7 @@ export function AgentCapabilitiesEditor({
                 ) : null}
                 {!wikiLoading && !wikiError ? (
                   <ListView
-                    aria-label="Cocola Wiki files"
+                    aria-label={t("wikiFiles")}
                     className="mt-4"
                     items={filteredWikiFiles}
                     selectionMode="none"
@@ -630,14 +625,19 @@ export function AgentCapabilitiesEditor({
   );
 }
 
-function unavailableSkillDescription(skill: AgentSkillCatalogItem): string {
+type CapabilityTranslations = ReturnType<typeof useTranslations<"agents.capabilities">>;
+
+function unavailableSkillDescription(
+  skill: AgentSkillCatalogItem,
+  t: CapabilityTranslations,
+): string {
   if (skill.unavailable_reason === "disabled_by_administrator") {
-    return "Disabled by an administrator. Remove it from this Agent to choose a replacement.";
+    return t("disabledDescription");
   }
   if (skill.unavailable_reason === "missing") {
-    return "This Skill no longer exists. Remove it from this Agent to continue.";
+    return t("missingDescription");
   }
-  return "This Skill is unavailable. Remove it from this Agent to continue.";
+  return t("unavailableDescription");
 }
 
 function CapabilityFeedback({
@@ -662,7 +662,11 @@ function CapabilityFeedback({
   );
 }
 
-function normalizeKnowledgeSource(rawURL: string, rawLabel: string): AgentKnowledgeSource | null {
+function normalizeKnowledgeSource(
+  rawURL: string,
+  rawLabel: string,
+  defaultLabels: Record<Exclude<AgentKnowledgeSource["type"], "cocola_wiki">, string>,
+): AgentKnowledgeSource | null {
   type FeishuKnowledgeType = Exclude<AgentKnowledgeSource["type"], "cocola_wiki">;
   try {
     const parsed = new URL(rawURL.trim());
@@ -696,12 +700,6 @@ function normalizeKnowledgeSource(rawURL: string, rawLabel: string): AgentKnowle
     const type = typeByRoot[normalizedRoot];
     if (!type) return null;
     const normalizedURL = `https://${host}/${normalizedRoot}/${token}`;
-    const defaultLabels: Record<FeishuKnowledgeType, string> = {
-      feishu_doc: "Feishu document",
-      feishu_wiki: "Feishu Wiki",
-      feishu_sheet: "Feishu Sheet",
-      feishu_base: "Feishu Base",
-    };
     return {
       type,
       label: rawLabel.trim() || defaultLabels[type],

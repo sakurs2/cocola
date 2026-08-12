@@ -4,6 +4,7 @@ import { ChevronsRight } from "@gravity-ui/icons";
 import { Button, Tooltip } from "@heroui/react";
 import { AppLayout } from "@cocola/ui-compat/app-layout";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { CocolaRuntimeProvider } from "@/app/runtime-provider";
@@ -30,17 +31,17 @@ const WORKSPACE_PATHS = [
   "/profile",
 ] as const;
 
-const PAGE_LABELS: Record<string, string> = {
-  "/agents": "Agents",
-  "/connectors": "Connectors",
-  "/folders": "Folders",
-  "/mcps": "MCP",
-  "/profile": "Profile",
-  "/projects": "Projects",
-  "/skills": "Skills",
-  "/tasks": "Tasks",
-  "/wiki": "Wiki",
-};
+const PAGE_LABEL_KEYS = {
+  "/agents": "agents",
+  "/connectors": "connectors",
+  "/folders": "folders",
+  "/mcps": "mcps",
+  "/profile": "profile",
+  "/projects": "projects",
+  "/skills": "skills",
+  "/tasks": "tasks",
+  "/wiki": "wiki",
+} as const;
 
 const PAGE_ACCENTS: Record<string, { accent: string; foreground: string }> = {
   "/agents": { accent: "oklch(68% 0.14 215)", foreground: "var(--eclipse)" },
@@ -62,11 +63,13 @@ function isWorkspacePath(pathname: string | null) {
   );
 }
 
-function workspaceLabel(pathname: string) {
-  const basePath = Object.keys(PAGE_LABELS).find(
+function workspaceLabelKey(
+  pathname: string,
+): (typeof PAGE_LABEL_KEYS)[keyof typeof PAGE_LABEL_KEYS] | "newChat" {
+  const basePath = Object.keys(PAGE_LABEL_KEYS).find(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
   );
-  return basePath ? (PAGE_LABELS[basePath] ?? "Workspace") : "New chat";
+  return basePath ? PAGE_LABEL_KEYS[basePath as keyof typeof PAGE_LABEL_KEYS] : "newChat";
 }
 
 function workspaceTheme(pathname: string): CSSProperties {
@@ -101,6 +104,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
 }
 
 function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pathname: string }) {
+  const t = useTranslations("navigation");
   const router = useRouter();
   const { runWithNavigationGuard } = useWorkspaceUnsavedChanges();
   const [immersive, setImmersive] = useState(false);
@@ -152,7 +156,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
             <WorkspaceTopbar
               compact={compactTopbar}
               immersive={immersive}
-              label={workspaceLabel(pathname)}
+              label={t(workspaceLabelKey(pathname))}
               pathname={pathname}
               onExitImmersive={() => updateImmersive(false)}
             />
@@ -178,7 +182,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
         <Tooltip delay={0}>
           <Button
             isIconOnly
-            aria-label="Exit immersive mode"
+            aria-label={t("exitImmersive")}
             aria-pressed="true"
             className="fixed left-1 top-2 z-50"
             size="sm"
@@ -187,7 +191,7 @@ function HeroUIWorkspaceLayout({ children, pathname }: { children: ReactNode; pa
           >
             <ChevronsRight className="size-4" />
           </Button>
-          <Tooltip.Content>Exit immersive mode · Esc</Tooltip.Content>
+          <Tooltip.Content>{t("exitImmersiveHint")}</Tooltip.Content>
         </Tooltip>
       ) : null}
       {immersive && !peeked ? (
@@ -215,6 +219,7 @@ function WorkspaceTopbar({
   pathname: string;
   onExitImmersive: () => void;
 }) {
+  const t = useTranslations("navigation");
   const isChat = pathname === "/";
   return (
     <div
@@ -224,7 +229,7 @@ function WorkspaceTopbar({
         <Tooltip delay={0}>
           <Button
             isIconOnly
-            aria-label="Exit immersive mode"
+            aria-label={t("exitImmersive")}
             aria-pressed="true"
             size="sm"
             variant="ghost"
@@ -232,7 +237,7 @@ function WorkspaceTopbar({
           >
             <ChevronsRight className="size-4" />
           </Button>
-          <Tooltip.Content>Exit immersive mode · Esc</Tooltip.Content>
+          <Tooltip.Content>{t("exitImmersiveHint")}</Tooltip.Content>
         </Tooltip>
       ) : (
         <AppLayout.MenuToggle />
@@ -246,7 +251,7 @@ function WorkspaceTopbar({
           ) : (
             <>
               <p className="text-accent truncate text-[11px] font-semibold tracking-[0.14em] uppercase">
-                Agent workspace
+                {t("agentWorkspace")}
               </p>
               <p className="text-foreground truncate text-sm font-medium">{label}</p>
             </>

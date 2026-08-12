@@ -5,6 +5,7 @@ import { ChevronRight, ExternalLink, LoaderCircle, Server } from "lucide-react";
 import { Button, Card } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import {
   AdminErrorDialog,
   AdminPage,
@@ -48,42 +49,53 @@ const LAYER_ORDER = [
   "Sandbox Plane",
   "Infrastructure",
 ];
+const LAYER_KEYS = {
+  "Client / UI": "layers.Client / UI",
+  "Control Plane": "layers.Control Plane",
+  "Runtime Plane": "layers.Runtime Plane",
+  "Sandbox Plane": "layers.Sandbox Plane",
+  Infrastructure: "layers.Infrastructure",
+} as const;
 
 type BadgeTone = "neutral" | "sky" | "green" | "amber" | "red";
 
-const STATUS_STYLES: Record<string, { dot: string; ring: string; tone: BadgeTone; label: string }> =
-  {
-    healthy: {
-      dot: "bg-emerald-400",
-      ring: "ring-emerald-400/40",
-      tone: "green",
-      label: "Healthy",
-    },
-    degraded: {
-      dot: "bg-amber-400",
-      ring: "ring-amber-400/40",
-      tone: "amber",
-      label: "Degraded",
-    },
-    unhealthy: {
-      dot: "bg-red-400",
-      ring: "ring-red-400/40",
-      tone: "red",
-      label: "Unhealthy",
-    },
-    unknown: {
-      dot: "bg-slate-400",
-      ring: "ring-slate-400/30",
-      tone: "neutral",
-      label: "Unknown",
-    },
-  };
+const STATUS_STYLES: Record<string, { dot: string; ring: string; tone: BadgeTone }> = {
+  healthy: {
+    dot: "bg-emerald-400",
+    ring: "ring-emerald-400/40",
+    tone: "green",
+  },
+  degraded: {
+    dot: "bg-amber-400",
+    ring: "ring-amber-400/40",
+    tone: "amber",
+  },
+  unhealthy: {
+    dot: "bg-red-400",
+    ring: "ring-red-400/40",
+    tone: "red",
+  },
+  unknown: {
+    dot: "bg-slate-400",
+    ring: "ring-slate-400/30",
+    tone: "neutral",
+  },
+};
 
 function statusStyle(status: Status) {
   return STATUS_STYLES[status] ?? STATUS_STYLES.unknown!;
 }
 
+function statusKey(status: Status) {
+  if (status === "healthy" || status === "degraded" || status === "unhealthy") {
+    return `status.${status}` as const;
+  }
+  return "status.unknown" as const;
+}
+
 export default function AdminArchitecturePage() {
+  const t = useTranslations("admin.architecture");
+  const format = useFormatter();
   const [graph, setGraph] = useState<ArchitectureGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -129,8 +141,8 @@ export default function AdminArchitecturePage() {
     <AdminPage className="admin-theme-fuchsia">
       <AdminPageHeader
         icon={<ArchitecturePageIcon className="size-5" />}
-        title="Architecture"
-        description="System topology and health states for the current cocola deployment."
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton
             variant="outline"
@@ -138,14 +150,14 @@ export default function AdminArchitecturePage() {
             disabled={loading}
             refreshing={loading}
           >
-            Refresh
+            {t("refresh")}
           </AdminRefreshButton>
         }
       />
 
       <AdminErrorDialog
         error={error}
-        title="Could not load architecture"
+        title={t("loadFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
@@ -156,8 +168,15 @@ export default function AdminArchitecturePage() {
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--separator)_1px,transparent_0)] [background-size:32px_32px]" />
             <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-md border border-border bg-background/95 px-3 py-2 text-xs text-muted shadow-sm backdrop-blur">
               {graph?.generated_at
-                ? `Generated ${formatDateTime(graph.generated_at)}`
-                : "Loading graph"}
+                ? t("generated", {
+                    time: format.dateTime(new Date(graph.generated_at), {
+                      month: "short",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }),
+                  })
+                : t("loadingGraph")}
             </div>
 
             {graph ? (
@@ -165,7 +184,7 @@ export default function AdminArchitecturePage() {
                 <div className="grid grid-cols-5 gap-4">
                   {LAYER_ORDER.map((layer) => (
                     <p key={layer} className="text-muted px-1 text-center text-xs font-medium">
-                      {layer}
+                      {t(LAYER_KEYS[layer as keyof typeof LAYER_KEYS])}
                     </p>
                   ))}
                 </div>
@@ -194,7 +213,7 @@ export default function AdminArchitecturePage() {
                 {columns.extras.length > 0 ? (
                   <div className="mt-8 border-t border-border pt-4">
                     <div className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.09em] text-muted/70">
-                      Other
+                      {t("other")}
                     </div>
                     <div className="flex flex-wrap gap-4">
                       {columns.extras.map((node) => (
@@ -216,7 +235,7 @@ export default function AdminArchitecturePage() {
               <div className="absolute inset-0 grid place-items-center bg-background/60">
                 <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted">
                   <LoaderCircle className="size-4 animate-spin" />
-                  Loading architecture...
+                  {t("loading")}
                 </div>
               </div>
             ) : null}
@@ -232,9 +251,9 @@ export default function AdminArchitecturePage() {
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[480px]">
             <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close component details" />
+              <Sheet.CloseTrigger aria-label={t("closeDetails")} />
               <Sheet.Header>
-                <Sheet.Heading>{selected?.label ?? "Component status"}</Sheet.Heading>
+                <Sheet.Heading>{selected?.label ?? t("componentStatus")}</Sheet.Heading>
                 <p className="text-muted text-sm">
                   {selected ? `${selected.layer} · ${selected.kind}` : ""}
                 </p>
@@ -242,7 +261,7 @@ export default function AdminArchitecturePage() {
               <Sheet.Body>{selected ? <NodeDetail node={selected} /> : null}</Sheet.Body>
               <Sheet.Footer>
                 <Button variant="outline" onPress={() => setSelectedId(null)}>
-                  Close
+                  {t("close")}
                 </Button>
               </Sheet.Footer>
             </Sheet.Dialog>
@@ -266,6 +285,7 @@ function NodeCard({
   style?: React.CSSProperties;
   className?: string;
 }) {
+  const t = useTranslations("admin.architecture");
   const s = statusStyle(node.status);
   return (
     <Card
@@ -285,7 +305,7 @@ function NodeCard({
             className={`admin-architecture-node-icon size-5 ${s.tone === "green" ? "text-success" : s.tone === "amber" ? "text-warning" : s.tone === "red" ? "text-danger" : "text-muted"}`}
           />
           <span className="flex items-center gap-1.5">
-            <AdminStatusBadge tone={s.tone}>{s.label}</AdminStatusBadge>
+            <AdminStatusBadge tone={s.tone}>{t(statusKey(node.status))}</AdminStatusBadge>
             <ChevronRight
               aria-hidden="true"
               className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
@@ -302,15 +322,16 @@ function NodeCard({
 }
 
 function NodeDetail({ node }: { node: ArchitectureNode }) {
+  const t = useTranslations("admin.architecture");
   const s = statusStyle(node.status);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-          Current status
+          {t("currentStatus")}
         </span>
         <AdminStatusBadge tone={s.tone} dot>
-          {s.label}
+          {t(statusKey(node.status))}
         </AdminStatusBadge>
       </div>
       {node.detail ? <p className="text-sm text-foreground">{node.detail}</p> : null}
@@ -322,7 +343,7 @@ function NodeDetail({ node }: { node: ArchitectureNode }) {
       <div className="flex flex-col gap-2">
         {node.admin_href ? (
           <Button className="w-full" onPress={() => window.location.assign(node.admin_href!)}>
-            Open in admin
+            {t("openAdmin")}
           </Button>
         ) : null}
         {node.external_href ? (
@@ -331,22 +352,13 @@ function NodeDetail({ node }: { node: ArchitectureNode }) {
             variant="outline"
             onPress={() => window.open(node.external_href!, "_blank", "noopener,noreferrer")}
           >
-            External console
+            {t("externalConsole")}
             <ExternalLink className="size-3.5" />
           </Button>
         ) : null}
       </div>
     </div>
   );
-}
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }
 
 async function readError(res: Response) {

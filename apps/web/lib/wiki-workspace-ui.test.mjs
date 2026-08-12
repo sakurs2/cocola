@@ -26,6 +26,6 @@ test("Markdown pages wait for content before enabling the editor", () => {
   assert.match(source, /const \[contentLoaded, setContentLoaded\] = useState\(!markdown\)/);
   assert.match(source, /state === "loading" && !contentLoaded/);
   assert.match(source, /state === "load-error"/);
-  assert.match(source, /Try again/);
+  assert.match(source, /t\("tryAgain"\)/);
   assert.doesNotMatch(source, /const loaded = useRef/);
 });

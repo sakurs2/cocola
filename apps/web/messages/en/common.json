@@ -1,0 +1,60 @@
+{
+  "metadata": { "description": "Open-source enterprise AI agent platform" },
+  "githubPage": "Go to GitHub page",
+  "switchTheme": "Switch to {mode} mode",
+  "themes": { "light": "light", "dark": "dark" },
+  "language": {
+    "label": "Language",
+    "menuLabel": "Choose language",
+    "english": "English",
+    "simplifiedChinese": "Simplified Chinese",
+    "changeFailed": "Language could not be changed."
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "copy": "Copy",
+    "delete": "Delete",
+    "edit": "Edit",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "save": "Save",
+    "search": "Search",
+    "deleteDefault": "Delete"
+  },
+  "dialog": {
+    "cannotUndo": "This action cannot be undone.",
+    "confirmContinue": "Confirm this operation to continue.",
+    "closeEditor": "Close editor",
+    "closeDetails": "Close details",
+    "discardTitle": "Discard unsaved changes?",
+    "discardDescription": "This Wiki page has changes that have not been saved. Continue only if you do not need them.",
+    "discard": "Discard and continue",
+    "keepEditing": "Keep editing"
+  },
+  "states": {
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "active": "Active",
+    "inactive": "Inactive",
+    "unknown": "Unknown"
+  },
+  "rawDebug": {
+    "title": "cocola — chat test tool",
+    "description": "Development-only client for the gateway SSE path. This is not the product UI.",
+    "bearerToken": "Bearer token",
+    "tokenPlaceholder": "Cocola-issued token (blank if authentication is disabled)",
+    "sessionId": "Session ID",
+    "prompt": "Prompt",
+    "streaming": "Streaming…",
+    "send": "Send",
+    "stop": "Stop",
+    "eventStream": "Event stream",
+    "noEvents": "No events yet.",
+    "noResponseBody": "No response body",
+    "reused": "reused"
+  }
+}

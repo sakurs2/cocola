@@ -5,6 +5,7 @@ import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { Folder, FolderOpen, GitBranch, GitFork, HardDrive, Loader2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import type { ProjectSummary } from "@/app/runtime-provider";
 import { useCocola } from "@/app/runtime-provider";
 import {
@@ -20,14 +21,14 @@ type ProviderFilter = "all" | "github" | "local";
 
 const STATUS_META: Record<
   ProjectSummary["status"],
-  { color: "success" | "warning" | "danger" | "default"; label: string }
+  { color: "success" | "warning" | "danger" | "default" }
 > = {
-  ready: { color: "success", label: "Ready" },
-  provisioning: { color: "warning", label: "Provisioning" },
-  failed: { color: "danger", label: "Failed" },
-  archiving: { color: "warning", label: "Archiving" },
-  archive_failed: { color: "danger", label: "Archive failed" },
-  archived: { color: "default", label: "Archived" },
+  ready: { color: "success" },
+  provisioning: { color: "warning" },
+  failed: { color: "danger" },
+  archiving: { color: "warning" },
+  archive_failed: { color: "danger" },
+  archived: { color: "default" },
 };
 
 function sourceLabel(project: ProjectSummary) {
@@ -37,19 +38,9 @@ function sourceLabel(project: ProjectSummary) {
   return "Cocola repository";
 }
 
-function relativeTime(iso: string) {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return "recently";
-  const minutes = Math.max(0, Math.round((Date.now() - then) / 60_000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  return days < 30 ? `${days}d ago` : new Date(then).toLocaleDateString();
-}
-
 export default function ProjectsPage() {
+  const t = useTranslations("projects.list");
+  const format = useFormatter();
   const { projects, projectsLoaded } = useCocola();
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<ProviderFilter>("all");
@@ -73,32 +64,32 @@ export default function ProjectsPage() {
         action={
           <WorkspacePageAction href="/projects/new">
             <Plus className="size-4" />
-            New project
+            {t("new")}
           </WorkspacePageAction>
         }
-        description="Long-lived workspaces backed by local or connected repositories."
+        description={t("description")}
         icon={<Folder className="size-5" />}
-        title="Projects"
+        title={t("title")}
       />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <WorkspaceSearch placeholder="Search projects" value={query} onChange={setQuery} />
+        <WorkspaceSearch placeholder={t("search")} value={query} onChange={setQuery} />
         <Segment
-          aria-label="Project provider"
+          aria-label={t("provider")}
           className="sm:ml-auto"
           selectedKey={provider}
           size="sm"
           onSelectionChange={(key) => setProvider(String(key) as ProviderFilter)}
         >
-          <Segment.Item id="all">All</Segment.Item>
+          <Segment.Item id="all">{t("all")}</Segment.Item>
           <Segment.Item id="github">GitHub</Segment.Item>
-          <Segment.Item id="local">Local</Segment.Item>
+          <Segment.Item id="local">{t("local")}</Segment.Item>
         </Segment>
       </div>
 
       <WorkspaceSectionHeader
-        description={`${filtered.length} project${filtered.length === 1 ? "" : "s"}`}
-        title="All projects"
+        description={t("count", { count: filtered.length })}
+        title={t("allProjects")}
       />
 
       {!projectsLoaded ? (
@@ -107,7 +98,7 @@ export default function ProjectsPage() {
         </div>
       ) : filtered.length ? (
         <section
-          aria-label="Projects"
+          aria-label={t("regionLabel")}
           className="cocola-web-catalog-grid cocola-web-project-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3"
         >
           {filtered.map((project) => {
@@ -116,9 +107,11 @@ export default function ProjectsPage() {
             return (
               <WorkspaceCatalogCard
                 key={project.id}
-                description={project.description || "No description"}
-                footerLabel="Open project"
-                footerMeta={`Updated ${relativeTime(project.updated_at)}`}
+                description={project.description || t("noDescription")}
+                footerLabel={t("open")}
+                footerMeta={t("updated", {
+                  time: formatProjectTime(project.updated_at, format, t("recently")),
+                })}
                 href={`/projects/${encodeURIComponent(project.id)}`}
                 icon={isGithub ? <GitFork className="size-5" /> : <FolderOpen className="size-5" />}
                 iconClassName={
@@ -134,7 +127,7 @@ export default function ProjectsPage() {
                       ) : (
                         <HardDrive className="size-3.5" />
                       )}
-                      {isGithub ? sourceLabel(project) : "Local"}
+                      {isGithub ? sourceLabel(project) : t("local")}
                     </Chip>
                     {project.default_branch ? (
                       <Chip size="sm" variant="soft">
@@ -146,7 +139,7 @@ export default function ProjectsPage() {
                 }
                 status={
                   <Chip color={status.color} size="sm" variant="soft">
-                    {status.label}
+                    {t(`status.${project.status}`)}
                   </Chip>
                 }
                 title={project.name}
@@ -161,13 +154,9 @@ export default function ProjectsPage() {
               <EmptyState.Media variant="icon">
                 <FolderOpen className="text-indigo-500" />
               </EmptyState.Media>
-              <EmptyState.Title>
-                {projects.length ? "No projects found" : "No projects yet"}
-              </EmptyState.Title>
+              <EmptyState.Title>{projects.length ? t("noResults") : t("empty")}</EmptyState.Title>
               <EmptyState.Description>
-                {projects.length
-                  ? "Try another search or provider."
-                  : "Create a local workspace or connect a GitHub repository."}
+                {projects.length ? t("noResultsDescription") : t("emptyDescription")}
               </EmptyState.Description>
             </EmptyState.Header>
             {projects.length ? (
@@ -180,7 +169,7 @@ export default function ProjectsPage() {
                     setProvider("all");
                   }}
                 >
-                  Clear filters
+                  {t("clearFilters")}
                 </Button>
               </EmptyState.Content>
             ) : null}
@@ -189,4 +178,17 @@ export default function ProjectsPage() {
       )}
     </WorkspacePageFrame>
   );
+}
+
+function formatProjectTime(iso: string, format: ReturnType<typeof useFormatter>, fallback: string) {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return fallback;
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60_000));
+  if (minutes < 60) return format.relativeTime(new Date(then), { unit: "minute" });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return format.relativeTime(new Date(then), { unit: "hour" });
+  const days = Math.round(hours / 24);
+  return days < 30
+    ? format.relativeTime(new Date(then), { unit: "day" })
+    : format.dateTime(new Date(then), { dateStyle: "medium" });
 }

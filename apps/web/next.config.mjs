@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import createNextIntlPlugin from "next-intl/plugin";
 
 /** @type {import('next').NextConfig} */
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -16,4 +17,7 @@ const nextConfig = {
   // catch-all route keeps the slash and relative resolution stays correct.
   skipTrailingSlashRedirect: true,
 };
-export default nextConfig;
+
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
+
+export default withNextIntl(nextConfig);

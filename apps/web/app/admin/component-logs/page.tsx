@@ -4,6 +4,7 @@ import { SquareTerminal as ComponentLogsPageIcon } from "lucide-react";
 import { CheckCircle2, Copy, Loader2 } from "lucide-react";
 import { Button, Card, Input, Label, TextField, Tooltip } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   AdminErrorDialog,
   AdminPage,
@@ -25,6 +26,7 @@ type LogResponse = {
 };
 
 export default function ComponentLogsPage() {
+  const t = useTranslations("admin.logs");
   const [files, setFiles] = useState<LogFile[]>([]);
   const [selected, setSelected] = useState("");
   const [lines, setLines] = useState<string[]>([]);
@@ -72,18 +74,18 @@ export default function ComponentLogsPage() {
     <AdminPage className="admin-theme-slate">
       <AdminPageHeader
         icon={<ComponentLogsPageIcon className="size-5" />}
-        title="Service Logs"
-        description="Recent output from Cocola's core runtime services"
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton
             variant="outline"
-            title="Refresh component logs"
-            aria-label="Refresh component logs"
+            title={t("refresh")}
+            aria-label={t("refresh")}
             onClick={() => void load()}
             disabled={loading}
             refreshing={loading}
           >
-            Refresh
+            {t("refreshAction")}
           </AdminRefreshButton>
         }
       />
@@ -91,9 +93,9 @@ export default function ComponentLogsPage() {
       <Card className="p-4">
         <Card.Content className="grid gap-3 p-0 md:grid-cols-[minmax(240px,1fr)_160px_120px] md:items-end">
           <div className="grid gap-1.5">
-            <Label>Service</Label>
+            <Label>{t("service")}</Label>
             <SelectControl
-              ariaLabel="Service"
+              ariaLabel={t("service")}
               className="h-10 w-full rounded-xl"
               value={selected}
               onValueChange={(value) => {
@@ -103,7 +105,7 @@ export default function ComponentLogsPage() {
               options={
                 files.length
                   ? files.map((file) => ({ value: file.name, label: file.label }))
-                  : [{ value: "", label: "No component logs", disabled: true }]
+                  : [{ value: "", label: t("noServices"), disabled: true }]
               }
               contentClassName="cocola-admin-ui"
             />
@@ -113,7 +115,7 @@ export default function ComponentLogsPage() {
             variant="secondary"
             onChange={(value) => setLineCount(Math.max(1, Math.min(2000, Number(value) || 1)))}
           >
-            <Label>Lines</Label>
+            <Label>{t("lines")}</Label>
             <Input className="h-10" type="number" min={1} max={2000} />
           </TextField>
           <Button
@@ -122,14 +124,14 @@ export default function ComponentLogsPage() {
             isPending={loading}
             onPress={() => void load()}
           >
-            Load
+            {t("load")}
           </Button>
         </Card.Content>
       </Card>
 
       <AdminErrorDialog
         error={error}
-        title="Could not load component logs"
+        title={t("loadFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
@@ -137,22 +139,21 @@ export default function ComponentLogsPage() {
       <Card className="overflow-hidden p-0">
         <Card.Header className="flex-row items-center justify-between p-4">
           <span>
-            <Card.Title>{selectedFile?.label ?? "Logs"}</Card.Title>
+            <Card.Title>{selectedFile?.label ?? t("logs")}</Card.Title>
             <Card.Description>
-              {lines.length} {lines.length === 1 ? "line" : "lines"} ·{" "}
-              {formatBytes(selectedFile?.size ?? 0)}
+              {t("lineCount", { count: lines.length })} · {formatBytes(selectedFile?.size ?? 0)}
             </Card.Description>
           </span>
           {loading ? (
             <span className="text-muted inline-flex items-center text-xs">
               <Loader2 className="mr-2 size-3 animate-spin" />
-              Loading
+              {t("loading")}
             </span>
           ) : (
             <Tooltip delay={0}>
               <Button
                 isIconOnly
-                aria-label="Copy loaded logs"
+                aria-label={t("copyLoaded")}
                 variant="ghost"
                 onPress={async () => {
                   await navigator.clipboard.writeText(lines.join("\n"));
@@ -166,12 +167,12 @@ export default function ComponentLogsPage() {
                   <Copy className="size-4" />
                 )}
               </Button>
-              <Tooltip.Content>{copied ? "Copied" : "Copy logs"}</Tooltip.Content>
+              <Tooltip.Content>{copied ? t("copied") : t("copy")}</Tooltip.Content>
             </Tooltip>
           )}
         </Card.Header>
         <pre className="max-h-[32rem] min-h-32 overflow-auto bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100">
-          {lines.length > 0 ? lines.join("\n") : "No component log lines"}
+          {lines.length > 0 ? lines.join("\n") : t("empty")}
         </pre>
       </Card>
     </AdminPage>

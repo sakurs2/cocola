@@ -17,18 +17,38 @@ test("provider form exposes and submits icon configuration", () => {
   assert.match(modelsPageSource, /icon_url: iconURL/);
   assert.doesNotMatch(modelsPageSource, /<DisclosureSummary>Appearance/);
   assert.match(modelsPageSource, /function IconPicker/);
-  assert.match(modelsPageSource, /Upload image/);
+  assert.match(modelsPageSource, /t\("uploadImage"\)/);
   assert.match(modelsPageSource, /accept="image\/png,image\/jpeg,image\/webp/);
   assert.doesNotMatch(modelsPageSource, /label="Image URL"|placeholder="https:\/\/\.\.\."/);
   assert.match(modelsPageSource, /iconType=\{providerForm\.icon_type\}/);
   assert.match(modelsPageSource, /iconSlug=\{providerForm\.icon_slug\}/);
 });
 
+test("model and provider icon controls share one visual baseline", () => {
+  assert.doesNotMatch(modelsPageSource, /t\("(?:source|brand|image)"\)/);
+  assert.match(
+    modelsPageSource,
+    /const iconPickerControlClass = cn\(inputClass, "h-11 min-h-11 rounded-2xl"\)/,
+  );
+  assert.match(
+    modelsPageSource,
+    /grid min-w-0 items-start gap-3 sm:grid-cols-2[\s\S]*?<SelectControl[\s\S]*?<SelectControl/,
+  );
+  assert.match(modelsPageSource, /grid-cols-\[44px_minmax\(0,1fr\)\]/);
+  assert.match(modelsPageSource, /className="flex size-11 items-center justify-center"/);
+  assert.equal(modelsPageSource.match(/className=\{iconPickerControlClass\}/g)?.length, 2);
+  assert.match(
+    modelsPageSource,
+    /className=\{cn\(iconPickerControlClass, "justify-start overflow-hidden"\)\}/,
+  );
+  assert.match(modelsPageSource, /className="flex min-w-0 flex-col items-start gap-1\.5"/);
+});
+
 test("model and provider icon uploads use the managed asset endpoint", () => {
   assert.match(modelsPageSource, /fetch\("\/api\/admin\/model-icons"/);
   assert.match(modelsPageSource, /providerIconFile/);
   assert.match(modelsPageSource, /modelIconFile/);
-  assert.match(modelsPageSource, /Model icons must be 1 MB or smaller/);
+  assert.match(modelsPageSource, /t\("icon\.uploadFailed"\)/);
   assert.match(iconRouteSource, /MANAGED_ICON_ID/);
   assert.match(iconRouteSource, /getManagedIcon/);
   assert.match(iconRouteSource, /\/admin\/model-icons\/\$\{id\}/);
@@ -43,11 +63,11 @@ test("provider list renders persisted brand or image icons", () => {
 });
 
 test("model form exposes one consistently styled model name", () => {
-  assert.match(modelsPageSource, /<Field label="Model name">/);
-  assert.doesNotMatch(modelsPageSource, /<Field label="Alias"/);
+  assert.match(modelsPageSource, /<Field label=\{t\("model\.name"\)\}>/);
+  assert.doesNotMatch(modelsPageSource, /<Field label=\{t\("model\.alias"\)\}/);
   assert.equal(
     modelsPageSource.match(
-      /<Field label="Model name">[\s\S]*?<Input[\s\S]*?className=\{inputClass\}/g,
+      /<Field label=\{t\("model\.name"\)\}>[\s\S]*?<Input[\s\S]*?className=\{inputClass\}/g,
     )?.length,
     2,
   );
@@ -57,7 +77,7 @@ test("model form exposes one consistently styled model name", () => {
   );
   assert.match(
     modelsPageSource,
-    /<Field label="Upstream model ID">[\s\S]*?<Input[\s\S]*?className=\{inputClass\}/,
+    /<Field label=\{t\("model\.upstreamId"\)\}>[\s\S]*?<Input[\s\S]*?className=\{inputClass\}/,
   );
 });
 

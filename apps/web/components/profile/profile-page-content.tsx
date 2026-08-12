@@ -2,6 +2,7 @@
 
 import { Avatar, Card, Chip } from "@heroui/react";
 import { Mail, ShieldCheck, UserRound } from "lucide-react";
+import { useTranslations } from "next-intl";
 import {
   WorkspacePageFrame,
   WorkspacePageHeader,
@@ -14,16 +15,17 @@ import { UsagePanel } from "@/components/profile/usage-panel";
 import type { SessionUser } from "@/lib/server-auth";
 
 export function ProfilePageContent({ user }: { user: SessionUser }) {
-  const displayName = user.name || user.email || "User";
+  const t = useTranslations("profile.page");
+  const displayName = user.name || user.email || t("user");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "U";
   const isAdmin = user.role === "admin";
 
   return (
     <WorkspacePageFrame>
       <WorkspacePageHeader
-        description="Personal settings, agent instructions, and usage."
+        description={t("description")}
         icon={<UserRound className="size-5" />}
-        title="Profile"
+        title={t("title")}
       />
 
       <Card className="p-5">
@@ -45,7 +47,7 @@ export function ProfilePageContent({ user }: { user: SessionUser }) {
             </p>
           </div>
           <Chip color="success" size="sm" variant="soft">
-            Active
+            {t("active")}
           </Chip>
         </Card.Content>
       </Card>

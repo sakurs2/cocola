@@ -1,0 +1,39 @@
+{
+  "workspaceReset": {
+    "title": "使用空工作区？",
+    "description": "保存此工作区的节点不可用。新建空工作区可以让下次重试在其他节点继续，但无法恢复原节点中的文件。",
+    "confirm": "使用空工作区",
+    "cancel": "保留当前工作区",
+    "confirmed": "已确认使用空工作区，请重新发送消息以继续。"
+  },
+  "runtime": {
+    "savedRunUnavailable": "已保存的运行不可用。",
+    "runStreamUnavailable": "运行事件流不可用（{status}）。",
+    "runConnectionUnavailable": "多次重试后仍无法连接运行，请刷新后重新连接。",
+    "answerRequired": "请选择一个选项或填写自己的回答。",
+    "continueConversation": "无法继续对话，请重试。",
+    "cancelQuestion": "无法取消问题，请重试。",
+    "scheduledTask": "计划任务",
+    "newChat": "新对话",
+    "chatUnavailable": "尝试 {attempts} 次后仍无法开始对话。",
+    "runtimeImmutable": "无法更改此对话的运行时。",
+    "pendingQuestion": "请先回答或取消待处理的问题，再开始新的运行。",
+    "chatConflict": "对话状态已变化，无法开始运行。",
+    "activeRun": "此对话已有活跃运行。",
+    "chatRejected": "对话启动被拒绝（{status}）{detail}",
+    "noResponseBody": "响应内容为空。",
+    "planExecutionFailed": "无法执行计划，请重试。",
+    "cancelPlan": "无法取消计划，请重试。",
+    "cancelFailed": "取消失败（{status}）。",
+    "renameFailed": "重命名失败（{status}）。",
+    "deleteRunning": "请先停止正在生成的回答并等待其结束，再删除对话。",
+    "deleteFailed": "删除失败（{status}）。",
+    "accountDisabled": "账号已禁用。",
+    "createFolderFailed": "创建文件夹失败（{status}）。",
+    "renameFolderFailed": "重命名文件夹失败（{status}）。",
+    "deleteFolderFailed": "删除文件夹失败（{status}）。",
+    "moveConversationFailed": "移动对话失败（{status}）。",
+    "productConfigUnavailable": "产品配置不可用。",
+    "agentRuntimeUnavailable": "配置的智能体运行时不可用。"
+  }
+}

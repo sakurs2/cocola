@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card } from "@heroui/react";
 import {
@@ -70,6 +71,8 @@ type TraceSpan = {
 
 export default function AdminTracePage() {
   const { traceId } = useParams<{ traceId: string }>();
+  const locale = useLocale();
+  const t = useTranslations("admin.tracePage");
   const [run, setRun] = useState<ConversationRun | null>(null);
   const [spans, setSpans] = useState<TraceSpan[]>([]);
   const [selected, setSelected] = useState<TraceSpan | null>(null);
@@ -126,14 +129,14 @@ export default function AdminTracePage() {
     <AdminPage className="admin-theme-indigo">
       <AdminPageHeader
         icon={<TracePageIcon className="size-5" />}
-        eyebrow="Conversation trace"
-        title={run?.conversation_title || "Agent run"}
+        eyebrow={t("eyebrow")}
+        title={run?.conversation_title || t("agentRun")}
         description={traceId}
         actions={
           <div className="flex items-center gap-2">
             {run ? <RunBadge status={run.status} /> : null}
             <AdminRefreshButton onClick={() => void load()} refreshing={loading} disabled={loading}>
-              Refresh
+              {t("refresh")}
             </AdminRefreshButton>
           </div>
         }
@@ -144,35 +147,35 @@ export default function AdminTracePage() {
           href="/admin/audit"
           className="inline-flex items-center gap-1.5 hover:text-foreground"
         >
-          <ArrowLeft className="size-4" /> Agent Runs
+          <ArrowLeft className="size-4" /> {t("agentRuns")}
         </Link>
         <span>{run?.user_email || run?.user_id || "—"}</span>
-        <span>{run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"}</span>
-        <span>{run?.model_alias || "Default model"}</span>
+        <span>{run?.source === "scheduled_task" ? t("scheduledTask") : t("interactive")}</span>
+        <span>{run?.model_alias || t("defaultModel")}</span>
         {run?.conversation_id ? (
           <Link
             href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
             className="font-mono text-xs text-accent hover:underline"
           >
-            Open conversation
+            {t("openConversation")}
           </Link>
         ) : null}
       </div>
 
       <AdminErrorDialog
         error={error}
-        title="Could not load agent run"
+        title={t("loadFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
       {run?.detail_status === "expired" ? (
         <AdminAlert tone="warning" icon={<Clock3 className="size-4" />}>
-          Trace details expired. The conversation audit summary remains available.
+          {t("expired")}
         </AdminAlert>
       ) : null}
       {run?.detail_status === "partial" ? (
         <AdminAlert tone="warning" icon={<AlertTriangle className="size-4" />}>
-          Some trace spans could not be recorded. The agent run summary is complete.
+          {t("partial")}
         </AdminAlert>
       ) : null}
 
@@ -180,16 +183,16 @@ export default function AdminTracePage() {
         <Card className="p-5 sm:p-6">
           <Card.Header className="flex items-start justify-between gap-4 p-0">
             <div>
-              <Card.Title>Trace timeline</Card.Title>
-              <Card.Description>Ordered runtime events for this run.</Card.Description>
+              <Card.Title>{t("timeline")}</Card.Title>
+              <Card.Description>{t("timelineDescription")}</Card.Description>
             </div>
             {run?.status === "running" ? (
               <span className="text-accent inline-flex items-center gap-2 text-xs">
-                <Loader2 className="size-3.5 animate-spin" /> Live
+                <Loader2 className="size-3.5 animate-spin" /> {t("live")}
               </span>
             ) : (
               <span className="text-muted inline-flex items-center gap-2 text-xs">
-                <CheckCircle2 className="size-3.5" /> {orderedSpans.length} events
+                <CheckCircle2 className="size-3.5" /> {t("events", { count: orderedSpans.length })}
               </span>
             )}
           </Card.Header>
@@ -234,11 +237,11 @@ export default function AdminTracePage() {
                               </span>
                             </span>
                             <span className="text-muted mt-1 block truncate font-mono text-[11px]">
-                              {span.service} · {formatDurationUS(span.duration_us)}
+                              {span.service} · {formatDurationUS(span.duration_us, locale)}
                             </span>
                           </span>
                           <span className="text-muted shrink-0 text-xs tabular-nums">
-                            {formatTime(span.started_at)}
+                            {formatTime(span.started_at, locale)}
                           </span>
                         </span>
                       </Button>
@@ -248,7 +251,7 @@ export default function AdminTracePage() {
               </ol>
             ) : (
               <div className="text-muted flex min-h-52 items-center justify-center text-sm">
-                {loading ? "Loading trace…" : "No detailed spans were recorded."}
+                {loading ? t("loading") : t("empty")}
               </div>
             )}
           </Card.Content>
@@ -256,33 +259,39 @@ export default function AdminTracePage() {
 
         <Card className="p-5 sm:p-6">
           <Card.Header className="p-0">
-            <Card.Title>Run context</Card.Title>
-            <Card.Description>Execution summary from Cocola.</Card.Description>
+            <Card.Title>{t("runContext")}</Card.Title>
+            <Card.Description>{t("runContextDescription")}</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 space-y-3 p-0">
             <TraceContextRow
-              label="Source"
-              value={run?.source === "scheduled_task" ? "Scheduled task" : "Interactive"}
+              label={t("source")}
+              value={run?.source === "scheduled_task" ? t("scheduledTask") : t("interactive")}
             />
-            <TraceContextRow label="Model" value={run?.model_alias || "Default model"} />
+            <TraceContextRow label={t("model")} value={run?.model_alias || t("defaultModel")} />
             <TraceContextRow
-              label="Duration"
-              value={formatDurationMS(run?.duration_ms ?? timeline.totalMs)}
+              label={t("duration")}
+              value={formatDurationMS(run?.duration_ms ?? timeline.totalMs, locale)}
             />
-            <TraceContextRow label="First token" value={formatDurationMS(run?.ttft_ms ?? 0)} />
             <TraceContextRow
-              label="Model calls"
+              label={t("firstToken")}
+              value={formatDurationMS(run?.ttft_ms ?? 0, locale)}
+            />
+            <TraceContextRow
+              label={t("modelCalls")}
               value={String(run?.llm_call_count ?? countCategory(spans, "model"))}
             />
             <TraceContextRow
-              label="Tool calls"
+              label={t("toolCalls")}
               value={String(run?.tool_call_count ?? countCategory(spans, "tool"))}
             />
             <TraceContextRow
-              label="Tokens"
-              value={`${formatNumber(run?.input_tokens ?? 0)} in · ${formatNumber(run?.output_tokens ?? 0)} out`}
+              label={t("tokens")}
+              value={t("tokenUsage", {
+                input: formatNumber(run?.input_tokens ?? 0, locale),
+                output: formatNumber(run?.output_tokens ?? 0, locale),
+              })}
             />
-            <TraceContextRow label="Trace ID" value={traceId} mono />
+            <TraceContextRow label={t("traceId")} value={traceId} mono />
           </Card.Content>
         </Card>
       </section>
@@ -291,8 +300,8 @@ export default function AdminTracePage() {
         open={inspectorOpen}
         onOpenChange={setInspectorOpen}
         className="admin-theme-indigo"
-        title={selected?.name || "Span details"}
-        description="Safe execution metadata"
+        title={selected?.name || t("spanDetails")}
+        description={t("safeExecutionMetadata")}
       >
         <SpanInspector span={selected} run={run} timeline={timeline} embedded />
       </AdminDrawer>
@@ -311,6 +320,8 @@ function SpanInspector({
   timeline: ReturnType<typeof timelineStats>;
   embedded?: boolean;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("admin.tracePage");
   const [tab, setTab] = useState<"run" | "metadata">("run");
   if (!span) {
     return (
@@ -320,7 +331,7 @@ function SpanInspector({
           !embedded && "sticky top-0",
         )}
       >
-        Select a span to inspect its timing and safe metadata.
+        {t("selectSpan")}
       </div>
     );
   }
@@ -342,10 +353,10 @@ function SpanInspector({
           </div>
           <div className="mt-5 flex gap-6">
             <InspectorTab active={tab === "run"} onClick={() => setTab("run")}>
-              Run
+              {t("run")}
             </InspectorTab>
             <InspectorTab active={tab === "metadata"} onClick={() => setTab("metadata")}>
-              Metadata
+              {t("metadata")}
             </InspectorTab>
           </div>
         </div>
@@ -354,16 +365,25 @@ function SpanInspector({
         {embedded || tab === "run" ? (
           <>
             <div className="grid gap-3 sm:grid-cols-3">
-              <InspectorMetric label="Duration" value={formatDurationUS(span.duration_us)} />
-              <InspectorMetric label="Started" value={formatTime(span.started_at)} />
-              <InspectorMetric label="Run position" value={formatRunPosition(span, timeline)} />
+              <InspectorMetric
+                label={t("duration")}
+                value={formatDurationUS(span.duration_us, locale)}
+              />
+              <InspectorMetric label={t("started")} value={formatTime(span.started_at, locale)} />
+              <InspectorMetric
+                label={t("runPosition")}
+                value={formatRunPosition(span, timeline, locale)}
+              />
             </div>
             <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-3 border-t border-border/70 pt-5 text-sm">
-              <InspectorRow label="Service" value={span.service} mono />
-              <InspectorRow label="Module" value={moduleKey(span.category)} />
-              <InspectorRow label="Started" value={formatDate(span.started_at)} />
-              <InspectorRow label="Parent span" value={span.parent_span_id || "Root"} mono />
-              <InspectorRow label="Trace ID" value={span.trace_id} mono />
+              <InspectorRow label={t("service")} value={span.service} mono />
+              <InspectorRow
+                label={t("module")}
+                value={t(moduleLabelKey(moduleKey(span.category)))}
+              />
+              <InspectorRow label={t("started")} value={formatDate(span.started_at, locale)} />
+              <InspectorRow label={t("parentSpan")} value={span.parent_span_id || t("root")} mono />
+              <InspectorRow label={t("traceId")} value={span.trace_id} mono />
             </dl>
             <div className="flex flex-wrap gap-4 border-t border-border/70 pt-5">
               {run?.conversation_id ? (
@@ -371,14 +391,14 @@ function SpanInspector({
                   href={`/conversations/${encodeURIComponent(run.conversation_id)}`}
                   className="text-sm font-medium text-accent hover:underline"
                 >
-                  Open conversation
+                  {t("openConversation")}
                 </Link>
               ) : null}
               <Link
                 href={`/admin/logs?trace_id=${encodeURIComponent(span.trace_id)}`}
                 className="text-sm font-medium text-accent hover:underline"
               >
-                View related component logs
+                {t("viewLogs")}
               </Link>
             </div>
             {embedded ? <SafeAttributes attributes={span.attributes_json} /> : null}
@@ -449,18 +469,19 @@ function InspectorMetric({ label, value }: { label: string; value: string }) {
 }
 
 function SafeAttributes({ attributes }: { attributes?: Record<string, unknown> }) {
+  const t = useTranslations("admin.tracePage");
   const entries = Object.entries(attributes ?? {});
   if (!entries.length) {
     return (
       <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-sm text-muted">
-        This span has no additional safe metadata.
+        {t("noMetadata")}
       </div>
     );
   }
   return (
     <div>
       <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">
-        Safe metadata
+        {t("safeMetadata")}
       </h3>
       <dl className="mt-3 grid gap-3 xl:grid-cols-2">
         {entries.map(([key, value]) => (
@@ -492,6 +513,7 @@ function InspectorRow({
 }
 
 function RunBadge({ status }: { status: string }) {
+  const t = useTranslations("admin.tracePage");
   const tone =
     status === "success"
       ? "green"
@@ -502,7 +524,7 @@ function RunBadge({ status }: { status: string }) {
           : "red";
   return (
     <AdminStatusBadge tone={tone} dot>
-      {status}
+      {t(statusLabelKey(status))}
     </AdminStatusBadge>
   );
 }
@@ -513,6 +535,23 @@ function moduleKey(category: string) {
   if (["request", "environment", "agent", "model", "tool", "finalization"].includes(category))
     return category;
   return "agent";
+}
+
+function moduleLabelKey(key: string) {
+  if (key === "request") return "modules.request" as const;
+  if (key === "environment") return "modules.environment" as const;
+  if (key === "model") return "modules.model" as const;
+  if (key === "tool") return "modules.tool" as const;
+  if (key === "finalization") return "modules.finalization" as const;
+  return "modules.agent" as const;
+}
+
+function statusLabelKey(status: string) {
+  if (status === "success") return "status.success" as const;
+  if (status === "running") return "status.running" as const;
+  if (status === "cancelled") return "status.cancelled" as const;
+  if (status === "interrupted") return "status.interrupted" as const;
+  return "status.failed" as const;
 }
 
 function moduleIcon(key: string) {
@@ -568,19 +607,20 @@ function humanize(value: string) {
   return value.replaceAll(".", " · ").replaceAll("_", " ");
 }
 
-function formatDurationUS(us: number) {
-  return formatDurationMS(us / 1000);
+function formatDurationUS(us: number, locale: string) {
+  return formatDurationMS(us / 1000, locale);
 }
 
-function formatDurationMS(ms: number) {
+function formatDurationMS(ms: number, locale: string) {
   if (!Number.isFinite(ms) || ms <= 0) return "—";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
-  return `${(ms / 60_000).toFixed(1)} min`;
+  const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
+  if (ms < 1000) return `${number.format(Math.round(ms))} ms`;
+  if (ms < 60_000) return `${number.format(ms / 1000)} s`;
+  return `${number.format(ms / 60_000)} min`;
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+function formatDate(value: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -590,8 +630,8 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+function formatTime(value: string, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -599,13 +639,17 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
-function formatRunPosition(span: TraceSpan, timeline: ReturnType<typeof timelineStats>) {
+function formatRunPosition(
+  span: TraceSpan,
+  timeline: ReturnType<typeof timelineStats>,
+  locale: string,
+) {
   const offset = Math.max(Date.parse(span.started_at) - timeline.startMs, 0);
-  return offset > 0 ? `+${formatDurationMS(offset)}` : "+0 ms";
+  return offset > 0 ? `+${formatDurationMS(offset, locale)}` : "+0 ms";
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat(undefined, {
+function formatNumber(value: number, locale: string) {
+  return new Intl.NumberFormat(locale, {
     notation: value >= 10_000 ? "compact" : "standard",
   }).format(value);
 }

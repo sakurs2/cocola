@@ -225,24 +225,33 @@ function clampInt(value: string, min: number, max: number, fallback: number): nu
   return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 }
 
-export function validateTaskForm(form: TaskFormState): string {
-  if (!form.name.trim()) return "Task name is required.";
-  if (!form.prompt.trim()) return "Tell Cocola what the task should do.";
-  if (!form.modelRouteID || !form.modelAlias) return "Choose a model.";
+export type TaskValidationCode =
+  | "name"
+  | "prompt"
+  | "model"
+  | "runAt"
+  | "runFuture"
+  | "endAt"
+  | "endFuture";
+
+export function validateTaskForm(form: TaskFormState): TaskValidationCode | "" {
+  if (!form.name.trim()) return "name";
+  if (!form.prompt.trim()) return "prompt";
+  if (!form.modelRouteID || !form.modelAlias) return "model";
   if (form.scheduleKind === "once") {
     if (!isValidDateTimeInput(form.runAt)) {
-      return "Choose a valid run date with a four-digit year.";
+      return "runAt";
     }
     const runAt = new Date(zonedLocalToISO(form.runAt, form.timezone)).getTime();
-    if (!Number.isFinite(runAt) || runAt <= Date.now()) return "Run time must be in the future.";
+    if (!Number.isFinite(runAt) || runAt <= Date.now()) return "runFuture";
   }
   if (form.scheduleKind !== "once" && form.ends === "on") {
     if (!isValidDateTimeInput(form.expiresAt)) {
-      return "Choose a valid end date with a four-digit year.";
+      return "endAt";
     }
     const expiresAt = new Date(zonedLocalToISO(form.expiresAt, form.timezone)).getTime();
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-      return "End time must be in the future.";
+      return "endFuture";
     }
   }
   return "";

@@ -29,6 +29,7 @@ import {
   type ReactNode,
 } from "react";
 import { signOut } from "next-auth/react";
+import { useTranslations } from "next-intl";
 import { parseFrames, type AgentEvent } from "@/lib/sse";
 import { Base64AttachmentAdapter } from "@/lib/base64-attachment-adapter";
 import {
@@ -49,7 +50,6 @@ import {
   interactionModeForRuntime,
   isRetryablePlanExecutionStatus,
   latestInteractionMode,
-  PLAN_ERRORS,
   planExecutionRequestKey,
   shouldAwaitPlanStop,
 } from "@/lib/plan-mode.mjs";
@@ -1475,6 +1475,7 @@ function convertMessage(message: UiMessage): ThreadMessageLike {
 const attachmentAdapter = new Base64AttachmentAdapter();
 
 export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
+  const t = useTranslations("errors.runtime");
   // Message and running state are keyed by session_id. A
   // background stream keeps writing into its own buffer even after navigation.
   const [convMessages, setConvMessages] = useState<Record<string, UiMessage[]>>({});
@@ -2152,12 +2153,12 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             if (response.status === 404) {
               applyEvent(cursor.conversationId, cursor.assistantId, {
                 kind: "error",
-                data: { error: "Saved run is unavailable" },
+                data: { error: t("savedRunUnavailable") },
               });
               finishRun(cursor);
               return;
             }
-            throw new Error(`run stream unavailable (${response.status})`);
+            throw new Error(t("runStreamUnavailable", { status: response.status }));
           }
 
           const reader = response.body.getReader();
@@ -2209,7 +2210,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           applyEvent(cursor.conversationId, cursor.assistantId, {
             kind: "error",
             data: {
-              error: "Run connection is unavailable after repeated retries. Refresh to reconnect.",
+              error: t("runConnectionUnavailable"),
             },
           });
           abortMap.current.delete(cursor.conversationId);
@@ -2222,7 +2223,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         retryDelay = Math.min(retryDelay * 2, 5000);
       }
     },
-    [applyEvent, finishRun, setRunning],
+    [applyEvent, finishRun, setRunning, t],
   );
 
   const connectActiveRun = useCallback(
@@ -2318,7 +2319,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const customText = answer.text?.trim() ?? "";
       const selectedOption = question.options.find((option) => option.id === optionId);
       if ((optionId && !selectedOption) || (!selectedOption && !customText)) {
-        throw new Error("Choose an option or enter your own answer.");
+        throw new Error(t("answerRequired"));
       }
       const answerText = [selectedOption?.label, customText].filter(Boolean).join("\n\n");
       const sourceMessage = messages.find((message) =>
@@ -2384,7 +2385,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         let response: Response | undefined;
         let retryDelay = 250;
         let attempts = 0;
-        let lastError: unknown = new Error("Could not continue the conversation. Try again.");
+        let lastError: unknown = new Error(t("continueConversation"));
         while (!response && !controller.signal.aborted && attempts < CHAT_START_MAX_ATTEMPTS) {
           attempts += 1;
           let candidate: Response | undefined;
@@ -2411,10 +2412,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               response = candidate;
               break;
             }
-            lastError = await apiError(
-              candidate,
-              "Could not continue the conversation. Try again.",
-            );
+            lastError = await apiError(candidate, t("continueConversation"));
             await candidate.body?.cancel().catch(() => {});
             if (candidate.status < 500) throw lastError;
           }
@@ -2424,7 +2422,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!response) throw lastError;
         const runId = response.headers.get("x-cocola-run-id") ?? "";
-        if (!runId) throw new Error("Could not continue the conversation. Try again.");
+        if (!runId) throw new Error(t("continueConversation"));
         const durableAssistantId = `${runId}-assistant`;
         setConvMessages((previous) => ({
           ...previous,
@@ -2500,7 +2498,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         throw error;
       }
     },
-    [connectActiveRun, followRun, messages, sessionId, setRunning],
+    [connectActiveRun, followRun, messages, sessionId, setRunning, t],
   );
 
   const cancelQuestion = useCallback(
@@ -2519,7 +2517,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (!response.ok) {
-        throw await apiError(response, "Could not cancel the question. Try again.");
+        throw await apiError(response, t("cancelQuestion"));
       }
       setConvMessages((previous) => {
         const current = previous[sessionId] ?? [];
@@ -2530,7 +2528,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       });
       refreshConversations();
     },
-    [refreshConversations, sessionId],
+    [refreshConversations, sessionId, t],
   );
 
   const applyUserEvent = useCallback(
@@ -2546,7 +2544,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         if (source === "snapshot" && deletedAtMs && startedAtMs <= deletedAtMs) return;
         deletedScheduledConversationsRef.current.delete(conversationID);
         realtimeScheduledRunsRef.current.add(conversationID);
-        const title = stringValue(event.data?.title) || "Scheduled task";
+        const title = stringValue(event.data?.title) || t("scheduledTask");
         const updatedAt = event.occurred_at || new Date().toISOString();
         setConversations((prev) => {
           const existing = prev.find((c) => c.id === conversationID);
@@ -2589,7 +2587,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         refreshConversations();
       }
     },
-    [defaultAgentRuntimeID, refreshConversations, setRunning],
+    [defaultAgentRuntimeID, refreshConversations, setRunning, t],
   );
 
   const applyUserEventSnapshot = useCallback(
@@ -2826,7 +2824,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         const now = new Date().toISOString();
         const existing = prev.find((c) => c.id === turnSessionId);
         const rest = prev.filter((c) => c.id !== turnSessionId);
-        const title = existing?.title || text.slice(0, 40) || "New Chat";
+        const title = existing?.title || text.slice(0, 40) || t("newChat");
         return [
           {
             id: turnSessionId,
@@ -2908,7 +2906,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             if (candidate.status >= 500) {
               await candidate.body?.cancel().catch(() => {});
               if (startAttempts >= CHAT_START_MAX_ATTEMPTS) {
-                throw new Error(`chat start unavailable after ${startAttempts} attempts`);
+                throw new Error(t("chatUnavailable", { attempts: startAttempts }));
               }
               await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
               retryDelay = Math.min(retryDelay * 2, 5000);
@@ -2950,7 +2948,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               ),
             }));
             refreshConversations();
-            throw new Error(conflict.error.message || "conversation runtime cannot be changed");
+            throw new Error(conflict.error.message || t("runtimeImmutable"));
           }
           if (conflict.error?.code === "QUESTION_PENDING") {
             setConvMessages((previous) => ({
@@ -2971,16 +2969,13 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             } catch {
               // The server error remains actionable even if history refresh fails.
             }
-            throw new Error(
-              conflict.error.message ||
-                "Answer or cancel Claude's pending question before starting another run.",
-            );
+            throw new Error(conflict.error.message || t("pendingQuestion"));
           }
           if (conflict.error?.code && conflict.error.code !== "RUN_IN_PROGRESS") {
-            throw new Error(conflict.error.message || "chat start conflict");
+            throw new Error(conflict.error.message || t("chatConflict"));
           }
           const runId = conflict.run_id ?? "";
-          if (!runId) throw new Error("conversation already has an active run");
+          if (!runId) throw new Error(t("activeRun"));
           sessionFolderHintsRef.current.delete(turnSessionId);
           sessionProjectHintsRef.current.delete(turnSessionId);
           const durableAssistantId = `${runId}-assistant`;
@@ -3033,9 +3028,11 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!res.ok) {
           const detail = await res.text().catch(() => "");
-          throw new Error(`chat start rejected (${res.status})${detail ? `: ${detail}` : ""}`);
+          throw new Error(
+            t("chatRejected", { status: res.status, detail: detail ? `: ${detail}` : "" }),
+          );
         }
-        if (!res.body) throw new Error("no response body");
+        if (!res.body) throw new Error(t("noResponseBody"));
         sessionFolderHintsRef.current.delete(turnSessionId);
         sessionProjectHintsRef.current.delete(turnSessionId);
 
@@ -3109,6 +3106,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       refreshConversations,
       markServerAccepted,
       setRunning,
+      t,
     ],
   );
 
@@ -3192,7 +3190,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         let response: Response | undefined;
         let retryDelay = 250;
         let startAttempts = 0;
-        let lastError: unknown = new Error(PLAN_ERRORS.executionFailed);
+        let lastError: unknown = new Error(t("planExecutionFailed"));
         while (!response && !controller.signal.aborted && startAttempts < CHAT_START_MAX_ATTEMPTS) {
           startAttempts += 1;
           let candidate: Response | undefined;
@@ -3221,9 +3219,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
               break;
             }
             if (candidate.ok) {
-              lastError = new Error(PLAN_ERRORS.executionFailed);
+              lastError = new Error(t("planExecutionFailed"));
             } else {
-              lastError = await apiError(candidate, PLAN_ERRORS.executionFailed);
+              lastError = await apiError(candidate, t("planExecutionFailed"));
               if (!isRetryablePlanExecutionStatus(candidate.status)) {
                 planExecutionRequestIds.current.delete(requestKey);
                 throw lastError;
@@ -3237,7 +3235,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (!response) throw lastError;
         const runId = response.headers.get("x-cocola-run-id") ?? "";
-        if (!runId) throw new Error(PLAN_ERRORS.executionFailed);
+        if (!runId) throw new Error(t("planExecutionFailed"));
         const durableAssistantId = `${runId}-assistant`;
         setConvMessages((previous) => ({
           ...previous,
@@ -3264,7 +3262,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           applyEvent(turnSessionId, assistantId, {
             kind: "error",
             data: {
-              error: error instanceof Error ? error.message : PLAN_ERRORS.executionFailed,
+              error: error instanceof Error ? error.message : t("planExecutionFailed"),
             },
           });
           setRunning(turnSessionId, false);
@@ -3272,7 +3270,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [applyEvent, followRun, sessionId, setRunning],
+    [applyEvent, followRun, sessionId, setRunning, t],
   );
 
   const cancelPlan = useCallback(
@@ -3290,7 +3288,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         redirectAccountDisabled();
         return;
       }
-      if (!response.ok) throw await apiError(response, "Could not cancel plan. Try again.");
+      if (!response.ok) throw await apiError(response, t("cancelPlan"));
       setConvMessages((previous) => {
         const current = previous[sessionId] ?? [];
         return {
@@ -3300,7 +3298,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       });
       refreshConversations();
     },
-    [refreshConversations, sessionId],
+    [refreshConversations, sessionId, t],
   );
 
   const onCancel = useCallback(async () => {
@@ -3316,7 +3314,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           redirectAccountDisabled();
           return;
         }
-        if (!response.ok) throw new Error(`cancel failed (${response.status})`);
+        if (!response.ok) throw new Error(t("cancelFailed", { status: response.status }));
       } catch (error) {
         cancellingRuns.current.delete(sessionId);
         applyEvent(sessionId, cursor.assistantId, {
@@ -3345,7 +3343,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       delete next[sessionId];
       return next;
     });
-  }, [applyEvent, sessionId, setRunning]);
+  }, [applyEvent, sessionId, setRunning, t]);
 
   // Replay a stored conversation into the thread: fetch its messages, map them
   // back into local state, and point session_id at it so a follow-up turn
@@ -3445,7 +3443,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           redirectAccountDisabled();
           return;
         }
-        if (!res.ok) throw new Error(`rename failed (${res.status})`);
+        if (!res.ok) throw new Error(t("renameFailed", { status: res.status }));
         const updated = (await res.json()) as ConversationSummary;
         setConversations((prev) =>
           prev.map((c) =>
@@ -3463,7 +3461,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [refreshConversations],
+    [refreshConversations, t],
   );
 
   const removeLocalConversations = useCallback((ids: string[]) => {
@@ -3527,55 +3525,61 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       if (!res.ok) {
         refreshConversations();
         if (res.status === 409) {
-          throw new Error("Stop the running answer and wait for it to finish before deleting.");
+          throw new Error(t("deleteRunning"));
         }
-        throw new Error(`delete failed (${res.status})`);
+        throw new Error(t("deleteFailed", { status: res.status }));
       }
 
       removeLocalConversations([id]);
     },
-    [refreshConversations, removeLocalConversations],
+    [refreshConversations, removeLocalConversations, t],
   );
 
-  const createFolder = useCallback(async (name: string) => {
-    const res = await fetch("/api/folders", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (isAccountDisabledResponse(res)) {
-      redirectAccountDisabled();
-      throw new Error("Account disabled");
-    }
-    if (!res.ok) throw await apiError(res, `create folder failed (${res.status})`);
-    const folder = (await res.json()) as ConversationFolder;
-    setFolders((prev) =>
-      [...prev.filter((item) => item.id !== folder.id), folder].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-      ),
-    );
-    return folder;
-  }, []);
+  const createFolder = useCallback(
+    async (name: string) => {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (isAccountDisabledResponse(res)) {
+        redirectAccountDisabled();
+        throw new Error(t("accountDisabled"));
+      }
+      if (!res.ok) throw await apiError(res, t("createFolderFailed", { status: res.status }));
+      const folder = (await res.json()) as ConversationFolder;
+      setFolders((prev) =>
+        [...prev.filter((item) => item.id !== folder.id), folder].sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+        ),
+      );
+      return folder;
+    },
+    [t],
+  );
 
-  const renameFolder = useCallback(async (id: string, name: string) => {
-    const res = await fetch(`/api/folders/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (isAccountDisabledResponse(res)) {
-      redirectAccountDisabled();
-      throw new Error("Account disabled");
-    }
-    if (!res.ok) throw await apiError(res, `rename folder failed (${res.status})`);
-    const folder = (await res.json()) as ConversationFolder;
-    setFolders((prev) =>
-      prev
-        .map((item) => (item.id === id ? folder : item))
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
-    );
-    return folder;
-  }, []);
+  const renameFolder = useCallback(
+    async (id: string, name: string) => {
+      const res = await fetch(`/api/folders/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (isAccountDisabledResponse(res)) {
+        redirectAccountDisabled();
+        throw new Error(t("accountDisabled"));
+      }
+      if (!res.ok) throw await apiError(res, t("renameFolderFailed", { status: res.status }));
+      const folder = (await res.json()) as ConversationFolder;
+      setFolders((prev) =>
+        prev
+          .map((item) => (item.id === id ? folder : item))
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+      );
+      return folder;
+    },
+    [t],
+  );
 
   const deleteFolder = useCallback(
     async (id: string) => {
@@ -3585,9 +3589,9 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`/api/folders/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (isAccountDisabledResponse(res)) {
         redirectAccountDisabled();
-        throw new Error("Account disabled");
+        throw new Error(t("accountDisabled"));
       }
-      if (!res.ok) throw await apiError(res, `delete folder failed (${res.status})`);
+      if (!res.ok) throw await apiError(res, t("deleteFolderFailed", { status: res.status }));
       setFolders((prev) => prev.filter((folder) => folder.id !== id));
       removeLocalConversations(deletedConversationIDs);
       let deletedPendingSession = false;
@@ -3605,34 +3609,37 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
       }
       refreshConversations();
     },
-    [refreshConversations, removeLocalConversations],
+    [refreshConversations, removeLocalConversations, t],
   );
 
-  const moveConversation = useCallback(async (id: string, folderId: string | null) => {
-    const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/folder`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ folder_id: folderId }),
-    });
-    if (isAccountDisabledResponse(res)) {
-      redirectAccountDisabled();
-      throw new Error("Account disabled");
-    }
-    if (!res.ok) throw await apiError(res, `move conversation failed (${res.status})`);
-    const updated = (await res.json()) as ConversationSummary;
-    sessionFolderHintsRef.current.delete(id);
-    setConversations((prev) =>
-      prev.map((conversation) =>
-        conversation.id === id
-          ? {
-              ...conversation,
-              ...updated,
-              folder_id: updated.folder_id || undefined,
-            }
-          : conversation,
-      ),
-    );
-  }, []);
+  const moveConversation = useCallback(
+    async (id: string, folderId: string | null) => {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}/folder`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ folder_id: folderId }),
+      });
+      if (isAccountDisabledResponse(res)) {
+        redirectAccountDisabled();
+        throw new Error(t("accountDisabled"));
+      }
+      if (!res.ok) throw await apiError(res, t("moveConversationFailed", { status: res.status }));
+      const updated = (await res.json()) as ConversationSummary;
+      sessionFolderHintsRef.current.delete(id);
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === id
+            ? {
+                ...conversation,
+                ...updated,
+                folder_id: updated.folder_id || undefined,
+              }
+            : conversation,
+        ),
+      );
+    },
+    [t],
+  );
 
   // Start a fresh conversation. Other conversations' in-flight streams continue
   // in the background; the fresh session_id prevents backend --resume.
@@ -3847,7 +3854,7 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
           fetch("/api/product-config", { cache: "no-store" }),
         ]);
         if (!runtimeResponse.ok || !configResponse.ok) {
-          throw new Error("Product configuration unavailable");
+          throw new Error(t("productConfigUnavailable"));
         }
         const rows = (await runtimeResponse.json()) as AgentRuntimeOption[];
         const config = (await configResponse.json()) as ProductConfig;
@@ -3865,14 +3872,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
             ? config.agent_runtime.default_id.trim()
             : "";
         if (!defaultID) {
-          throw new Error("Product configuration unavailable");
+          throw new Error(t("productConfigUnavailable"));
         }
         setRuntimes(next);
         const selected = selectAgentRuntime({
           runtimes: next,
           defaultRuntimeId: defaultID,
         });
-        if (!selected) throw new Error("Configured Agent Runtime unavailable");
+        if (!selected) throw new Error(t("agentRuntimeUnavailable"));
         setProductConfig({
           agent_runtime: {
             default_id: defaultID,
@@ -3886,14 +3893,14 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
         setProductConfig(null);
         setSelectedRuntimeIdState("");
         setRuntimeConfigError(
-          error instanceof Error ? error.message : "Product configuration unavailable",
+          error instanceof Error ? error.message : t("productConfigUnavailable"),
         );
       } finally {
         setRuntimesLoaded(true);
         setProductConfigLoaded(true);
       }
     })();
-  }, []);
+  }, [t]);
 
   const runtime = useExternalStoreRuntime<UiMessage>({
     messages,
@@ -4042,30 +4049,49 @@ export function CocolaRuntimeProvider({ children }: { children: ReactNode }) {
   return (
     <CocolaContext.Provider value={ctx}>
       <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>
-      <ActionConfirmDialog
+      <RuntimeWorkspaceResetDialog
         open={workspaceResetRequest !== null}
-        title="Use an empty Workspace?"
-        description="The node holding this Workspace is unavailable. A new empty Workspace lets the next retry continue on another node, but files from the previous node cannot be recovered."
-        confirmLabel="Use empty Workspace"
-        cancelLabel="Keep current Workspace"
-        tone="warning"
         onOpenChange={(open) => {
           if (open || !workspaceResetRequest) return;
           workspaceResetPromptedRef.current.delete(workspaceResetRequest.conversationId);
           setWorkspaceResetRequest(null);
         }}
-        onConfirm={() => {
+        onConfirm={(confirmedMessage) => {
           if (!workspaceResetRequest) return;
           workspaceResetAllowedRef.current.add(workspaceResetRequest.conversationId);
           applyEvent(workspaceResetRequest.conversationId, workspaceResetRequest.assistantId, {
             kind: "error",
             data: {
-              error: "Empty Workspace confirmed. Send the message again to continue.",
+              error: confirmedMessage,
             },
           });
           setWorkspaceResetRequest(null);
         }}
       />
     </CocolaContext.Provider>
+  );
+}
+
+function RuntimeWorkspaceResetDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (confirmedMessage: string) => void;
+}) {
+  const t = useTranslations("errors.workspaceReset");
+  return (
+    <ActionConfirmDialog
+      open={open}
+      title={t("title")}
+      description={t("description")}
+      confirmLabel={t("confirm")}
+      cancelLabel={t("cancel")}
+      tone="warning"
+      onOpenChange={onOpenChange}
+      onConfirm={() => onConfirm(t("confirmed"))}
+    />
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { ChevronLeft, GitBranch, GitMerge } from "lucide-react";
 import { Button, Chip } from "@heroui/react";
 import { useCocola } from "@/app/runtime-provider";
@@ -22,6 +23,7 @@ type ProjectWorkspace = {
 };
 
 export default function ProjectTaskPage() {
+  const t = useTranslations("projects.taskBar");
   const params = useParams<{ id: string; conversationId: string }>();
   const router = useRouter();
   const { activeSessionId, loadConversation, projects } = useCocola();
@@ -114,12 +116,12 @@ export default function ProjectTaskPage() {
           onPress={() => router.push(`/projects/${encodeURIComponent(params.id)}`)}
         >
           <ChevronLeft className="size-3.5" />
-          {project?.name || projectName || "Project"}
+          {project?.name || projectName || t("project")}
         </Button>
         {merged ? (
           <Chip className="ml-auto" color="success" size="sm" variant="soft">
             <GitMerge className="size-3.5" />
-            Merged · read-only
+            {t("mergedReadOnly")}
           </Chip>
         ) : null}
         <Chip

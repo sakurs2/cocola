@@ -24,6 +24,7 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import {
@@ -58,6 +59,7 @@ type Candidate = Skill & {
 };
 
 export default function SkillsPage() {
+  const t = useTranslations("skills");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -261,12 +263,12 @@ export default function SkillsPage() {
         action={
           <WorkspacePageAction isDisabled={working} onPress={() => fileInputRef.current?.click()}>
             <Upload className="size-4" />
-            Upload zip
+            {t("uploadZip")}
           </WorkspacePageAction>
         }
-        description={`${availableSkills.length} skills are currently in your workspace catalog.`}
+        description={t("catalogCount", { count: availableSkills.length })}
         icon={<Sparkles className="size-5" />}
-        title="Skills"
+        title={t("title")}
       />
       <input
         ref={fileInputRef}
@@ -282,20 +284,20 @@ export default function SkillsPage() {
 
       <Card className="p-4">
         <Card.Header className="p-0">
-          <Card.Title>Import from Git</Card.Title>
-          <Card.Description>Scan a repository for SKILL.md packages.</Card.Description>
+          <Card.Title>{t("importGit")}</Card.Title>
+          <Card.Description>{t("importGitDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-3 p-0 lg:grid-cols-[minmax(0,1fr)_160px_180px_auto] lg:items-end">
           <TextField value={gitRepo} onChange={setGitRepo}>
-            <Label>Repository</Label>
-            <Input placeholder="owner/repository or Git URL" />
+            <Label>{t("repository")}</Label>
+            <Input placeholder={t("repositoryPlaceholder")} />
           </TextField>
           <TextField value={gitRef} onChange={setGitRef}>
-            <Label>Ref</Label>
+            <Label>{t("ref")}</Label>
             <Input placeholder="main" />
           </TextField>
           <TextField value={gitPath} onChange={setGitPath}>
-            <Label>Path</Label>
+            <Label>{t("path")}</Label>
             <Input placeholder="skills/example" />
           </TextField>
           <Button
@@ -308,7 +310,7 @@ export default function SkillsPage() {
             ) : (
               <GitBranch className="size-4" />
             )}
-            {gitScanning ? "Scanning…" : "Scan repository"}
+            {gitScanning ? t("scanning") : t("scanRepository")}
           </Button>
         </Card.Content>
       </Card>
@@ -317,8 +319,10 @@ export default function SkillsPage() {
         <Card className="p-4">
           <Card.Header className="flex-row items-start justify-between gap-4 p-0">
             <span>
-              <Card.Title>Candidates</Card.Title>
-              <Card.Description>{validCandidates.length} valid packages found.</Card.Description>
+              <Card.Title>{t("candidates")}</Card.Title>
+              <Card.Description>
+                {t("validPackages", { count: validCandidates.length })}
+              </Card.Description>
             </span>
             <span className="flex gap-2">
               <Button
@@ -334,7 +338,7 @@ export default function SkillsPage() {
                   )
                 }
               >
-                {allValidSelected ? "Clear all" : "Select all"}
+                {allValidSelected ? t("clearAll") : t("selectAll")}
               </Button>
               <Button
                 isDisabled={working || !Object.values(selected).some(Boolean)}
@@ -342,7 +346,7 @@ export default function SkillsPage() {
                 variant="primary"
                 onPress={importSelected}
               >
-                Import selected
+                {t("importSelected")}
               </Button>
             </span>
           </Card.Header>
@@ -370,7 +374,7 @@ export default function SkillsPage() {
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1.5">
                     <Chip color={candidate.valid ? "success" : "danger"} size="sm" variant="soft">
-                      {candidate.valid ? "Valid" : "Invalid"}
+                      {candidate.valid ? t("valid") : t("invalid")}
                     </Chip>
                     <Chip size="sm" variant="soft">
                       {candidate.path}
@@ -385,11 +389,11 @@ export default function SkillsPage() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <WorkspaceSectionHeader
-          description={`${filteredSkills.length} workspace capabilities managed by the platform.`}
-          title="Skills catalog"
+          description={t("catalogDescription", { count: filteredSkills.length })}
+          title={t("catalog")}
         />
         <WorkspaceSearch
-          placeholder="Search skills by name"
+          placeholder={t("search")}
           value={skillQuery}
           onChange={(value) => {
             setSkillQuery(value);
@@ -408,7 +412,7 @@ export default function SkillsPage() {
             <SkillSection
               actionSkillId={actionSkillId}
               skills={visibleSharedSkills}
-              title="Shared skills"
+              title={t("shared")}
               total={sharedSkills.length}
               onToggle={setSkillEnabled}
             />
@@ -417,7 +421,7 @@ export default function SkillsPage() {
             <SkillSection
               actionSkillId={actionSkillId}
               skills={visiblePersonalSkills}
-              title="My skills"
+              title={t("personalSection")}
               total={personalSkills.length}
               onDelete={(skill) => {
                 setError(null);
@@ -445,11 +449,9 @@ export default function SkillsPage() {
                 <Sparkles className="text-violet-500" />
               )}
             </EmptyState.Media>
-            <EmptyState.Title>No skills found</EmptyState.Title>
+            <EmptyState.Title>{t("empty")}</EmptyState.Title>
             <EmptyState.Description>
-              {skillQuery
-                ? "Try another name or clear the search."
-                : "No skills are available yet."}
+              {skillQuery ? t("searchEmptyDescription") : t("emptyDescription")}
             </EmptyState.Description>
           </EmptyState.Header>
           {skillQuery ? (
@@ -462,7 +464,7 @@ export default function SkillsPage() {
                   setSkillPage(1);
                 }}
               >
-                Clear search
+                {t("clearSearch")}
               </Button>
             </EmptyState.Content>
           ) : null}
@@ -470,11 +472,13 @@ export default function SkillsPage() {
       )}
       <DeleteConfirmDialog
         busy={deleteTarget !== null && actionSkillId === deleteTarget.id}
-        confirmLabel="Remove Skill"
-        description={`${deleteTarget ? displaySkillName(deleteTarget) : "This personal Skill"} will be permanently removed from your workspace.`}
+        confirmLabel={t("remove")}
+        description={t("removeDescription", {
+          name: deleteTarget ? displaySkillName(deleteTarget) : t("thisPersonalSkill"),
+        })}
         error={error}
         open={deleteTarget !== null}
-        title="Remove this Skill?"
+        title={t("removeTitle")}
         onConfirm={() => {
           if (deleteTarget) void deleteSkill(deleteTarget);
         }}
@@ -504,9 +508,13 @@ function SkillSection({
   onDelete?: (skill: Skill) => void;
   onToggle: (skill: Skill) => void;
 }) {
+  const t = useTranslations("skills");
   return (
     <section className="grid gap-3">
-      <WorkspaceSectionHeader description={`${total} ${title.toLowerCase()}`} title={title} />
+      <WorkspaceSectionHeader
+        description={t("sectionCount", { count: total, name: title })}
+        title={title}
+      />
       <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
         {skills.map((skill) => (
           <SkillCard
@@ -537,19 +545,20 @@ function SkillPagination({
   total: number;
   onPageChange: (page: number) => void;
 }) {
+  const t = useTranslations("skills");
   return (
     <nav
-      aria-label="Skills pagination"
+      aria-label={t("pagination")}
       className="flex flex-wrap items-center justify-between gap-3 pt-1"
     >
       <span className="text-muted text-xs tabular-nums">
-        Showing {total === 0 ? 0 : start + 1}–{end} of {total}
+        {t("showing", { start: total === 0 ? 0 : start + 1, end, total })}
       </span>
       <span className="flex items-center gap-2">
         <Tooltip delay={0}>
           <Button
             isIconOnly
-            aria-label="Previous Skills page"
+            aria-label={t("previousAria")}
             isDisabled={page === 1}
             size="sm"
             variant="outline"
@@ -557,7 +566,7 @@ function SkillPagination({
           >
             <ChevronLeft className="size-4" />
           </Button>
-          <Tooltip.Content>Previous page</Tooltip.Content>
+          <Tooltip.Content>{t("previousPage")}</Tooltip.Content>
         </Tooltip>
         <span className="text-muted min-w-14 text-center text-xs tabular-nums">
           {page} / {pageCount}
@@ -565,7 +574,7 @@ function SkillPagination({
         <Tooltip delay={0}>
           <Button
             isIconOnly
-            aria-label="Next Skills page"
+            aria-label={t("nextAria")}
             isDisabled={page === pageCount}
             size="sm"
             variant="outline"
@@ -573,7 +582,7 @@ function SkillPagination({
           >
             <ChevronRight className="size-4" />
           </Button>
-          <Tooltip.Content>Next page</Tooltip.Content>
+          <Tooltip.Content>{t("nextPage")}</Tooltip.Content>
         </Tooltip>
       </span>
     </nav>
@@ -591,6 +600,8 @@ function SkillCard({
   onDelete?: () => void;
   onToggle: () => void;
 }) {
+  const t = useTranslations("skills");
+  const skillName = displaySkillName(skill);
   const details = (
     <>
       <SkillIcon
@@ -601,15 +612,15 @@ function SkillCard({
         {displaySkillName(skill)}
       </span>
       <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
-        {skill.description || "No description"}
+        {skill.description || t("noDescription")}
       </span>
       <span className="mt-3 flex flex-wrap gap-1.5">
         <Chip color={skill.scope === "user" ? "accent" : "default"} size="sm" variant="soft">
-          {skill.scope === "user" ? "Personal" : "Shared"}
+          {skill.scope === "user" ? t("personal") : t("sharedLabel")}
         </Chip>
         {skill.file_count ? (
           <Chip size="sm" variant="soft">
-            {skill.file_count} files
+            {t("files", { count: skill.file_count })}
           </Chip>
         ) : null}
       </span>
@@ -628,7 +639,7 @@ function SkillCard({
           {onDelete ? (
             <Button
               isIconOnly
-              aria-label={`Remove ${displaySkillName(skill)}`}
+              aria-label={t("removeAria", { name: skillName })}
               isDisabled={working}
               size="sm"
               variant="danger-soft"
@@ -638,7 +649,7 @@ function SkillCard({
             </Button>
           ) : null}
           <Switch
-            aria-label={`${skill.enabled ? "Disable" : "Enable"} ${displaySkillName(skill)}`}
+            aria-label={t(skill.enabled ? "disableAria" : "enableAria", { name: skillName })}
             isDisabled={working}
             isSelected={skill.enabled}
             onChange={onToggle}

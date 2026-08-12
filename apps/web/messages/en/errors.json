@@ -1,0 +1,39 @@
+{
+  "workspaceReset": {
+    "title": "Use an empty Workspace?",
+    "description": "The node holding this Workspace is unavailable. A new empty Workspace lets the next retry continue on another node, but files from the previous node cannot be recovered.",
+    "confirm": "Use empty Workspace",
+    "cancel": "Keep current Workspace",
+    "confirmed": "Empty Workspace confirmed. Send the message again to continue."
+  },
+  "runtime": {
+    "savedRunUnavailable": "Saved run is unavailable.",
+    "runStreamUnavailable": "Run stream unavailable ({status}).",
+    "runConnectionUnavailable": "Run connection is unavailable after repeated retries. Refresh to reconnect.",
+    "answerRequired": "Choose an option or enter your own answer.",
+    "continueConversation": "Could not continue the conversation. Try again.",
+    "cancelQuestion": "Could not cancel the question. Try again.",
+    "scheduledTask": "Scheduled task",
+    "newChat": "New Chat",
+    "chatUnavailable": "Chat could not start after {attempts} attempts.",
+    "runtimeImmutable": "The conversation runtime cannot be changed.",
+    "pendingQuestion": "Answer or cancel the pending question before starting another run.",
+    "chatConflict": "The conversation could not start because its state changed.",
+    "activeRun": "The conversation already has an active run.",
+    "chatRejected": "Chat start rejected ({status}){detail}",
+    "noResponseBody": "The response body is empty.",
+    "planExecutionFailed": "Could not execute the plan. Try again.",
+    "cancelPlan": "Could not cancel the plan. Try again.",
+    "cancelFailed": "Cancellation failed ({status}).",
+    "renameFailed": "Rename failed ({status}).",
+    "deleteRunning": "Stop the running answer and wait for it to finish before deleting.",
+    "deleteFailed": "Delete failed ({status}).",
+    "accountDisabled": "Account disabled.",
+    "createFolderFailed": "Create folder failed ({status}).",
+    "renameFolderFailed": "Rename folder failed ({status}).",
+    "deleteFolderFailed": "Delete folder failed ({status}).",
+    "moveConversationFailed": "Move conversation failed ({status}).",
+    "productConfigUnavailable": "Product configuration unavailable.",
+    "agentRuntimeUnavailable": "The configured Agent Runtime is unavailable."
+  }
+}

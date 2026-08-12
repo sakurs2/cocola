@@ -2,6 +2,7 @@
 
 import { Check, ChevronDown } from "lucide-react";
 import { Dropdown } from "@heroui/react";
+import { useTranslations } from "next-intl";
 import { ModelIcon } from "@/components/ui/model-icon";
 import type { AgentModelOption } from "@/lib/agents";
 
@@ -18,12 +19,13 @@ export function HeroUIAgentModelSelect({
   fallbackLabel?: string;
   onChange: (modelID: string) => void;
 }) {
+  const t = useTranslations("agents.modelSelect");
   const model = models.find((item) => item.id === value);
 
   return (
     <Dropdown>
       <Dropdown.Trigger
-        aria-label="Select model"
+        aria-label={t("select")}
         className="cocola-web-select-trigger border-separator bg-default hover:bg-default-hover flex h-11 w-full min-w-0 items-center gap-3 rounded-2xl border px-3 text-left text-sm outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         isDisabled={isDisabled}
       >
@@ -36,7 +38,7 @@ export function HeroUIAgentModelSelect({
         <ChevronDown className="text-muted size-4 shrink-0" />
       </Dropdown.Trigger>
       <Dropdown.Popover className="min-w-72" placement="bottom start">
-        <Dropdown.Menu aria-label="Agent models" onAction={(key) => onChange(String(key))}>
+        <Dropdown.Menu aria-label={t("models")} onAction={(key) => onChange(String(key))}>
           {models.map((item) => (
             <Dropdown.Item key={item.id} id={item.id} textValue={item.alias}>
               <span className="flex min-w-0 items-center gap-2.5">

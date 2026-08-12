@@ -2,6 +2,7 @@
 
 import { AppLayout } from "@cocola/ui-compat/app-layout";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useCallback, type ReactNode } from "react";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import {
@@ -33,12 +34,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
 }
 
 function AdminTopbar() {
+  const t = useTranslations("admin.shell");
   return (
     <div className="flex h-14 w-full items-center gap-3 px-3 sm:px-5">
       <AppLayout.MenuToggle />
       <div className="min-w-0 flex-1">
         <p className="text-accent truncate text-[11px] font-semibold uppercase tracking-[0.14em]">
-          Control plane
+          {t("topbar")}
         </p>
       </div>
       <WorkspaceHeaderActions />

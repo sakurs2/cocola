@@ -25,7 +25,7 @@ const globalStyles = readFileSync(new URL("../app/globals.css", import.meta.url)
 
 test("Agent capabilities use a compact Knowledge empty state and a two-column Skills grid", () => {
   const knowledgeSection = capabilitiesSource.slice(
-    capabilitiesSource.indexOf("<Card.Title>Knowledge</Card.Title>"),
+    capabilitiesSource.indexOf('<Card.Title>{t("knowledge")}</Card.Title>'),
     capabilitiesSource.indexOf("<Sheet isOpen={wikiPickerOpen}"),
   );
 
@@ -34,7 +34,7 @@ test("Agent capabilities use a compact Knowledge empty state and a two-column Sk
     demoStyles,
     /\.cocola-user-ui \.cocola-web-agent-skill-grid \.item-card \{\s*align-items: flex-start;/,
   );
-  assert.match(knowledgeSection, /No Knowledge sources yet\./);
+  assert.match(knowledgeSection, /t\("emptyKnowledge"\)/);
   assert.doesNotMatch(knowledgeSection, /min-h-24/);
   assert.match(itemCardSource, /const rootProps = \{[\s\S]*?children,/);
 });
@@ -53,7 +53,7 @@ test("user workspace primary actions keep white text on a theme-colored backgrou
 test("Skills catalog exposes bounded pagination controls", () => {
   assert.match(skillsPageSource, /const SKILLS_PER_PAGE = 12/);
   assert.match(skillsPageSource, /paginateCatalog\(/);
-  assert.match(skillsPageSource, /aria-label="Skills pagination"/);
+  assert.match(skillsPageSource, /aria-label=\{t\("pagination"\)\}/);
   assert.match(skillsPageSource, /setSkillPage\(1\)/);
 });
 
@@ -92,12 +92,12 @@ test("administrator-disabled Skills stay out of the user catalog but remain repa
     capabilitiesSource,
     /skills\.filter\([\s\S]*?skill\.available \|\| selectedIDs\.has\(skill\.id\)/,
   );
-  assert.match(capabilitiesSource, /Disabled by an administrator\. Remove it from this Agent/);
+  assert.match(capabilitiesSource, /t\("disabledDescription"\)/);
   assert.match(capabilitiesSource, /cocola-web-agent-skill-unavailable opacity-55/);
   assert.match(capabilitiesSource, /unavailable \? null : <PressableFeedback\.Highlight \/>/);
-  assert.match(capabilitiesSource, /Remove unavailable \$\{skill\.name\} Skill from this Agent/);
+  assert.match(capabilitiesSource, /t\("removeUnavailable", \{ name: skill\.name \}\)/);
   assert.match(skillDetailSource, /skill\?\.available === false/);
-  assert.match(skillDetailSource, /An administrator has disabled this Skill/);
+  assert.match(skillDetailSource, /t\("adminDisabled"\)/);
 });
 
 test("Skills cards do not repeat enabled state in the card header", () => {

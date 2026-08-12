@@ -4,6 +4,7 @@ import { Button, Card, Chip, Input, Label, Separator, TextField } from "@heroui/
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { ArrowRight, Bot, Check, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AgentAvatar } from "@/components/agents/agent-avatar";
@@ -43,6 +44,8 @@ const COLOR_SWATCHES: Record<string, string> = {
 };
 
 export default function AgentsPage() {
+  const t = useTranslations("agents.list");
+  const common = useTranslations("common.actions");
   const router = useRouter();
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [models, setModels] = useState<AgentModelOption[]>([]);
@@ -72,14 +75,14 @@ export default function AgentsPage() {
         if (!controller.signal.aborted) setAgents(Array.isArray(rows) ? rows : []);
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : "Could not load Agents");
+          setError(cause instanceof Error ? cause.message : t("loadFailed"));
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -98,7 +101,7 @@ export default function AgentsPage() {
           !configResponse.ok ||
           !skillsResponse.ok
         ) {
-          throw new Error("Agent capability configuration is temporarily unavailable.");
+          throw new Error(t("capabilitiesUnavailable"));
         }
         const modelRows = normalizeAgentModels(await modelsResponse.json());
         const runtimes = normalizeAgentRuntimes(await runtimesResponse.json());
@@ -107,7 +110,7 @@ export default function AgentsPage() {
         const runtime =
           runtimes.find((item) => item.id === configuredRuntimeID) ??
           runtimes.find((item) => item.isDefault);
-        if (!runtime) throw new Error("The default Agent runtime is not configured.");
+        if (!runtime) throw new Error(t("runtimeMissing"));
         const compatible = modelRows.filter((model) =>
           model.protocols.includes(runtime.modelProtocol),
         );
@@ -119,14 +122,14 @@ export default function AgentsPage() {
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : "Could not load models");
+          setError(cause instanceof Error ? cause.message : t("modelsFailed"));
         }
       } finally {
         if (!controller.signal.aborted) setCatalogLoading(false);
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [t]);
 
   const selectedModel = useMemo(
     () => models.find((model) => model.id === modelID) ?? null,
@@ -171,7 +174,7 @@ export default function AgentsPage() {
       setCreateOpen(false);
       router.push(`/agents/${encodeURIComponent(created.id)}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create Agent");
+      setError(cause instanceof Error ? cause.message : t("createFailed"));
     } finally {
       setCreating(false);
     }
@@ -186,12 +189,12 @@ export default function AgentsPage() {
             onPress={openCreateSheet}
           >
             <Plus className="size-4" />
-            New agent
+            {t("new")}
           </WorkspacePageAction>
         }
-        description="Reusable profiles that bind a model, prompt, skills, knowledge, and channels."
+        description={t("description")}
         icon={<Bot className="size-5" />}
-        title="Agents"
+        title={t("title")}
       />
 
       {error && !createOpen ? (
@@ -199,8 +202,8 @@ export default function AgentsPage() {
       ) : null}
 
       <WorkspaceSectionHeader
-        description={`${agents.length} reusable profile${agents.length === 1 ? "" : "s"} available for new chats.`}
-        title="Your agents"
+        description={t("count", { count: agents.length })}
+        title={t("yourAgents")}
       />
 
       {loading ? (
@@ -233,19 +236,19 @@ export default function AgentsPage() {
                         size="sm"
                         variant="soft"
                       >
-                        {agent.status === "active" ? "Active" : "Archived"}
+                        {agent.status === "active" ? t("active") : t("archived")}
                       </Chip>
                     </span>
                     <span className="text-foreground mt-4 block max-w-full truncate font-semibold">
                       {agent.name}
                     </span>
                     <span className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
-                      {agent.description || "No description"}
+                      {agent.description || t("noDescription")}
                     </span>
                     <span className="mt-4 flex min-h-7 max-w-full flex-wrap gap-1.5">
                       {(agent.skill_ids ?? []).length === 0 ? (
                         <Chip size="sm" variant="soft">
-                          Default Skills
+                          {t("defaultSkills")}
                         </Chip>
                       ) : selectedSkills.length ? (
                         <>
@@ -262,7 +265,7 @@ export default function AgentsPage() {
                         </>
                       ) : (
                         <Chip color="warning" size="sm" variant="soft">
-                          Skills unavailable
+                          {t("skillsUnavailable")}
                         </Chip>
                       )}
                     </span>
@@ -274,7 +277,7 @@ export default function AgentsPage() {
                           <span className="truncate">{agent.model_alias}</span>
                         </span>
                         <span className="text-accent flex shrink-0 items-center gap-1 font-medium">
-                          Open Agent
+                          {t("open")}
                           <ArrowRight className="cocola-web-catalog-card-arrow size-3.5" />
                         </span>
                       </span>
@@ -292,14 +295,12 @@ export default function AgentsPage() {
               <EmptyState.Media variant="icon">
                 <Bot className="text-cyan-500" />
               </EmptyState.Media>
-              <EmptyState.Title>No Agents yet</EmptyState.Title>
-              <EmptyState.Description>
-                Create a focused profile, or continue using standard chat without an Agent.
-              </EmptyState.Description>
+              <EmptyState.Title>{t("empty")}</EmptyState.Title>
+              <EmptyState.Description>{t("emptyDescription")}</EmptyState.Description>
             </EmptyState.Header>
             <EmptyState.Content>
               <Button size="sm" variant="outline" onPress={openCreateSheet}>
-                <Plus className="size-4" /> New agent
+                <Plus className="size-4" /> {t("new")}
               </Button>
             </EmptyState.Content>
           </EmptyState>
@@ -307,9 +308,9 @@ export default function AgentsPage() {
       )}
 
       <WorkspaceEntitySheet
-        description="Create a focused identity and choose its compatible model. Configure capabilities and channels next."
+        description={t("sheetDescription")}
         isOpen={createOpen}
-        title="New Agent"
+        title={t("newTitle")}
         onOpenChange={(next) => !creating && setCreateOpen(next)}
       >
         <form className="grid gap-5" onSubmit={createAgent}>
@@ -317,31 +318,29 @@ export default function AgentsPage() {
             <AgentAvatar avatarColor={avatarColor} avatarKey={avatarKey} className="size-10" />
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium">
-                {name.trim() || "New Agent"}
+                {name.trim() || t("newTitle")}
               </span>
-              <span className="text-muted mt-1 block text-xs">
-                Instructions, knowledge, and channels are configured after creation.
-              </span>
+              <span className="text-muted mt-1 block text-xs">{t("afterCreation")}</span>
             </span>
           </div>
 
           <TextField isRequired value={name} onChange={setName}>
-            <Label>Name</Label>
-            <Input autoFocus maxLength={100} placeholder="Data analyst" />
+            <Label>{t("name")}</Label>
+            <Input autoFocus maxLength={100} placeholder={t("namePlaceholder")} />
           </TextField>
           <TextField value={description} onChange={setDescription}>
-            <Label>Description</Label>
-            <Input maxLength={500} placeholder="What this Agent is best at" />
+            <Label>{t("descriptionLabel")}</Label>
+            <Input maxLength={500} placeholder={t("descriptionPlaceholder")} />
           </TextField>
 
           <div>
-            <Label>Icon</Label>
+            <Label>{t("icon")}</Label>
             <div className="mt-2 flex flex-wrap gap-2">
               {AGENT_AVATAR_KEYS.map((key) => (
                 <Button
                   key={key}
                   isIconOnly
-                  aria-label={`Use ${key} icon`}
+                  aria-label={t("useIcon", { name: key })}
                   className={avatarKey === key ? "ring-2 ring-accent" : ""}
                   size="sm"
                   variant="ghost"
@@ -358,13 +357,13 @@ export default function AgentsPage() {
           </div>
 
           <div>
-            <Label>Color</Label>
+            <Label>{t("color")}</Label>
             <div className="mt-2 flex flex-wrap gap-2">
               {AGENT_AVATAR_COLORS.map((color) => (
                 <Button
                   key={color}
                   isIconOnly
-                  aria-label={`Use ${color} color`}
+                  aria-label={t("useColor", { name: color })}
                   className={avatarColor === color ? "ring-2 ring-foreground/30" : ""}
                   size="sm"
                   variant="ghost"
@@ -381,7 +380,7 @@ export default function AgentsPage() {
           </div>
 
           <div>
-            <Label>Model</Label>
+            <Label>{t("model")}</Label>
             <div className="mt-2">
               <HeroUIAgentModelSelect models={models} value={modelID} onChange={setModelID} />
             </div>
@@ -393,7 +392,7 @@ export default function AgentsPage() {
 
           <div className="flex justify-end gap-2">
             <Button isDisabled={creating} variant="outline" onPress={() => setCreateOpen(false)}>
-              Cancel
+              {common("cancel")}
             </Button>
             <Button
               isDisabled={creating || !name.trim() || !selectedModel}
@@ -401,7 +400,7 @@ export default function AgentsPage() {
               type="submit"
               variant="primary"
             >
-              {creating ? "Creating…" : "Create Agent"}
+              {creating ? t("creating") : t("create")}
             </Button>
           </div>
         </form>

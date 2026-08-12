@@ -54,6 +54,7 @@ import {
 import { MaterialFileIcon } from "@/lib/material-file-icons";
 import { dockPageInstanceID, dockPageInstanceLabel } from "@/lib/workspace-dock-tabs.mjs";
 import { Diff as DiffView, Hunk, parseDiff, tokenize } from "react-diff-view";
+import { useLocale, useTranslations } from "next-intl";
 import { refractor } from "refractor";
 import refractorMarkup from "refractor/lang/markup.js";
 import refractorCss from "refractor/lang/css.js";
@@ -133,11 +134,10 @@ type DockPage = {
   render: (context: DockPageContext) => ReactNode;
 };
 
-const BASE_DOCK_PAGES: DockPage[] = [
+const BASE_DOCK_PAGES: Omit<DockPage, "label">[] = [
   {
     id: "files",
     kind: "files",
-    label: "Workspace files",
     icon: FolderOpen,
     render: ({ sessionID, active, setHeaderActions, openCodeFolder, workspaceRoot }) => (
       <WorkspaceFilesPage
@@ -152,7 +152,6 @@ const BASE_DOCK_PAGES: DockPage[] = [
   {
     id: "shell",
     kind: "shell",
-    label: "Shell",
     icon: SquareTerminal,
     render: ({ sessionID, active, setHeaderActions }) => (
       <ShellPage
@@ -166,7 +165,6 @@ const BASE_DOCK_PAGES: DockPage[] = [
   {
     id: "preview",
     kind: "preview",
-    label: "Preview",
     icon: Globe,
     render: ({ sessionID, active, setHeaderActions }) => (
       <PreviewPage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
@@ -174,11 +172,11 @@ const BASE_DOCK_PAGES: DockPage[] = [
   },
 ];
 
-function createGitPage(): DockPage {
+function createGitPage(label: string): DockPage {
   return {
     id: "git",
     kind: "git",
-    label: "Git",
+    label,
     icon: GitBranch,
     render: ({ sessionID, active, setHeaderActions }) => (
       <GitPage sessionID={sessionID} active={active} setHeaderActions={setHeaderActions} />
@@ -186,16 +184,20 @@ function createGitPage(): DockPage {
   };
 }
 
-function createCodePage(workspacePath: string, workspaceRoot = ""): DockPage {
+function createCodePage(
+  workspacePath: string,
+  workspaceRoot = "",
+  labels: { project: string; workspace: string } = { project: "Project", workspace: "Workspace" },
+): DockPage {
   const normalizedPath = normalizeCodeEditorWorkspacePath(workspacePath);
   const normalizedRoot = normalizeCodeEditorWorkspacePath(workspaceRoot);
   const folder = normalizedPath ? `/workspace/${normalizedPath}` : "/workspace";
   const label =
     normalizedPath === normalizedRoot
       ? normalizedRoot
-        ? "Project"
-        : "Workspace"
-      : normalizedPath.split("/").pop() || "Workspace";
+        ? labels.project
+        : labels.workspace
+      : normalizedPath.split("/").pop() || labels.workspace;
   return {
     id: codeEditorTabID(normalizedPath),
     kind: "code",
@@ -245,6 +247,7 @@ export function WorkspaceDock({
   onArtifactClose: () => void;
   onClose: () => void;
 }) {
+  const t = useTranslations("chat.workspacePanel");
   // Opening the workspace dock must not contact code-server. Code tabs only
   // exist after a directory action explicitly creates one.
   const [openPages, setOpenPages] = useState<DockPage[]>([]);
@@ -255,10 +258,18 @@ export function WorkspaceDock({
   const [headerActions, setHeaderActions] = useState<Record<string, ReactNode>>({});
 
   const workspaceRoot = projectTask ? "project" : "";
-  const basePages = useMemo(
-    () => (projectTask ? [...BASE_DOCK_PAGES, createGitPage()] : BASE_DOCK_PAGES),
-    [projectTask],
-  );
+  const basePages = useMemo(() => {
+    const translated = BASE_DOCK_PAGES.map((page) => ({
+      ...page,
+      label:
+        page.kind === "files"
+          ? t("panels.files")
+          : page.kind === "shell"
+            ? t("panels.shell")
+            : t("panels.preview"),
+    }));
+    return projectTask ? [...translated, createGitPage(t("panels.git"))] : translated;
+  }, [projectTask, t]);
 
   const addablePages = basePages;
 
@@ -285,11 +296,16 @@ export function WorkspaceDock({
 
   const openCodeFolder = useCallback(
     (workspacePath: string) => {
-      const instance = createPageInstance(createCodePage(workspacePath, workspaceRoot));
+      const instance = createPageInstance(
+        createCodePage(workspacePath, workspaceRoot, {
+          project: t("panels.project"),
+          workspace: t("panels.workspace"),
+        }),
+      );
       setOpenPages((current) => [...current, instance]);
       setActivePageId(instance.id);
     },
-    [createPageInstance, workspaceRoot],
+    [createPageInstance, t, workspaceRoot],
   );
 
   useEffect(() => {
@@ -397,7 +413,7 @@ export function WorkspaceDock({
                 </Button>
                 <Button
                   isIconOnly
-                  aria-label={`Close ${page.label}`}
+                  aria-label={t("panels.closeNamed", { name: page.label })}
                   className="mr-1 size-7 min-w-7 rounded-lg text-muted/70 opacity-60 transition-[color,background-color,opacity] hover:bg-background/70 hover:text-foreground hover:opacity-100 focus-visible:opacity-100 group-hover:opacity-100"
                   size="sm"
                   variant="ghost"
@@ -414,7 +430,7 @@ export function WorkspaceDock({
               <DropdownMenuTrigger asChild>
                 <Button
                   isIconOnly
-                  aria-label="Add a panel"
+                  aria-label={t("panels.add")}
                   className="size-9 min-w-9 shrink-0"
                   size="sm"
                   variant="ghost"
@@ -434,7 +450,7 @@ export function WorkspaceDock({
                     );
                   })
                 ) : (
-                  <div className="px-2 py-1.5 text-xs text-muted">empty</div>
+                  <div className="px-2 py-1.5 text-xs text-muted">{t("panels.empty")}</div>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -445,7 +461,7 @@ export function WorkspaceDock({
 
         <Button
           isIconOnly
-          aria-label="Close side panel"
+          aria-label={t("panels.close")}
           className="size-9 min-w-9 shrink-0"
           size="sm"
           variant="ghost"
@@ -522,6 +538,7 @@ function GitPage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.git");
   const {
     closeCommit,
     closeDiff,
@@ -542,7 +559,7 @@ function GitPage({
       <Tooltip delay={0}>
         <Button
           isIconOnly
-          aria-label="Refresh Git status"
+          aria-label={t("refreshAria")}
           isDisabled={loading}
           size="sm"
           variant="ghost"
@@ -550,11 +567,11 @@ function GitPage({
         >
           <RefreshCw className={cn("size-4", loading && "animate-spin")} />
         </Button>
-        <Tooltip.Content>Refresh Git status (may restore the sandbox)</Tooltip.Content>
+        <Tooltip.Content>{t("refreshTooltip")}</Tooltip.Content>
       </Tooltip>,
     );
     return () => setHeaderActions(null);
-  }, [active, inspect, loading, setHeaderActions]);
+  }, [active, inspect, loading, setHeaderActions, t]);
 
   const changes = snapshot?.changes ?? [];
   const commits = snapshot?.commits ?? [];
@@ -578,7 +595,7 @@ function GitPage({
         ) : null}
         {loading && !snapshot ? (
           <div className="flex items-center gap-2 px-4 py-5 text-sm text-muted">
-            <LoaderCircle className="size-4 animate-spin" /> Loading saved history…
+            <LoaderCircle className="size-4 animate-spin" /> {t("loadingHistory")}
           </div>
         ) : diff ? (
           <GitDiffPanel diff={diff} onBack={closeDiff} />
@@ -598,18 +615,18 @@ function GitPage({
                 <span className="grid size-4 place-items-center rounded bg-success/10 text-[9px] font-bold text-success">
                   ✓
                 </span>
-                Working tree clean · no uncommitted changes
+                {t("clean")}
               </div>
             ) : null}
             <GitChangeSection
-              title="Staged Changes"
+              title={t("staged")}
               changes={stagedChanges}
               onOpenDiff={(change) =>
                 void inspect("diff", { path: change.path, diffTarget: "staged" })
               }
             />
             <GitChangeSection
-              title="Changes"
+              title={t("changes")}
               changes={unstagedChanges}
               onOpenDiff={(change) =>
                 void inspect("diff", {
@@ -619,14 +636,12 @@ function GitPage({
               }
             />
             {snapshot?.truncated ? (
-              <div className="px-4 py-1.5 text-[11px] text-warning">
-                Showing the first 500 changed paths.
-              </div>
+              <div className="px-4 py-1.5 text-[11px] text-warning">{t("truncatedPaths")}</div>
             ) : null}
-            <GitSectionHeader title="Commits" count={commits.length || undefined} />
+            <GitSectionHeader title={t("commits")} count={commits.length || undefined} />
             {commits.length ? (
               <ListView
-                aria-label="Git commit history"
+                aria-label={t("historyAria")}
                 className="rounded-none border-0 bg-transparent pb-2 shadow-none"
                 selectionMode="none"
                 variant="secondary"
@@ -644,19 +659,19 @@ function GitPage({
             ) : snapshot ? (
               <GitEmptyState
                 icon={<GitCommitHorizontal className="size-5 text-accent" />}
-                title="No commit history"
-                description="Refresh Git status to load the latest saved history."
+                title={t("noHistory")}
+                description={t("noHistoryDescription")}
               />
             ) : (
               <GitEmptyState
                 icon={<GitBranch className="size-5 text-accent" />}
-                title="No Git snapshot"
-                description="Refresh to inspect this project workspace."
+                title={t("noSnapshot")}
+                description={t("noSnapshotDescription")}
               />
             )}
             {snapshot?.history_truncated ? (
               <div className="border-t border-border px-4 py-2 text-center text-xs text-muted">
-                Showing the latest 50 commits.
+                {t("truncatedHistory")}
               </div>
             ) : null}
           </ScrollShadow>
@@ -665,9 +680,9 @@ function GitPage({
 
       <ActionConfirmDialog
         open={refreshConfirmOpen}
-        title="Refresh Git status?"
-        description="Refreshing may restore the project sandbox if its workspace has been reclaimed."
-        confirmLabel="Refresh"
+        title={t("refreshTitle")}
+        description={t("refreshDescription")}
+        confirmLabel={t("refresh")}
         busy={loading}
         icon={RefreshCw}
         showHint={false}
@@ -700,6 +715,7 @@ function ChangeRequestCard({
   hasCommits: boolean;
   workspaceHeadSHA: string;
 }) {
+  const t = useTranslations("chat.workspacePanel.changeRequest");
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
   const status = changeRequest?.status || "working";
   const merged = status === "merged";
@@ -716,34 +732,34 @@ function ChangeRequestCard({
     changeRequest.head_sha.toLowerCase() !== workspaceHeadSHA.toLowerCase(),
   );
   const copy = merged
-    ? "Merged into main as one reviewed change."
+    ? t("copy.merged")
     : workspaceDirty
       ? changeRequest
-        ? "Commit the current changes before updating the review branch."
-        : "Commit the current changes before opening a review."
+        ? t("copy.commitUpdate")
+        : t("copy.commitCreate")
       : hasUnpublishedCommits
-        ? "New local commits are ready to publish to this change request."
+        ? t("copy.unpublished")
         : checksFailed
-          ? "Provider checks failed. Fix the reported issue, push a new commit, then refresh."
+          ? t("copy.checksFailed")
           : blocked
-            ? "The branch cannot merge cleanly. Resolve the conflict in this task, then refresh."
+            ? t("copy.conflict")
             : pending
-              ? "Provider checks are still running. Refresh before merging."
+              ? t("copy.pending")
               : changeRequest
-                ? "The task branch is published and ready for review."
+                ? t("copy.review")
                 : hasCommits
-                  ? "Publish this task branch for review and squash merge."
-                  : "Make and commit a change before opening a review.";
+                  ? t("copy.publish")
+                  : t("copy.makeChange");
 
   const action = !changeRequest
-    ? { label: "Create change request", kind: "create" as const }
+    ? { label: t("actions.create"), kind: "create" as const }
     : merged || status === "closed"
       ? null
       : hasUnpublishedCommits
-        ? { label: "Update branch", kind: "update" as const }
+        ? { label: t("actions.update"), kind: "update" as const }
         : status === "open"
-          ? { label: "Squash merge", kind: "merge" as const }
-          : { label: "Refresh status", kind: "refresh" as const };
+          ? { label: t("actions.merge"), kind: "merge" as const }
+          : { label: t("actions.refresh"), kind: "refresh" as const };
 
   return (
     <>
@@ -755,7 +771,7 @@ function ChangeRequestCard({
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold">Change request</span>
+                <span className="text-xs font-semibold">{t("title")}</span>
                 <Chip
                   className="h-5 px-1.5 text-[9.5px]"
                   color={merged ? "success" : blocked ? "danger" : pending ? "warning" : "accent"}
@@ -763,16 +779,16 @@ function ChangeRequestCard({
                   variant="soft"
                 >
                   {merged
-                    ? "Merged"
+                    ? t("statuses.merged")
                     : checksFailed
-                      ? "Checks failed"
+                      ? t("statuses.checksFailed")
                       : blocked
-                        ? "Conflict"
+                        ? t("statuses.conflict")
                         : pending
-                          ? "Checks pending"
+                          ? t("statuses.checksPending")
                           : changeRequest
-                            ? "In review"
-                            : "Working"}
+                            ? t("statuses.review")
+                            : t("statuses.working")}
                 </Chip>
               </div>
               <p className="mt-0.5 text-[11px] leading-4 text-muted">{copy}</p>
@@ -780,9 +796,9 @@ function ChangeRequestCard({
           </div>
           <div
             className="grid w-full grid-cols-[auto_minmax(1rem,1fr)_auto_minmax(1rem,1fr)_auto] items-center gap-2"
-            aria-label="Change request progress"
+            aria-label={t("progress")}
           >
-            {["Changes", "Review", "Main"].map((label, index) => {
+            {[t("stages.changes"), t("stages.review"), t("stages.main")].map((label, index) => {
               const complete = merged || (changeRequest ? index < 2 : index === 0 && hasCommits);
               const stage = (
                 <span key={label} className="flex min-w-0 items-center gap-1.5">
@@ -821,7 +837,7 @@ function ChangeRequestCard({
                     window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
                   }
                 >
-                  Open on GitHub
+                  {t("actions.openGithub")}
                 </Button>
               ) : null}
               {changeRequest && action.kind !== "refresh" ? (
@@ -831,7 +847,7 @@ function ChangeRequestCard({
                   variant="outline"
                   onPress={() => void request("refresh")}
                 >
-                  Refresh
+                  {t("actions.refresh")}
                 </Button>
               ) : null}
               <Button
@@ -871,7 +887,7 @@ function ChangeRequestCard({
                   window.open(changeRequest.external_url, "_blank", "noopener,noreferrer")
                 }
               >
-                Open on GitHub
+                {t("actions.openGithub")}
               </Button>
             </div>
           ) : null}
@@ -879,9 +895,9 @@ function ChangeRequestCard({
       </Card>
       <ActionConfirmDialog
         open={mergeConfirmOpen}
-        title="Squash merge this change request?"
-        description="All task commits will be combined into one commit on main. The task becomes read-only after the merge."
-        confirmLabel="Squash merge"
+        title={t("mergeTitle")}
+        description={t("mergeDescription")}
+        confirmLabel={t("actions.merge")}
         busy={loading}
         error={error || null}
         icon={GitMerge}
@@ -894,9 +910,13 @@ function ChangeRequestCard({
 }
 
 function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
+  const t = useTranslations("chat.workspacePanel.git");
+  const locale = useLocale();
   const capturedLabel = snapshot?.captured_at
-    ? `Captured ${formatGitRelativeTime(snapshot.captured_at)}`
-    : "No saved snapshot yet";
+    ? t("captured", {
+        time: formatGitRelativeTime(snapshot.captured_at, Date.now(), locale, t("unknownTime")),
+      })
+    : t("noSavedSnapshot");
   const revisionLabel =
     snapshot?.base_sha && snapshot?.head_sha
       ? `${snapshot.base_sha.slice(0, 7)} → ${snapshot.head_sha.slice(0, 7)}`
@@ -908,7 +928,7 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
         <GitBranch className="size-3" />
       </span>
       <span className="max-w-[45%] shrink-0 truncate text-xs font-semibold">
-        {snapshot?.branch || "Project branch"}
+        {snapshot?.branch || t("projectBranch")}
       </span>
       <span
         className="min-w-0 flex-1 truncate text-[10.5px] text-muted"
@@ -926,7 +946,7 @@ function GitSnapshotHeader({ snapshot }: { snapshot: GitSnapshot | null }) {
       </span>
       {snapshot?.ahead ? (
         <Chip className="h-5 px-1.5 text-[9.5px]" color="success" size="sm" variant="soft">
-          ↑ {snapshot.ahead} ahead
+          {t("ahead", { count: snapshot.ahead })}
         </Chip>
       ) : null}
     </div>
@@ -1077,13 +1097,14 @@ function gitAuthorColor(name: string) {
 }
 
 function GitAuthorAvatar({ name, merge = false }: { name: string; merge?: boolean }) {
+  const t = useTranslations("chat.workspacePanel.git");
   return (
     <span
       className={cn(
         "grid size-[18px] shrink-0 place-items-center rounded-full text-[8.5px] font-bold text-white",
         merge ? "bg-accent" : gitAuthorColor(name),
       )}
-      title={name || "Unknown author"}
+      title={name || t("unknownAuthor")}
     >
       {merge ? <GitMerge className="size-2.5" /> : gitAuthorInitials(name)}
     </span>
@@ -1122,6 +1143,8 @@ function GitCommitLogRow({
   snapshot: GitSnapshot | null;
   last: boolean;
 }) {
+  const t = useTranslations("chat.workspacePanel.git");
+  const locale = useLocale();
   const merge = (commit.parents?.length ?? 0) > 1;
   const isBase = commit.sha === snapshot?.base_sha;
   return (
@@ -1145,14 +1168,16 @@ function GitCommitLogRow({
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium leading-4 text-foreground">
-            {commit.subject || "Untitled commit"}
+            {commit.subject || t("untitledCommit")}
           </span>
           <GitRefBadges commit={commit} snapshot={snapshot} />
         </span>
         <span className="flex min-w-0 items-center gap-1 text-[9.5px] leading-4 text-muted">
-          <span className="min-w-0 truncate">{commit.author_name || "Unknown author"}</span>
+          <span className="min-w-0 truncate">{commit.author_name || t("unknownAuthor")}</span>
           <span aria-hidden="true">·</span>
-          <span className="shrink-0">{formatGitRelativeTime(commit.authored_at)}</span>
+          <span className="shrink-0">
+            {formatGitRelativeTime(commit.authored_at, Date.now(), locale, t("unknownTime"))}
+          </span>
           <span aria-hidden="true">·</span>
           <span className="shrink-0 font-mono text-muted/80">{commit.sha.slice(0, 7)}</span>
         </span>
@@ -1163,15 +1188,10 @@ function GitCommitLogRow({
 }
 
 function GitPanelBackHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  const t = useTranslations("chat.workspacePanel.git");
   return (
     <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-2">
-      <Button
-        isIconOnly
-        aria-label="Back to Git history"
-        size="sm"
-        variant="ghost"
-        onPress={onBack}
-      >
+      <Button isIconOnly aria-label={t("backHistory")} size="sm" variant="ghost" onPress={onBack}>
         <ArrowLeft className="size-4" />
       </Button>
       <span className="min-w-0 flex-1 truncate text-xs font-semibold">{title}</span>
@@ -1190,6 +1210,8 @@ function GitCommitPanel({
   onBack: () => void;
   onOpenDiff: (file: GitCommitFile) => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.git");
+  const locale = useLocale();
   const { commit, files } = detail;
   const badges = gitCommitBadges(commit, snapshot);
   const description = gitCommitDescription(commit);
@@ -1199,7 +1221,7 @@ function GitCommitPanel({
   );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <GitPanelBackHeader title={commit.subject || "Commit details"} onBack={onBack} />
+      <GitPanelBackHeader title={commit.subject || t("commitDetails")} onBack={onBack} />
       <ScrollShadow hideScrollBar className="min-h-0 flex-1 overflow-y-auto">
         <div className="border-b border-border bg-surface-secondary/20 px-4 py-4">
           <div className="flex items-start gap-3">
@@ -1230,9 +1252,11 @@ function GitCommitPanel({
             </Chip>
           </div>
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 pl-12 text-[11px] text-muted">
-            <span className="truncate">{commit.author_name || "Unknown author"}</span>
-            <span>{formatGitRelativeTime(commit.authored_at)}</span>
-            <span>{commit.files_changed ?? files.length} files changed</span>
+            <span className="truncate">{commit.author_name || t("unknownAuthor")}</span>
+            <span>
+              {formatGitRelativeTime(commit.authored_at, Date.now(), locale, t("unknownTime"))}
+            </span>
+            <span>{t("filesChanged", { count: commit.files_changed ?? files.length })}</span>
             <span className="font-mono">
               <span className="text-success">+{commit.additions ?? 0}</span>{" "}
               <span className="text-danger">−{commit.deletions ?? 0}</span>
@@ -1240,7 +1264,7 @@ function GitCommitPanel({
           </div>
         </div>
         {files.length ? (
-          <div className="py-2" aria-label="Files changed in commit">
+          <div className="py-2" aria-label={t("filesAria")}>
             {fileGroups.map((group) => (
               <div key={group.directory || "."}>
                 {group.directory ? (
@@ -1263,14 +1287,14 @@ function GitCommitPanel({
         ) : (
           <GitEmptyState
             icon={<File className="size-5 text-accent" />}
-            title="No file changes"
-            description="This commit does not contain any file changes."
+            title={t("noFileChanges")}
+            description={t("noFileChangesDescription")}
           />
         )}
       </ScrollShadow>
       {detail.truncated ? (
         <div className="border-t border-border px-3 py-2 text-xs text-warning">
-          Showing the first 500 changed paths.
+          {t("truncatedPaths")}
         </div>
       ) : null}
     </div>
@@ -1286,6 +1310,7 @@ function GitFileRow({
   indented: boolean;
   onOpen: () => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.git");
   const { path, old_path: oldPath, binary, additions = 0, deletions = 0 } = file;
   const slash = path.lastIndexOf("/");
   const name = slash < 0 ? path : path.slice(slash + 1);
@@ -1307,7 +1332,7 @@ function GitFileRow({
         {name}
       </span>
       {binary ? (
-        <span className="shrink-0 text-[10px] text-muted">Binary</span>
+        <span className="shrink-0 text-[10px] text-muted">{t("binary")}</span>
       ) : (
         <span className="shrink-0 font-mono text-[10.5px]">
           (<span className="text-success">+{additions}</span>
@@ -1397,15 +1422,16 @@ function gitDiffLanguage(path: string): string | null {
 }
 
 function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
+  const t = useTranslations("chat.workspacePanel.git");
   const [viewType, setViewType] = useState<"unified" | "split">("unified");
   const parsed = useMemo(() => {
     if (!diff.text) return { files: [], error: "" };
     try {
       return { files: parseDiff(diff.text), error: "" };
     } catch {
-      return { files: [], error: "This patch could not be rendered." };
+      return { files: [], error: t("patchError") };
     }
-  }, [diff.text]);
+  }, [diff.text, t]);
 
   const tokensByFile = useMemo(() => {
     ensureGitDiffLanguages();
@@ -1441,13 +1467,7 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border px-2">
-        <Button
-          isIconOnly
-          aria-label="Back to changed files"
-          size="sm"
-          variant="ghost"
-          onPress={onBack}
-        >
+        <Button isIconOnly aria-label={t("backFiles")} size="sm" variant="ghost" onPress={onBack}>
           <ArrowLeft className="size-4" />
         </Button>
         {(() => {
@@ -1462,25 +1482,25 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
           );
         })()}
         <Segment
-          aria-label="Diff layout"
+          aria-label={t("diffLayout")}
           selectedKey={viewType}
           size="sm"
           onSelectionChange={(key) => setViewType(String(key) === "split" ? "split" : "unified")}
         >
-          <Segment.Item id="unified">Unified</Segment.Item>
-          <Segment.Item id="split">Split</Segment.Item>
+          <Segment.Item id="unified">{t("unified")}</Segment.Item>
+          <Segment.Item id="split">{t("split")}</Segment.Item>
         </Segment>
       </div>
       {diff.binary ? (
         <GitEmptyState
           icon={<FileQuestion className="size-5 text-warning" />}
-          title="Binary file"
-          description="Binary differences cannot be displayed in the browser."
+          title={t("binaryFile")}
+          description={t("binaryDescription")}
         />
       ) : parsed.error ? (
         <GitEmptyState
           icon={<AlertTriangle className="size-5 text-danger" />}
-          title="Diff unavailable"
+          title={t("diffUnavailable")}
           description={parsed.error}
         />
       ) : parsed.files.length ? (
@@ -1511,13 +1531,13 @@ function GitDiffPanel({ diff, onBack }: { diff: GitDiff; onBack: () => void }) {
       ) : (
         <GitEmptyState
           icon={<File className="size-5 text-accent" />}
-          title="No changes"
-          description="There is no diff for this target."
+          title={t("noChanges")}
+          description={t("noChangesDescription")}
         />
       )}
       {diff.truncated ? (
         <div className="bg-warning-soft text-warning-soft-foreground border-t border-border px-3 py-2 text-xs">
-          Diff truncated at 512 KiB.
+          {t("diffTruncated")}
         </div>
       ) : null}
     </div>
@@ -1533,6 +1553,7 @@ function ArtifactPreviewPage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.artifact");
   const [htmlSourceMode, setHtmlSourceMode] = useState(false);
   const canHtml = isHtmlPreview(artifact.mimeType, artifact.filename);
   const previewFile = useMemo<PreviewFile>(
@@ -1556,8 +1577,8 @@ function ArtifactPreviewPage({
         {canHtml ? (
           <button
             type="button"
-            aria-label={htmlSourceMode ? "Preview HTML" : "View HTML source"}
-            title={htmlSourceMode ? "Preview HTML" : "View source"}
+            aria-label={htmlSourceMode ? t("previewHtml") : t("viewSource")}
+            title={htmlSourceMode ? t("previewHtml") : t("viewSource")}
             onClick={() => setHtmlSourceMode((value) => !value)}
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
@@ -1568,8 +1589,8 @@ function ArtifactPreviewPage({
           <a
             href={artifact.downloadUrl}
             download={artifact.filename}
-            title="Download"
-            aria-label={`Download ${artifact.filename}`}
+            title={t("download")}
+            aria-label={t("downloadNamed", { name: artifact.filename })}
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
             <Download className="size-4" />
@@ -1578,7 +1599,7 @@ function ArtifactPreviewPage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, artifact, canHtml, htmlSourceMode, setHeaderActions]);
+  }, [active, artifact, canHtml, htmlSourceMode, setHeaderActions, t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -1592,7 +1613,7 @@ function ArtifactPreviewPage({
           file={previewFile}
           renderHtml={canHtml && !htmlSourceMode}
           fetchBinary
-          unsupportedMessage="Download the file to open it locally."
+          unsupportedMessage={t("unsupported")}
         />
       </div>
     </div>
@@ -1602,6 +1623,7 @@ function ArtifactPreviewPage({
 // Empty-state launcher: lists the available panels centered in the dock so the
 // user can pick one to open (mirrors a command-menu style row list).
 function WorkspaceLauncher({ pages, onOpen }: { pages: DockPage[]; onOpen: (id: string) => void }) {
+  const t = useTranslations("chat.workspacePanel.panels");
   return (
     <div className="flex h-full min-h-0 flex-col items-center justify-center px-6">
       <EmptyState className="w-full max-w-md" size="md">
@@ -1609,14 +1631,12 @@ function WorkspaceLauncher({ pages, onOpen }: { pages: DockPage[]; onOpen: (id: 
           <EmptyState.Media variant="icon">
             <SquareTerminal className="size-5 text-accent" />
           </EmptyState.Media>
-          <EmptyState.Title>Open a workspace panel</EmptyState.Title>
-          <EmptyState.Description>
-            Inspect files, use the shell, open previews, or review Git history.
-          </EmptyState.Description>
+          <EmptyState.Title>{t("launcherTitle")}</EmptyState.Title>
+          <EmptyState.Description>{t("launcherDescription")}</EmptyState.Description>
         </EmptyState.Header>
         <EmptyState.Content className="w-full">
           <ListView
-            aria-label="Workspace panels"
+            aria-label={t("aria")}
             selectionMode="none"
             variant="secondary"
             onAction={(key) => onOpen(String(key))}
@@ -1704,6 +1724,7 @@ function WorkspaceFilesPage({
   onOpenCode: (workspacePath: string) => void;
   workspaceRoot: string;
 }) {
+  const t = useTranslations("chat.workspacePanel.files");
   const [directories, setDirectories] = useState<Record<string, DirectoryState>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<WorkspaceEntry | null>(null);
@@ -1800,7 +1821,10 @@ function WorkspaceFilesPage({
           { cache: "no-store" },
         );
         if (!response.ok) {
-          const failure = await workspaceFailure(response);
+          const failure = await workspaceFailure(
+            response,
+            t("requestFailed", { status: response.status }),
+          );
           throw new WorkspaceRequestError(failure.code, failure.message);
         }
         const result = (await response.json()) as DirectoryResponse;
@@ -1817,7 +1841,7 @@ function WorkspaceFilesPage({
           },
         }));
       } catch (err) {
-        const failure = workspaceErrorMessage(err);
+        const failure = workspaceErrorMessage(err, t);
         setDirectories((current) => ({
           ...current,
           [path]: {
@@ -1829,7 +1853,7 @@ function WorkspaceFilesPage({
         }));
       }
     },
-    [sessionID],
+    [sessionID, t],
   );
 
   useEffect(() => {
@@ -1875,7 +1899,7 @@ function WorkspaceFilesPage({
       <div className="flex items-center gap-1">
         <TooltipIconButton
           type="button"
-          tooltip="Open in Code Server"
+          tooltip={t("openCode")}
           disabled={!rootReady}
           onClick={() => onOpenCode(workspaceRoot)}
           className="size-8 rounded-full text-muted"
@@ -1884,8 +1908,8 @@ function WorkspaceFilesPage({
         </TooltipIconButton>
         <button
           type="button"
-          title="Refresh workspace"
-          aria-label="Refresh workspace"
+          title={t("refresh")}
+          aria-label={t("refresh")}
           disabled={refreshing}
           onClick={() => void refresh()}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus disabled:opacity-50"
@@ -1895,7 +1919,7 @@ function WorkspaceFilesPage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, onOpenCode, refreshing, refresh, rootReady, setHeaderActions, workspaceRoot]);
+  }, [active, onOpenCode, refreshing, refresh, rootReady, setHeaderActions, t, workspaceRoot]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
@@ -1905,7 +1929,7 @@ function WorkspaceFilesPage({
         style={{ ["--workspace-tree-width" as string]: `${treeWidth}px` }}
       >
         <section
-          aria-label="Workspace files"
+          aria-label={t("aria")}
           className={cn("min-h-0 flex-col bg-background md:flex", selected ? "hidden" : "flex")}
         >
           <div className="min-h-0 flex-1 overflow-y-auto py-1" role="tree">
@@ -1921,11 +1945,9 @@ function WorkspaceFilesPage({
               <div className="flex flex-col items-center gap-2 px-5 py-12 text-center">
                 <Folder className="size-7 text-muted/70" />
                 <div className="text-sm font-medium text-foreground">
-                  {workspaceRoot ? "Project is empty" : "Workspace is empty"}
+                  {workspaceRoot ? t("projectEmpty") : t("workspaceEmpty")}
                 </div>
-                <div className="text-xs text-muted">
-                  Files created by the agent will appear here after refresh.
-                </div>
+                <div className="text-xs text-muted">{t("emptyDescription")}</div>
               </div>
             ) : (
               <WorkspaceTree
@@ -1946,14 +1968,14 @@ function WorkspaceFilesPage({
 
         <div
           role="separator"
-          aria-label="Resize workspace file tree"
+          aria-label={t("resize")}
           aria-orientation="vertical"
           aria-valuemin={MIN_TREE_WIDTH}
           aria-valuemax={MAX_TREE_WIDTH}
           aria-valuenow={Math.round(treeWidth)}
-          aria-valuetext={`${Math.round(treeWidth)} pixels`}
+          aria-valuetext={t("pixels", { count: Math.round(treeWidth) })}
           tabIndex={0}
-          title="Drag to resize file tree"
+          title={t("dragResize")}
           onKeyDown={resizeTreeWithKeyboard}
           onPointerDown={beginTreeResize}
           onPointerMove={moveTreeResize}
@@ -1977,7 +1999,7 @@ function WorkspaceFilesPage({
         </div>
 
         <section
-          aria-label="Workspace file preview"
+          aria-label={t("previewAria")}
           className={cn("min-h-0 flex-col bg-background md:flex", selected ? "flex" : "hidden")}
         >
           {selected ? (
@@ -1990,8 +2012,8 @@ function WorkspaceFilesPage({
             <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
               <FileCode2 className="size-9 stroke-[1.4]" />
               <div>
-                <p className="text-sm font-medium text-foreground">Select a file to preview</p>
-                <p className="mt-1 text-xs">Workspace access is read-only.</p>
+                <p className="text-sm font-medium text-foreground">{t("select")}</p>
+                <p className="mt-1 text-xs">{t("readonly")}</p>
               </div>
             </div>
           )}
@@ -2024,6 +2046,7 @@ function WorkspaceTree({
   onLoadMore: (path: string, cursor: string) => void;
   onReload: (path: string) => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.files");
   const directory = directories[path];
   if (!directory) return null;
   return (
@@ -2079,7 +2102,7 @@ function WorkspaceTree({
               {isDirectory ? (
                 <TooltipIconButton
                   type="button"
-                  tooltip="Open in Code Server"
+                  tooltip={t("openCode")}
                   onClick={() => onOpenCode(entry.path)}
                   className="absolute right-1 top-1/2 size-6 -translate-y-1/2 text-muted opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/tree-row:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
                 >
@@ -2093,7 +2116,7 @@ function WorkspaceTree({
                   className="flex h-8 items-center gap-2 text-xs text-muted"
                   style={{ paddingLeft: `${32 + depth * 14}px` }}
                 >
-                  <LoaderCircle className="size-3.5 animate-spin" /> Loading
+                  <LoaderCircle className="size-3.5 animate-spin" /> {t("loading")}
                 </div>
               ) : child?.error ? (
                 <button
@@ -2102,7 +2125,7 @@ function WorkspaceTree({
                   className="block w-full py-2 pr-2 text-left text-[11px] text-danger"
                   style={{ paddingLeft: `${32 + depth * 14}px` }}
                 >
-                  {child.error} · retry
+                  {child.error} · {t("retry")}
                 </button>
               ) : (
                 <WorkspaceTree
@@ -2131,7 +2154,7 @@ function WorkspaceTree({
           style={{ paddingLeft: `${28 + depth * 14}px` }}
         >
           {directory.loading ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-          Load more
+          {t("loadMore")}
         </button>
       ) : null}
     </>
@@ -2147,6 +2170,7 @@ function WorkspaceFilePreview({
   sessionID: string;
   onBack: () => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.files");
   const previewFile = useMemo<PreviewFile>(() => {
     const query = new URLSearchParams({ path: entry.path });
     return {
@@ -2164,8 +2188,8 @@ function WorkspaceFilePreview({
         <button
           type="button"
           onClick={onBack}
-          aria-label="Back to workspace files"
-          title="Back to workspace files"
+          aria-label={t("back")}
+          title={t("back")}
           className="inline-flex size-8 items-center justify-center rounded-full text-muted hover:bg-surface-secondary hover:text-foreground md:hidden"
         >
           <ArrowLeft className="size-4" />
@@ -2180,10 +2204,8 @@ function WorkspaceFilePreview({
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
             <FileQuestion className="size-8" />
-            <p className="text-sm font-medium text-foreground">Preview unavailable</p>
-            <p className="max-w-64 text-xs">
-              This file is sensitive, unsupported, too large, or not a regular file.
-            </p>
+            <p className="text-sm font-medium text-foreground">{t("previewUnavailable")}</p>
+            <p className="max-w-64 text-xs">{t("previewUnavailableDescription")}</p>
           </div>
         )}
       </div>
@@ -2192,9 +2214,10 @@ function WorkspaceFilePreview({
 }
 
 function WorkspaceLoading() {
+  const t = useTranslations("chat.workspacePanel.files");
   return (
     <div className="flex items-center gap-2 px-4 py-5 text-xs text-muted">
-      <LoaderCircle className="size-4 animate-spin" /> Loading workspace
+      <LoaderCircle className="size-4 animate-spin" /> {t("loadingWorkspace")}
     </div>
   );
 }
@@ -2208,15 +2231,16 @@ function WorkspaceError({
   message: string;
   onRetry: () => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.files");
   return (
     <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
       <AlertTriangle className="size-7 text-warning" />
       <div>
-        <p className="text-sm font-medium text-foreground">{workspaceErrorTitle(code)}</p>
+        <p className="text-sm font-medium text-foreground">{workspaceErrorTitle(code, t)}</p>
         <p className="mt-1 text-xs leading-5 text-muted">{message}</p>
       </div>
       <Button size="sm" variant="outline" onPress={onRetry}>
-        Retry
+        {t("retryAction")}
       </Button>
     </div>
   );
@@ -2231,46 +2255,58 @@ class WorkspaceRequestError extends Error {
   }
 }
 
-async function workspaceFailure(response: Response): Promise<{ code: string; message: string }> {
+async function workspaceFailure(
+  response: Response,
+  fallbackMessage: string,
+): Promise<{ code: string; message: string }> {
   const body = (await response.json().catch(() => null)) as {
     error?: { code?: string; message?: string } | string;
   } | null;
   if (typeof body?.error === "string") return { code: "", message: body.error };
   return {
     code: body?.error?.code ?? "",
-    message: body?.error?.message ?? `Workspace request failed (${response.status})`,
+    message: body?.error?.message ?? fallbackMessage,
   };
 }
 
-function workspaceErrorMessage(err: unknown): { code: string; message: string } {
+type WorkspaceFileTranslations = ReturnType<typeof useTranslations<"chat.workspacePanel.files">>;
+
+function workspaceErrorMessage(
+  err: unknown,
+  t: WorkspaceFileTranslations,
+): { code: string; message: string } {
   if (err instanceof WorkspaceRequestError) {
-    return { code: err.code, message: friendlyWorkspaceError(err.code, err.message) };
+    return { code: err.code, message: friendlyWorkspaceError(err.code, err.message, t) };
   }
   return { code: "", message: err instanceof Error ? err.message : String(err) };
 }
 
-function friendlyWorkspaceError(code: string, fallback: string): string {
+function friendlyWorkspaceError(
+  code: string,
+  fallback: string,
+  t: WorkspaceFileTranslations,
+): string {
   switch (code) {
     case "WORKSPACE_NODE_UNAVAILABLE":
-      return "The node storing this workspace is unavailable. Try again after it recovers.";
+      return t("errors.node");
     case "WORKSPACE_NOT_FOUND":
-      return "This workspace has not been created yet or is no longer available.";
+      return t("errors.notFound");
     case "DIRECTORY_TOO_LARGE":
-      return "This directory contains too many entries to browse safely.";
+      return t("errors.tooLarge");
     case "NOT_CONFIGURED":
-      return "Workspace browsing requires the managed k3s storage mode.";
+      return t("errors.notConfigured");
     case "TOO_MANY_REQUESTS":
-      return "The storage node is busy. Wait a moment and retry.";
+      return t("errors.busy");
     default:
       return fallback;
   }
 }
 
-function workspaceErrorTitle(code: string): string {
-  if (code === "WORKSPACE_NODE_UNAVAILABLE") return "Workspace node unavailable";
-  if (code === "WORKSPACE_NOT_FOUND") return "Workspace not ready";
-  if (code === "NOT_CONFIGURED") return "Workspace browsing unavailable";
-  return "Could not open workspace";
+function workspaceErrorTitle(code: string, t: WorkspaceFileTranslations): string {
+  if (code === "WORKSPACE_NODE_UNAVAILABLE") return t("errors.nodeTitle");
+  if (code === "WORKSPACE_NOT_FOUND") return t("errors.notFoundTitle");
+  if (code === "NOT_CONFIGURED") return t("errors.notConfiguredTitle");
+  return t("errors.defaultTitle");
 }
 
 function workspaceMimeType(entry: WorkspaceEntry): string {
@@ -2317,6 +2353,7 @@ function PreviewPage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.preview");
   // Draft is the text in the input; committed is the port actually being
   // previewed. Committing (Enter / Preview button) mounts the iframe.
   const [draftPort, setDraftPort] = useState("3000");
@@ -2370,8 +2407,8 @@ function PreviewPage({
       <div className="flex items-center gap-1">
         <button
           type="button"
-          title="Reload preview"
-          aria-label="Reload preview"
+          title={t("reload")}
+          aria-label={t("reload")}
           disabled={committedPort == null}
           onClick={() => setReloadKey((k) => k + 1)}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus disabled:opacity-50"
@@ -2382,8 +2419,8 @@ function PreviewPage({
           href={src || "#"}
           target="_blank"
           rel="noreferrer"
-          title="Open preview in a new tab"
-          aria-label="Open preview in a new tab"
+          title={t("openTab")}
+          aria-label={t("openTab")}
           aria-disabled={readiness !== "ready"}
           onClick={(event) => {
             if (readiness !== "ready") event.preventDefault();
@@ -2398,7 +2435,7 @@ function PreviewPage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, committedPort, readiness, src, setHeaderActions]);
+  }, [active, committedPort, readiness, src, setHeaderActions, t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
@@ -2415,7 +2452,7 @@ function PreviewPage({
               if (event.key === "Enter") commit();
             }}
             placeholder="3000"
-            aria-label="Dev server port"
+            aria-label={t("port")}
             className="w-full min-w-0 bg-transparent text-foreground outline-none placeholder:text-muted/60"
           />
         </div>
@@ -2424,7 +2461,7 @@ function PreviewPage({
           onClick={commit}
           className="inline-flex h-7 shrink-0 items-center rounded-md bg-accent px-3 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
-          Preview
+          {t("action")}
         </button>
       </div>
 
@@ -2433,23 +2470,22 @@ function PreviewPage({
           <iframe
             key={reloadKey}
             src={src}
-            title={`Preview of port ${committedPort}`}
+            title={t("frameTitle", { port: committedPort })}
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals"
           />
         ) : committedPort != null && readiness === "checking" ? (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
             <LoaderCircle className="mb-3 size-7 animate-spin text-accent/70" />
-            <p className="text-sm font-medium text-foreground">Connecting to preview</p>
-            <p className="mt-1 text-xs text-muted">Checking port {committedPort} in the sandbox…</p>
+            <p className="text-sm font-medium text-foreground">{t("connecting")}</p>
+            <p className="mt-1 text-xs text-muted">{t("checking", { port: committedPort })}</p>
           </div>
         ) : committedPort != null && readiness === "unavailable" ? (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
             <AlertTriangle className="mb-3 size-8 text-warning" />
-            <p className="text-sm font-medium text-foreground">Preview server unavailable</p>
+            <p className="text-sm font-medium text-foreground">{t("unavailable")}</p>
             <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
-              No server is reachable on port {committedPort}. Ask the Agent to start a managed
-              preview server, then retry.
+              {t("unavailableDescription", { port: committedPort })}
             </p>
             <Button
               className="mt-4"
@@ -2458,17 +2494,14 @@ function PreviewPage({
               onPress={() => setReloadKey((key) => key + 1)}
             >
               <RefreshCw className="size-3.5" />
-              Retry
+              {t("retry")}
             </Button>
           </div>
         ) : (
           <div className="flex h-full min-h-0 flex-col items-center justify-center px-6 text-center">
             <Globe className="mb-3 size-8 text-muted/50" />
-            <p className="text-sm font-medium text-foreground">Preview a dev server</p>
-            <p className="mt-1 max-w-xs text-xs text-muted">
-              Enter the port your in-sandbox dev server listens on (e.g. 3000), then press Preview
-              to load it here.
-            </p>
+            <p className="text-sm font-medium text-foreground">{t("title")}</p>
+            <p className="mt-1 max-w-xs text-xs text-muted">{t("description")}</p>
           </div>
         )}
       </div>
@@ -2503,6 +2536,7 @@ function CodePage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.code");
   const hasMessages = useThread((thread) => thread.messages.length > 0);
   const isRunning = useThread((thread) => thread.isRunning);
   // Persisted Environment snapshots can be stale after an interrupted run;
@@ -2613,8 +2647,8 @@ function CodePage({
       <div className="flex items-center gap-1">
         <button
           type="button"
-          title="Reload editor"
-          aria-label="Reload editor"
+          title={t("reload")}
+          aria-label={t("reload")}
           onClick={() => setReloadKey((k) => k + 1)}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
@@ -2624,8 +2658,8 @@ function CodePage({
           href={src}
           target="_blank"
           rel="noreferrer"
-          title="Open editor in a new tab"
-          aria-label="Open editor in a new tab"
+          title={t("openTab")}
+          aria-label={t("openTab")}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           <ExternalLink className="size-4" />
@@ -2633,7 +2667,7 @@ function CodePage({
       </div>,
     );
     return () => setHeaderActions(null);
-  }, [active, readiness, src, setHeaderActions]);
+  }, [active, readiness, src, setHeaderActions, t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
@@ -2642,7 +2676,7 @@ function CodePage({
           <iframe
             key={reloadKey}
             src={src}
-            title={`Code editor for ${folder}`}
+            title={t("frameTitle", { folder })}
             className="h-full w-full border-0 bg-white"
             sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-modals allow-downloads"
           />
@@ -2664,27 +2698,27 @@ function CodeEditorPlaceholder({
   readiness: Exclude<CodeEditorReadiness, "ready">;
   onRetry?: () => void;
 }) {
+  const t = useTranslations("chat.workspacePanel.code");
   const content = {
     "not-started": {
-      title: "Environment not started",
-      description:
-        "Send your first message to prepare the sandbox. Code will be available when the environment is ready.",
+      title: t("states.not-started.title"),
+      description: t("states.not-started.description"),
     },
     checking: {
-      title: "Checking environment",
-      description: "Checking whether the Code editor is available for this conversation.",
+      title: t("states.checking.title"),
+      description: t("states.checking.description"),
     },
     waiting: {
-      title: "Preparing environment",
-      description: "Code will open automatically when the sandbox is ready.",
+      title: t("states.waiting.title"),
+      description: t("states.waiting.description"),
     },
     reclaimed: {
-      title: "Sandbox has been reclaimed",
-      description: "Continue this conversation to restore the sandbox and reopen Code.",
+      title: t("states.reclaimed.title"),
+      description: t("states.reclaimed.description"),
     },
     error: {
-      title: "Code editor unavailable",
-      description: "The sandbox could not be reached. Check the environment and try again.",
+      title: t("states.error.title"),
+      description: t("states.error.description"),
     },
   }[readiness];
   const loading = readiness === "checking" || readiness === "waiting";
@@ -2704,7 +2738,7 @@ function CodeEditorPlaceholder({
           className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
           <RefreshCw className="size-3.5" />
-          Try again
+          {t("retry")}
         </button>
       ) : null}
     </div>

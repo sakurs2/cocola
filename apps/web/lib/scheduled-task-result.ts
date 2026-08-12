@@ -7,8 +7,22 @@ export type ScheduledTaskResultInput = {
 };
 
 export type ScheduledTaskResultView = {
-  label: string;
-  detail: string;
+  key:
+    | "workerTimeout"
+    | "runExpired"
+    | "timedOut"
+    | "authenticationFailed"
+    | "limitReached"
+    | "runFailed"
+    | "succeeded"
+    | "failed"
+    | "running"
+    | "cancelled"
+    | "completed"
+    | "notRun"
+    | "unknown";
+  detail?: string;
+  fallbackLabel?: string;
   tone: ScheduledTaskResultTone;
 };
 
@@ -17,45 +31,48 @@ export function scheduledTaskResultView(task: ScheduledTaskResultInput): Schedul
   if (error) {
     const normalized = error.toLowerCase();
     if (normalized.includes("worker heartbeat timeout")) {
-      return { label: "Worker timeout", detail: error, tone: "danger" };
+      return { key: "workerTimeout", detail: error, tone: "danger" };
     }
     if (normalized.includes("expired")) {
-      return { label: "Run expired", detail: error, tone: "danger" };
+      return { key: "runExpired", detail: error, tone: "danger" };
     }
     if (normalized.includes("timeout") || normalized.includes("timed out")) {
-      return { label: "Timed out", detail: error, tone: "danger" };
+      return { key: "timedOut", detail: error, tone: "danger" };
     }
     if (normalized.includes("unauthorized") || normalized.includes("authentication")) {
-      return { label: "Authentication failed", detail: error, tone: "danger" };
+      return { key: "authenticationFailed", detail: error, tone: "danger" };
     }
     if (normalized.includes("rate limit") || normalized.includes("quota")) {
-      return { label: "Limit reached", detail: error, tone: "warning" };
+      return { key: "limitReached", detail: error, tone: "warning" };
     }
-    return { label: "Run failed", detail: error, tone: "danger" };
+    return { key: "runFailed", detail: error, tone: "danger" };
   }
 
   const status = task.last_status?.trim().toLowerCase() ?? "";
   if (["completed", "success", "succeeded"].includes(status)) {
-    return { label: "Succeeded", detail: task.last_status?.trim() || "Succeeded", tone: "success" };
+    return { key: "succeeded", tone: "success" };
   }
   if (["failed", "error"].includes(status)) {
-    return { label: "Failed", detail: task.last_status?.trim() || "Failed", tone: "danger" };
+    return { key: "failed", tone: "danger" };
   }
   if (["running", "in_progress"].includes(status)) {
-    return { label: "Running", detail: task.last_status?.trim() || "Running", tone: "accent" };
+    return { key: "running", tone: "accent" };
   }
   if (["cancelled", "canceled"].includes(status)) {
-    return { label: "Cancelled", detail: task.last_status?.trim() || "Cancelled", tone: "warning" };
+    return { key: "cancelled", tone: "warning" };
   }
   if (status) {
     return {
-      label: status.replace(/[_-]+/g, " ").replace(/^./, (character) => character.toUpperCase()),
+      key: "unknown",
+      fallbackLabel: status
+        .replace(/[_-]+/g, " ")
+        .replace(/^./, (character) => character.toUpperCase()),
       detail: task.last_status?.trim() || status,
       tone: "default",
     };
   }
   if ((task.run_count ?? 0) > 0) {
-    return { label: "Completed", detail: "Completed", tone: "success" };
+    return { key: "completed", tone: "success" };
   }
-  return { label: "Not run", detail: "This task has not run yet.", tone: "default" };
+  return { key: "notRun", tone: "default" };
 }

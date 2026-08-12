@@ -2,6 +2,7 @@
 
 import { Wrench as ToolboxIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useState, type ComponentType } from "react";
 import { AdminPage, AdminPageHeader } from "@/components/admin/admin-ui";
 import { SystemPromptTool } from "./system-prompt-tool";
@@ -24,6 +25,7 @@ const TOOLBOX_ITEMS: readonly {
 
 export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | null }) {
   const router = useRouter();
+  const t = useTranslations("admin.toolboxPage");
   const [activeTool, setActiveTool] = useState<ToolboxToolId | null>(initialTool);
 
   const setToolOpen = (tool: ToolboxToolId, open: boolean) => {
@@ -41,8 +43,8 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
     <AdminPage className="admin-theme-cyan">
       <AdminPageHeader
         icon={<ToolboxIcon className="size-[18px]" />}
-        title="Toolbox"
-        description="Open lightweight controls that shape how Cocola operates."
+        title={t("title")}
+        description={t("description")}
       />
 
       <section className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">

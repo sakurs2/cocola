@@ -15,12 +15,15 @@ import {
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
+import { useFormatter, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCocola } from "@/app/runtime-provider";
 import { useWorkspaceUnsavedChanges } from "@/components/assistant-ui/workspace-unsaved-changes";
 import { cn } from "@/lib/utils";
 
 export function CommandPalette() {
+  const t = useTranslations("chat.commandMenu");
+  const format = useFormatter();
   const router = useRouter();
   const pathname = usePathname();
   const { data: session } = useSession();
@@ -50,8 +53,8 @@ export function CommandPalette() {
     () => [
       {
         id: "new-chat",
-        label: "New chat",
-        hint: "Start a fresh workspace session",
+        label: t("newChat"),
+        hint: t("newChatHint"),
         icon: Plus,
         run: () => {
           runWithNavigationGuard(() => {
@@ -62,36 +65,36 @@ export function CommandPalette() {
       },
       {
         id: "tasks",
-        label: "Tasks",
-        hint: "Manage scheduled work",
+        label: t("tasks"),
+        hint: t("tasksHint"),
         icon: CalendarClock,
         run: () => navigateTo("/tasks"),
       },
       {
         id: "agents",
-        label: "Agents",
-        hint: "Manage custom assistants and Feishu bots",
+        label: t("agents"),
+        hint: t("agentsHint"),
         icon: Bot,
         run: () => navigateTo("/agents"),
       },
       {
         id: "skills",
-        label: "Skills",
-        hint: "Browse installed agent skills",
+        label: t("skills"),
+        hint: t("skillsHint"),
         icon: Sparkles,
         run: () => navigateTo("/skills"),
       },
       {
         id: "mcp",
         label: "MCP",
-        hint: "Inspect configured tool servers",
+        hint: t("mcpHint"),
         icon: PlugZap,
         run: () => navigateTo("/mcps"),
       },
       {
         id: "profile",
-        label: "Profile",
-        hint: "View account details",
+        label: t("profile"),
+        hint: t("profileHint"),
         icon: UserRound,
         run: () => navigateTo("/profile"),
       },
@@ -99,15 +102,15 @@ export function CommandPalette() {
         ? [
             {
               id: "admin",
-              label: "Admin",
-              hint: "Open admin monitoring",
+              label: t("admin"),
+              hint: t("adminHint"),
               icon: ShieldCheck,
               run: () => navigateTo("/admin"),
             },
           ]
         : []),
     ],
-    [isAdmin, navigateTo, newConversation, pathname, router, runWithNavigationGuard],
+    [isAdmin, navigateTo, newConversation, pathname, router, runWithNavigationGuard, t],
   );
 
   const runAndClose = (run: () => void | Promise<void>) => {
@@ -120,13 +123,13 @@ export function CommandPalette() {
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/12 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <Dialog.Content className="fixed left-1/2 top-[14vh] z-50 w-[min(92vw,640px)] -translate-x-1/2 overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
-          <Dialog.Title className="sr-only">Command menu</Dialog.Title>
+          <Dialog.Title className="sr-only">{t("title")}</Dialog.Title>
           <Command shouldFilter className="bg-transparent">
             <div className="flex items-center gap-3 border-b border-border px-4">
               <Search className="size-4 text-muted" />
               <Command.Input
                 autoFocus
-                placeholder="Search conversations or jump somewhere..."
+                placeholder={t("search")}
                 className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
               />
               <kbd className="rounded-md border border-border bg-surface-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted">
@@ -135,9 +138,9 @@ export function CommandPalette() {
             </div>
             <Command.List className="max-h-[420px] overflow-y-auto p-2">
               <Command.Empty className="px-3 py-10 text-center text-sm text-muted">
-                No matching command or conversation.
+                {t("empty")}
               </Command.Empty>
-              <Command.Group heading="Actions" className={groupClassName}>
+              <Command.Group heading={t("actions")} className={groupClassName}>
                 {actions.map((action) => (
                   <PaletteItem
                     key={action.id}
@@ -148,13 +151,16 @@ export function CommandPalette() {
                   />
                 ))}
               </Command.Group>
-              <Command.Group heading="Conversations" className={cn(groupClassName, "mt-2")}>
+              <Command.Group heading={t("conversations")} className={cn(groupClassName, "mt-2")}>
                 {conversations.map((conversation) => (
                   <PaletteItem
                     key={conversation.id}
                     icon={conversation.chat_type === "scheduled_task" ? Bot : History}
-                    label={conversation.title || "Untitled"}
-                    hint={new Date(conversation.updated_at).toLocaleString()}
+                    label={conversation.title || t("untitled")}
+                    hint={format.dateTime(new Date(conversation.updated_at), {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
                     onSelect={() =>
                       runAndClose(() => {
                         runWithNavigationGuard(async () => {

@@ -55,6 +55,7 @@ import {
   AdminToast,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
+import { useTranslations } from "next-intl";
 
 type MCPServer = {
   id: string;
@@ -149,6 +150,7 @@ function glyphFor(id: string) {
 }
 
 export default function AdminMCPPage() {
+  const t = useTranslations("admin.mcpsPage");
   const [mcps, setMcps] = useState<MCPServer[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editing, setEditing] = useState<MCPServer | null>(null);
@@ -216,25 +218,27 @@ export default function AdminMCPPage() {
     const name = form.name.trim();
     const id = editing?.id || slugify(form.id || name);
     if (!name || !id) {
-      setError("Name is required.");
+      setError(t("validation.name"));
       return;
     }
     if (form.transport === "stdio" && !form.command.trim()) {
-      setError("Command is required for a stdio server.");
+      setError(t("validation.command"));
       return;
     }
     const keepsRemoteURL =
       editing && normalizeTransport(editing.transport) !== "stdio" && !form.url.trim();
     if (form.transport !== "stdio" && !form.url.trim() && !keepsRemoteURL) {
-      setError("URL is required for an HTTP or SSE server.");
+      setError(t("validation.url"));
       return;
     }
 
     let env: Record<string, string> | undefined;
     let headers: Record<string, string> | undefined;
     try {
-      env = parsePairs(form.env, "Env");
-      headers = parsePairs(form.headers, "Headers");
+      env = parsePairs(form.env, "Env", (kind, values) => t(`validation.${kind}`, values));
+      headers = parsePairs(form.headers, "Headers", (kind, values) =>
+        t(`validation.${kind}`, values),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return;
@@ -269,7 +273,7 @@ export default function AdminMCPPage() {
       });
       if (!res.ok) throw new Error(await readError(res));
       const result = (await res.json()) as MCPServer;
-      setNotice(`${result.name} saved. The connection will be checked when an agent uses it.`);
+      setNotice(t("savedNotice", { name: result.name }));
       setDrawerOpen(false);
       await load();
     } catch (err) {
@@ -310,16 +314,16 @@ export default function AdminMCPPage() {
     <AdminPage className="admin-theme-orange">
       <AdminPageHeader
         icon={<McpPageIcon className="size-[18px]" />}
-        title="MCP Servers"
+        title={t("title")}
         actions={
           <>
             <AdminRefreshButton refreshing={loading} onClick={() => void load()} variant="outline">
-              Refresh
+              {t("refresh")}
             </AdminRefreshButton>
             {loading || mcps.length > 0 ? (
               <Button className="gap-2" onPress={openCreate}>
                 <Plus className="size-4" />
-                Add server
+                {t("add")}
               </Button>
             ) : null}
           </>
@@ -328,7 +332,7 @@ export default function AdminMCPPage() {
 
       <AdminErrorDialog
         error={drawerOpen ? null : error}
-        title="MCP server operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
@@ -336,14 +340,14 @@ export default function AdminMCPPage() {
 
       {loading || mcps.length > 0 ? (
         <SearchField
-          aria-label="Search MCP servers"
+          aria-label={t("search")}
           className="w-full sm:w-[320px]"
           value={query}
           onChange={setQuery}
         >
           <SearchField.Group>
             <SearchField.SearchIcon />
-            <SearchField.Input placeholder="Search MCP servers" />
+            <SearchField.Input placeholder={t("search")} />
             <SearchField.ClearButton />
           </SearchField.Group>
         </SearchField>
@@ -352,7 +356,7 @@ export default function AdminMCPPage() {
       {loading && !mcps.length ? (
         <div className="flex min-h-48 items-center justify-center text-sm text-muted">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
-          Loading MCP servers
+          {t("loading")}
         </div>
       ) : visibleMcps.length ? (
         <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -370,17 +374,13 @@ export default function AdminMCPPage() {
       ) : (
         <AdminEmptyState
           icon={<McpPageIcon className="size-6" />}
-          title={mcps.length ? "No matching MCP servers" : "No MCP servers configured"}
-          description={
-            mcps.length
-              ? "Try another search or clear the active query."
-              : "Add a server now; Cocola checks the connection when an agent first uses it."
-          }
+          title={mcps.length ? t("noMatch") : t("empty")}
+          description={mcps.length ? t("noMatchDescription") : t("emptyDescription")}
           action={
             !mcps.length ? (
               <Button className="gap-2" onPress={openCreate}>
                 <Plus className="size-4" />
-                Add server
+                {t("add")}
               </Button>
             ) : undefined
           }
@@ -393,13 +393,13 @@ export default function AdminMCPPage() {
           if (!saving) setDrawerOpen(open);
         }}
         className="admin-theme-orange"
-        title={editing ? `Edit ${editing.name}` : "Add MCP server"}
-        description="Save the configuration now. Its connection is checked in the first agent session that uses it."
+        title={editing ? t("editTitle", { name: editing.name }) : t("add")}
+        description={t("drawerDescription")}
         size="lg"
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" isDisabled={saving} onPress={() => setDrawerOpen(false)}>
-              Cancel
+              {t("cancel")}
             </Button>
             <Button isDisabled={saving} className="min-w-32 gap-2" onPress={() => void save()}>
               {saving ? (
@@ -407,7 +407,7 @@ export default function AdminMCPPage() {
               ) : (
                 <Save className="size-4" />
               )}
-              {saving ? "Saving…" : editing ? "Save changes" : "Add server"}
+              {saving ? t("saving") : editing ? t("save") : t("add")}
             </Button>
           </div>
         }
@@ -424,10 +424,10 @@ export default function AdminMCPPage() {
               variant="secondary"
               onChange={(name) => setForm({ ...form, name })}
             >
-              <Label>Name</Label>
+              <Label>{t("fields.name")}</Label>
               <Input autoFocus placeholder="GitHub" />
             </TextField>
-            <Field label="Transport">
+            <Field label={t("fields.transport")}>
               <SelectControl
                 className="w-full"
                 value={form.transport}
@@ -435,7 +435,7 @@ export default function AdminMCPPage() {
                   setForm({ ...form, transport: value as FormState["transport"] })
                 }
                 options={[
-                  { value: "stdio", label: "stdio · Command" },
+                  { value: "stdio", label: `stdio · ${t("fields.command")}` },
                   { value: "http", label: "HTTP · URL" },
                   { value: "sse", label: "SSE · URL" },
                 ]}
@@ -446,8 +446,8 @@ export default function AdminMCPPage() {
 
           <p className="-mt-3 text-xs leading-5 text-muted">
             {form.transport === "stdio"
-              ? "stdio starts a local process, so it uses Command instead of URL."
-              : `${form.transport === "http" ? "HTTP" : "SSE"} connects to a remote URL.`}
+              ? t("fields.stdioHint")
+              : t("fields.remoteHint", { transport: form.transport === "http" ? "HTTP" : "SSE" })}
           </p>
 
           <TextField
@@ -456,9 +456,10 @@ export default function AdminMCPPage() {
             onChange={(description) => setForm({ ...form, description })}
           >
             <Label>
-              Description <span className="text-muted font-normal">· optional</span>
+              {t("fields.description")}{" "}
+              <span className="text-muted font-normal">· {t("fields.optional")}</span>
             </Label>
-            <Input placeholder="Repository tools for agent sessions" />
+            <Input placeholder={t("fields.descriptionPlaceholder")} />
           </TextField>
 
           {form.transport === "stdio" ? (
@@ -468,7 +469,7 @@ export default function AdminMCPPage() {
                 variant="secondary"
                 onChange={(command) => setForm({ ...form, command })}
               >
-                <Label>Command</Label>
+                <Label>{t("fields.command")}</Label>
                 <Input className="font-mono" placeholder="npx" />
               </TextField>
               <TextField
@@ -477,8 +478,10 @@ export default function AdminMCPPage() {
                 onChange={(args) => setForm({ ...form, args })}
               >
                 <Label>
-                  Arguments{" "}
-                  <span className="text-muted font-normal">· optional · one per line</span>
+                  {t("fields.arguments")}{" "}
+                  <span className="text-muted font-normal">
+                    · {t("fields.optional")} · {t("fields.onePerLine")}
+                  </span>
                 </Label>
                 <TextArea
                   className="min-h-24 font-mono"
@@ -486,7 +489,7 @@ export default function AdminMCPPage() {
                 />
               </TextField>
               <SecretPairsField
-                label="Env"
+                label={t("fields.environment")}
                 value={form.env}
                 placeholder="GITHUB_TOKEN=..."
                 savedHints={editing?.env_hints}
@@ -500,12 +503,8 @@ export default function AdminMCPPage() {
           ) : (
             <>
               <Field
-                label="URL"
-                hint={
-                  editing
-                    ? "Leave blank to keep the saved URL."
-                    : "Paste the complete provider URL."
-                }
+                label={t("fields.url")}
+                hint={editing ? t("fields.keepUrl") : t("fields.pasteUrl")}
               >
                 <TextField
                   className="relative"
@@ -513,20 +512,20 @@ export default function AdminMCPPage() {
                   variant="secondary"
                   onChange={(url) => setForm({ ...form, url })}
                 >
-                  <Label className="sr-only">URL</Label>
+                  <Label className="sr-only">{t("fields.url")}</Label>
                   <Input
                     type={showURL ? "text" : "password"}
                     className="w-full pr-11 font-mono"
                     placeholder={
                       editing
-                        ? editing.url_hint || "Saved URL"
+                        ? editing.url_hint || t("fields.savedUrl")
                         : "https://mcp.example.com/api?token=..."
                     }
                     autoComplete="off"
                   />
                   <Button
                     isIconOnly
-                    aria-label={showURL ? "Hide URL" : "Show URL"}
+                    aria-label={showURL ? t("fields.hideUrl") : t("fields.showUrl")}
                     className="absolute bottom-1 right-1 size-9 min-w-9"
                     size="sm"
                     variant="ghost"
@@ -536,11 +535,9 @@ export default function AdminMCPPage() {
                   </Button>
                 </TextField>
               </Field>
-              <p className="-mt-3 text-xs leading-5 text-muted">
-                The complete URL is encrypted. Lists only show its scheme, host, and path.
-              </p>
+              <p className="-mt-3 text-xs leading-5 text-muted">{t("fields.urlSecure")}</p>
               <SecretPairsField
-                label="Headers"
+                label={t("fields.headers")}
                 value={form.headers}
                 placeholder="Authorization=Bearer ..."
                 savedHints={editing?.header_hints}
@@ -559,9 +556,9 @@ export default function AdminMCPPage() {
               onChange={(defaultEnabled) => setForm({ ...form, defaultEnabled })}
             >
               <span>
-                <span className="block text-sm font-medium">Enabled for users by default</span>
+                <span className="block text-sm font-medium">{t("fields.defaultOn")}</span>
                 <span className="text-muted mt-0.5 block text-xs leading-5">
-                  Users can still turn this server off for their own agent sessions.
+                  {t("fields.defaultDescription")}
                 </span>
               </span>
             </Checkbox>
@@ -578,7 +575,7 @@ export default function AdminMCPPage() {
                 <ChevronDown
                   className={`size-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
                 />
-                Advanced
+                {t("fields.advanced")}
               </Button>
               {advancedOpen ? (
                 <div className="mt-3">
@@ -588,12 +585,10 @@ export default function AdminMCPPage() {
                     onChange={(id) => setForm({ ...form, id })}
                   >
                     <Label>
-                      ID <span className="text-muted font-normal">· optional</span>
+                      ID <span className="text-muted font-normal">· {t("fields.optional")}</span>
                     </Label>
                     <Input className="font-mono" placeholder={slugify(form.name) || "github"} />
-                    <span className="text-muted text-xs">
-                      Generated from the name when left blank.
-                    </span>
+                    <span className="text-muted text-xs">{t("fields.idHint")}</span>
                   </TextField>
                 </div>
               ) : null}
@@ -608,9 +603,11 @@ export default function AdminMCPPage() {
           if (!open) setDeleteTarget(null);
         }}
         className="admin-theme-orange"
-        title="Delete MCP server?"
-        description={`This permanently removes ${deleteTarget?.name || deleteTarget?.id || "this server"} from future agent sessions.`}
-        confirmLabel="Delete server"
+        title={t("delete.title")}
+        description={t("delete.description", {
+          name: deleteTarget?.name || deleteTarget?.id || t("delete.thisServer"),
+        })}
+        confirmLabel={t("delete.action")}
         destructive
         busy={deleteTarget !== null && busyID === deleteTarget.id}
         onConfirm={() => {
@@ -634,6 +631,7 @@ function MCPCard({
   onToggle: () => void;
   onDelete: () => void;
 }) {
+  const t = useTranslations("admin.mcpsPage.card");
   const transport = normalizeTransport(mcp.transport);
   const remote = transport !== "stdio";
   const endpoint = !remote
@@ -653,38 +651,44 @@ function MCPCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="min-w-0 flex-1 text-sm font-semibold text-foreground">
-                <AdminTruncatedValue copyLabel="MCP name" value={mcp.name || mcp.id} />
+                <AdminTruncatedValue copyLabel={t("copyName")} value={mcp.name || mcp.id} />
               </h2>
               <Chip size="sm" variant="soft">
                 {transport === "http" ? "HTTP" : transport}
               </Chip>
             </div>
             <p className="text-muted mt-1 line-clamp-2 min-h-10 text-sm leading-5">
-              {mcp.description || "No description"}
+              {mcp.description || t("noDescription")}
             </p>
           </div>
         </div>
 
         <div className="bg-surface-secondary mt-4 min-w-0 rounded-2xl p-3">
           <div className="text-muted text-[10px] font-semibold uppercase tracking-[0.12em]">
-            {remote ? "URL" : "Command"}
+            {remote ? "URL" : t("command")}
           </div>
           <AdminTruncatedValue
             className="mt-1 font-mono text-xs tabular-nums text-foreground/80"
-            copyLabel={remote ? "MCP URL" : "MCP command"}
-            value={endpoint || (remote ? "Remote URL saved" : "Command saved")}
+            copyLabel={remote ? t("copyUrl") : t("copyCommand")}
+            value={endpoint || (remote ? t("remoteSaved") : t("commandSaved"))}
           />
         </div>
 
-        {mcp.default_enabled ? <div className="text-muted mt-3 text-xs">Default on</div> : null}
+        {mcp.default_enabled ? (
+          <div className="text-muted mt-3 text-xs">{t("defaultOn")}</div>
+        ) : null}
         <div className="mt-auto flex items-center justify-between gap-3 pt-4">
           <Button isDisabled={busy} size="sm" variant="outline" onPress={onEdit}>
             <Pencil className="size-4" />
-            Edit
+            {t("edit")}
           </Button>
           <span className="flex items-center gap-2">
             <Switch
-              aria-label={`${mcp.enabled ? "Disable" : "Enable"} ${mcp.name || mcp.id}`}
+              aria-label={
+                mcp.enabled
+                  ? t("disable", { name: mcp.name || mcp.id })
+                  : t("enable", { name: mcp.name || mcp.id })
+              }
               isDisabled={busy}
               isSelected={mcp.enabled}
               onChange={onToggle}
@@ -697,7 +701,7 @@ function MCPCard({
             </Switch>
             <Button isDisabled={busy} size="sm" variant="danger-soft" onPress={onDelete}>
               <Trash2 className="size-4" />
-              Remove
+              {t("remove")}
             </Button>
           </span>
         </div>
@@ -717,12 +721,13 @@ function Field({
   hint?: string;
   children: ReactNode;
 }) {
+  const t = useTranslations("admin.mcpsPage.fields");
   return (
     <label className="grid gap-1.5 text-sm">
       <span className="flex items-baseline justify-between gap-3 text-xs font-medium text-muted">
         <span>
           {label}
-          {optional ? <span className="font-normal"> · optional</span> : null}
+          {optional ? <span className="font-normal"> · {t("optional")}</span> : null}
         </span>
         {hint ? <span className="text-right font-normal">{hint}</span> : null}
       </span>
@@ -748,27 +753,24 @@ function SecretPairsField({
   onChange: (value: string) => void;
   onClearSaved: (clear: boolean) => void;
 }) {
+  const t = useTranslations("admin.mcpsPage.pairs");
   const savedKeys = Object.keys(savedHints ?? {});
   return (
-    <Field label={label} optional hint="One KEY=value pair per line.">
+    <Field label={label} optional hint={t("hint")}>
       <TextField value={value} variant="secondary" onChange={onChange}>
         <Label className="sr-only">{label}</Label>
         <TextArea className="min-h-24 font-mono" placeholder={placeholder} />
       </TextField>
       {savedKeys.length ? (
         <div className="text-muted flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span>
-            {clearSaved
-              ? "Saved values will be cleared."
-              : `Saved: ${savedKeys.join(", ")}. Blank keeps them.`}
-          </span>
+          <span>{clearSaved ? t("cleared") : t("saved", { keys: savedKeys.join(", ") })}</span>
           <Button
             className="h-8 min-h-8 px-2"
             size="sm"
             variant="ghost"
             onPress={() => onClearSaved(!clearSaved)}
           >
-            {clearSaved ? "Keep saved values" : "Clear saved values"}
+            {clearSaved ? t("keep") : t("clear")}
           </Button>
         </div>
       ) : null}
@@ -798,21 +800,32 @@ function splitArgs(raw: string) {
     .filter(Boolean);
 }
 
-function parsePairs(raw: string, field: string): Record<string, string> | undefined {
+function parsePairs(
+  raw: string,
+  field: string,
+  message: (
+    kind: "pairFormat" | "pairKey" | "pairValue" | "pairDuplicate",
+    values: { field: string; line: number; key: string },
+  ) => string,
+): Record<string, string> | undefined {
   const result: Record<string, string> = {};
   const lines = raw.split("\n");
   for (const [index, rawLine] of lines.entries()) {
     const line = rawLine.trim();
     if (!line) continue;
     const separator = line.indexOf("=");
-    if (separator <= 0) throw new Error(`${field} line ${index + 1} must use KEY=value.`);
+    if (separator <= 0) {
+      throw new Error(message("pairFormat", { field, line: index + 1, key: "" }));
+    }
     const key = line.slice(0, separator).trim();
     const value = line.slice(separator + 1).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key)) {
-      throw new Error(`${field} line ${index + 1} has an invalid key.`);
+      throw new Error(message("pairKey", { field, line: index + 1, key }));
     }
-    if (!value) throw new Error(`${field} line ${index + 1} has an empty value.`);
-    if (Object.hasOwn(result, key)) throw new Error(`${field} contains duplicate key ${key}.`);
+    if (!value) throw new Error(message("pairValue", { field, line: index + 1, key }));
+    if (Object.hasOwn(result, key)) {
+      throw new Error(message("pairDuplicate", { field, line: index + 1, key }));
+    }
     result[key] = value;
   }
   return Object.keys(result).length ? result : undefined;

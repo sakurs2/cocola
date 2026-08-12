@@ -4,6 +4,7 @@ import { Settings as SettingsPageIcon } from "lucide-react";
 import { Loader2, RotateCcw, Save } from "lucide-react";
 import { Check } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button, Card, Chip, Input, Label, Switch, TextField, Tooltip } from "@heroui/react";
 import {
   AdminConfirmDialog,
@@ -41,7 +42,28 @@ type SystemSetting = {
 
 type Drafts = Record<string, DraftValue>;
 
+const SETTING_TRANSLATION_KEYS = {
+  "execution.agent_max_turns": "agentMaxTurns",
+  "execution.tool_step_timeout_secs": "toolMaximumRuntime",
+  "execution.sandbox_idle_timeout_minutes": "sandboxIdleTimeout",
+  "scheduler.enabled": "schedulerEnabled",
+  "scheduler.poll_secs": "pollInterval",
+  "scheduler.run_timeout_secs": "runTimeout",
+  "scheduler.heartbeat_secs": "heartbeatInterval",
+  "scheduler.lease_timeout_secs": "leaseTimeout",
+  "storage.session_volume_default_size": "sessionVolumeRequest",
+  "observability.trace_retention_days": "traceRetention",
+} as const;
+
+const SETTING_GROUP_KEYS = {
+  Execution: "groups.execution",
+  Scheduler: "groups.scheduler",
+  Storage: "groups.storage",
+  Observability: "groups.observability",
+} as const;
+
 export default function AdminSettingsPage() {
+  const t = useTranslations("admin.settingsPage");
   const [settings, setSettings] = useState<SystemSetting[]>([]);
   const [drafts, setDrafts] = useState<Drafts>({});
   const [loading, setLoading] = useState(true);
@@ -95,7 +117,7 @@ export default function AdminSettingsPage() {
         }),
       });
       if (!res.ok) throw new Error(await errorText(res));
-      setNotice(`${setting.label} saved`);
+      setNotice(t("saved", { setting: translatedSetting(setting, t).label }));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -115,7 +137,7 @@ export default function AdminSettingsPage() {
         { method: "DELETE" },
       );
       if (!res.ok) throw new Error(await errorText(res));
-      setNotice(`${resetTarget.label} reset to startup default`);
+      setNotice(t("resetDone", { setting: translatedSetting(resetTarget, t).label }));
       setResetTarget(null);
       await load();
     } catch (err) {
@@ -129,25 +151,25 @@ export default function AdminSettingsPage() {
     <AdminPage className="admin-theme-slate">
       <AdminPageHeader
         icon={<SettingsPageIcon className="size-5" />}
-        title="Settings"
-        description="Runtime settings with environment defaults and database overrides"
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton
             variant="outline"
-            title="Refresh settings"
-            aria-label="Refresh settings"
+            title={t("refresh")}
+            aria-label={t("refresh")}
             onClick={() => void load()}
             disabled={loading}
             refreshing={loading}
           >
-            Refresh
+            {t("refreshAction")}
           </AdminRefreshButton>
         }
       />
 
       <AdminErrorDialog
         error={error}
-        title="Settings operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
@@ -161,20 +183,25 @@ export default function AdminSettingsPage() {
       {loading ? (
         <div className="text-muted flex h-40 items-center justify-center text-sm">
           <Loader2 className="mr-2 size-4 animate-spin" />
-          Loading settings
+          {t("loading")}
         </div>
       ) : (
         <section className="grid gap-5">
           {grouped.map(([group, rows]) => (
             <Card key={group} className="overflow-hidden p-0">
               <Card.Header className="bg-surface-secondary flex-row items-center justify-between px-5 py-4">
-                <Card.Title>{group}</Card.Title>
+                <Card.Title>
+                  {group in SETTING_GROUP_KEYS
+                    ? t(SETTING_GROUP_KEYS[group as keyof typeof SETTING_GROUP_KEYS])
+                    : group}
+                </Card.Title>
                 <Chip size="sm" variant="soft">
-                  {rows.length} {rows.length === 1 ? "setting" : "settings"}
+                  {t("settingCount", { count: rows.length })}
                 </Chip>
               </Card.Header>
               <Card.Content className="divide-y divide-separator p-0">
                 {rows.map((setting) => {
+                  const copy = translatedSetting(setting, t);
                   const draftValue = drafts[setting.key] ?? valueForDraft(setting);
                   const dirty = !sameDraft(setting, valueForDraft(setting), draftValue);
                   const valid = validDraft(setting, draftValue);
@@ -186,29 +213,29 @@ export default function AdminSettingsPage() {
                     >
                       <div className="admin-setting-description min-w-0">
                         <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{setting.label}</span>
+                          <span className="font-medium">{copy.label}</span>
                           <Chip
                             color={setting.source === "db" ? "accent" : "default"}
                             size="sm"
                             variant="soft"
                           >
-                            {sourceLabel(setting.source)}
+                            {t(`source.${setting.source}`)}
                           </Chip>
                         </span>
                         <p className="text-muted mt-1 max-w-2xl text-xs leading-5">
-                          {setting.description}
+                          {copy.description}
                         </p>
                         <div className="text-muted mt-2 flex min-w-0 flex-wrap gap-2 font-mono text-[11px]">
                           <span className="bg-surface-secondary max-w-full rounded-lg px-2 py-1">
                             <AdminTruncatedValue
-                              copyLabel="setting key"
+                              copyLabel={t("copy.settingKey")}
                               value={`${setting.key} · v${setting.version}`}
                             />
                           </span>
                           {setting.env ? (
                             <span className="bg-surface-secondary max-w-full rounded-lg px-2 py-1">
                               <AdminTruncatedValue
-                                copyLabel="environment variable"
+                                copyLabel={t("copy.environmentVariable")}
                                 value={setting.env}
                               />
                             </span>
@@ -224,7 +251,9 @@ export default function AdminSettingsPage() {
                             setDrafts((prev) => ({ ...prev, [setting.key]: value }))
                           }
                         />
-                        <div className="text-muted mt-1 text-xs">{`Default: ${formatValue(setting.default, setting.kind)}`}</div>
+                        <div className="text-muted mt-1 text-xs">
+                          {t("defaultValue", { value: formatValue(setting.default, setting.kind) })}
+                        </div>
                       </div>
 
                       <div className="admin-setting-actions flex items-center justify-end gap-2">
@@ -232,7 +261,7 @@ export default function AdminSettingsPage() {
                           <>
                             <Tooltip delay={0}>
                               <Button
-                                aria-label={`Save ${setting.label}`}
+                                aria-label={t("saveNamed", { setting: copy.label })}
                                 isDisabled={!dirty || !valid || busy}
                                 size="sm"
                                 variant={dirty ? "primary" : "outline"}
@@ -243,15 +272,17 @@ export default function AdminSettingsPage() {
                                 ) : (
                                   <Save className="size-4" />
                                 )}
-                                Save
+                                {t("save")}
                               </Button>
-                              <Tooltip.Content>
-                                Save this value as a database override
-                              </Tooltip.Content>
+                              <Tooltip.Content>{t("saveTooltip")}</Tooltip.Content>
                             </Tooltip>
                             <Tooltip delay={0}>
                               <Button
-                                aria-label={`${dirty ? "Revert" : "Reset"} ${setting.label}`}
+                                aria-label={
+                                  dirty
+                                    ? t("revertNamed", { setting: copy.label })
+                                    : t("resetNamed", { setting: copy.label })
+                                }
                                 isDisabled={(!dirty && setting.source !== "db") || busy}
                                 size="sm"
                                 variant="outline"
@@ -265,18 +296,16 @@ export default function AdminSettingsPage() {
                                 }
                               >
                                 <RotateCcw className="size-4" />
-                                {dirty ? "Revert" : "Reset"}
+                                {dirty ? t("revert") : t("reset")}
                               </Button>
                               <Tooltip.Content>
-                                {dirty
-                                  ? "Discard the unsaved change"
-                                  : "Remove the database override"}
+                                {dirty ? t("revertTooltip") : t("resetTooltip")}
                               </Tooltip.Content>
                             </Tooltip>
                           </>
                         ) : (
                           <Chip size="sm" variant="soft">
-                            Read only
+                            {t("readOnly")}
                           </Chip>
                         )}
                       </div>
@@ -292,9 +321,13 @@ export default function AdminSettingsPage() {
       <AdminConfirmDialog
         open={resetTarget !== null}
         onOpenChange={(open) => !open && setResetTarget(null)}
-        title="Reset override?"
-        description={`${resetTarget?.label ?? "This setting"} will return to its startup default. The expected version is checked before reset.`}
-        confirmLabel="Reset override"
+        title={t("confirmReset.title")}
+        description={t("confirmReset.description", {
+          setting: resetTarget
+            ? translatedSetting(resetTarget, t).label
+            : t("confirmReset.thisSetting"),
+        })}
+        confirmLabel={t("confirmReset.action")}
         busy={Boolean(resetTarget && savingKey === resetTarget.key)}
         onConfirm={() => void reset()}
       />
@@ -311,6 +344,7 @@ function SettingControl({
   value: DraftValue;
   onChange: (value: DraftValue) => void;
 }) {
+  const t = useTranslations("admin.settingsPage");
   if (setting.kind === "bool") {
     const checked = value === true;
     return (
@@ -324,7 +358,7 @@ function SettingControl({
           <Switch.Control>
             <Switch.Thumb />
           </Switch.Control>
-          {checked ? "Enabled" : "Disabled"}
+          {checked ? t("enabled") : t("disabled")}
         </Switch.Content>
       </Switch>
     );
@@ -340,11 +374,11 @@ function SettingControl({
           variant="secondary"
           onChange={(amount) => onChange({ ...quantity, amount })}
         >
-          <Label className="sr-only">{setting.label} value</Label>
+          <Label className="sr-only">{t("fieldValue", { label: setting.label })}</Label>
           <Input inputMode="decimal" min={1} step="1" type="number" />
         </TextField>
         <SelectControl
-          ariaLabel={`${setting.label} unit`}
+          ariaLabel={t("fieldUnit", { label: setting.label })}
           className="h-full rounded-xl"
           disabled={!setting.editable}
           options={QUANTITY_UNITS}
@@ -429,8 +463,16 @@ function parseQuantityDraft(value: SettingValue | DraftValue): QuantityDraft {
   return { amount, unit: suffix.startsWith("m") ? "MB" : "GB" };
 }
 
-function sourceLabel(source: SystemSetting["source"]) {
-  return source === "db" ? "DB override" : source === "env" ? "Environment" : "Default";
+function translatedSetting(
+  setting: SystemSetting,
+  t: ReturnType<typeof useTranslations<"admin.settingsPage">>,
+) {
+  const key = SETTING_TRANSLATION_KEYS[setting.key as keyof typeof SETTING_TRANSLATION_KEYS];
+  if (!key) return { label: setting.label, description: setting.description };
+  return {
+    label: t(`definitions.${key}.label`),
+    description: t(`definitions.${key}.description`),
+  };
 }
 
 async function errorText(res: Response) {

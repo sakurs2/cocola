@@ -1,0 +1,132 @@
+{
+  "workspace": {
+    "title": "Wiki",
+    "refresh": "刷新 Wiki",
+    "search": "搜索此 Wiki",
+    "parentFolder": "上级文件夹",
+    "folderPath": "Wiki 文件夹路径",
+    "allFiles": "全部文件",
+    "noMatches": "没有匹配页面",
+    "loadingTree": "正在加载 Wiki…",
+    "emptyTree": "创建第一个页面或上传文件。",
+    "folder": "文件夹",
+    "page": "页面",
+    "upload": "上传",
+    "fileLimit": "单个文件最大 {size}",
+    "resizeSidebar": "调整 Wiki 侧栏宽度",
+    "dismiss": "关闭",
+    "untitledFilename": "未命名.md",
+    "fileTooLarge": "{name} 超过 {limit} 的文件限制。",
+    "dialog": {
+      "close": "关闭 Wiki 操作",
+      "createFolder": "创建文件夹",
+      "createMarkdown": "创建 Markdown 页面",
+      "renameItem": "重命名项目",
+      "folderDescription": "在当前 Wiki 位置添加文件夹。",
+      "markdownDescription": "在当前 Wiki 位置创建可编辑的 Markdown 页面。",
+      "renameDescription": "输入新名称，文件类型必须仍受 Wiki 支持。",
+      "folderName": "文件夹名称",
+      "filename": "文件名",
+      "newName": "新名称",
+      "name": "名称",
+      "cancel": "取消",
+      "rename": "重命名",
+      "create": "创建"
+    },
+    "delete": {
+      "action": "删除",
+      "folderTitle": "删除文件夹？",
+      "fileTitle": "删除文件？",
+      "folderDescription": "{name} 及其全部内容将被永久删除。",
+      "fileDescription": "{name} 将被永久删除。",
+      "thisFile": "此文件"
+    },
+    "discard": {
+      "title": "放弃未保存的更改？",
+      "description": "此页面包含尚未保存的更改，仅在不再需要这些更改时继续。",
+      "confirm": "放弃并继续",
+      "cancel": "继续编辑"
+    },
+    "actions": {
+      "download": "下载",
+      "downloadNamed": "下载 {name}",
+      "rename": "重命名",
+      "renameNamed": "重命名 {name}",
+      "delete": "删除",
+      "deleteNamed": "删除 {name}"
+    },
+    "folderView": { "items": "{count} 项", "folder": "文件夹", "empty": "此文件夹为空。" },
+    "fileView": {
+      "office": {
+        "title": "可供智能体读取",
+        "description": "Cocola 会保留原始 Office 文件。在对话中使用 @ 引用后，智能体可以提取文档、幻灯片或表格内容；暂不支持 Web 预览和在线 Office 编辑。",
+        "download": "下载原文件"
+      },
+      "saving": "保存中…",
+      "save": "保存",
+      "loading": "正在加载页面…",
+      "loadError": "无法打开此页面",
+      "tryAgain": "重试",
+      "conflict": "此页面已在其他标签页中更改。请先重新加载，避免覆盖。",
+      "reload": "重新加载",
+      "status": {
+        "loading": "加载中…",
+        "load-error": "加载失败",
+        "saved": "已保存",
+        "dirty": "未保存",
+        "saving": "保存中…",
+        "conflict": "编辑冲突",
+        "error": "保存失败"
+      }
+    },
+    "welcome": {
+      "title": "构建你的工作 Wiki",
+      "description": "使用文件夹组织持久上下文，保真编写 Markdown，并在任意智能体对话中通过 @ 精确引用文件。",
+      "newMarkdown": "新建 Markdown",
+      "upload": "上传文件"
+    }
+  },
+  "editor": {
+    "placeholder": "开始编写页面…",
+    "richAria": "Markdown 页面编辑器",
+    "sourceAria": "Markdown 源码编辑器",
+    "sourceWarning": "此页面使用了富文本编辑器无法安全保留的 Markdown 语法。请直接编辑源码以完整保留内容。",
+    "checking": "正在检查 Markdown 兼容性…",
+    "toolbar": "页面格式",
+    "buttons": {
+      "bold": "粗体 (Cmd+B)",
+      "italic": "斜体 (Cmd+I)",
+      "underline": "下划线 (Cmd+U)",
+      "strikethrough": "删除线",
+      "highlight": "高亮",
+      "inlineCode": "行内代码",
+      "heading1": "一级标题",
+      "heading2": "二级标题",
+      "heading3": "三级标题",
+      "bulletList": "无序列表",
+      "orderedList": "有序列表",
+      "taskList": "任务列表",
+      "blockquote": "引用",
+      "codeBlock": "代码块",
+      "link": "插入或编辑链接",
+      "image": "通过 URL 插入图片",
+      "rule": "分隔线",
+      "clear": "清除格式",
+      "undo": "撤销 (Cmd+Z)",
+      "redo": "重做 (Cmd+Shift+Z)"
+    },
+    "url": {
+      "imageError": "请使用 http(s) 或站点相对图片 URL。",
+      "linkError": "请使用 http(s)、mailto、tel 或站点相对 URL。",
+      "imageTitle": "插入图片",
+      "linkTitle": "添加链接",
+      "imageDescription": "使用安全的远程或站点相对 URL 添加图片。",
+      "linkDescription": "将所选文本链接到网页、邮箱、电话号码或 Wiki URL。",
+      "imageLabel": "图片 URL",
+      "linkLabel": "链接 URL",
+      "insertImage": "插入图片",
+      "applyLink": "应用链接",
+      "removeLink": "移除链接"
+    }
+  }
+}

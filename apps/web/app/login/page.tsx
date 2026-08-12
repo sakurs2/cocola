@@ -3,12 +3,14 @@
 import { Eye, EyeOff } from "lucide-react";
 import { Button, Card, Input, Label, TextField } from "@heroui/react";
 import { signIn } from "next-auth/react";
+import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useState } from "react";
 
 import { CocolaTagline } from "@/components/assistant-ui/cocola-tagline";
 import { CocolaWordmark } from "@/components/assistant-ui/cocola-wordmark";
 import { CocolaLogo } from "@/components/cocola-logo";
+import { LanguageMenu } from "@/components/i18n/language-menu";
 
 export default function LoginPage() {
   return (
@@ -19,12 +21,14 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
+  const t = useTranslations("auth.signIn");
   const search = useSearchParams();
   const callbackUrl = safeCallbackPath(search.get("callbackUrl"));
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState(initialLoginError(search.get("error"), search.get("reason")));
+  const initialErrorKey = initialLoginErrorKey(search.get("error"), search.get("reason"));
+  const [error, setError] = useState(initialErrorKey ? t(initialErrorKey) : "");
   const [pending, setPending] = useState(false);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -42,10 +46,10 @@ function LoginForm() {
           preflight.status === 403 &&
           preflight.headers.get("x-cocola-auth") === "account-disabled"
         ) {
-          setError("This account has been disabled. Contact an administrator.");
+          setError(t("accountDisabled"));
           return;
         }
-        setError("Sign in failed. Check your username/email and password.");
+        setError(t("invalidCredentials"));
         return;
       }
       const res = await signIn("credentials", {
@@ -58,9 +62,9 @@ function LoginForm() {
         window.location.href = callbackUrl;
         return;
       }
-      setError("Sign in failed. Check your username/email and password.");
+      setError(t("invalidCredentials"));
     } catch {
-      setError("Sign in failed. Please try again.");
+      setError(t("failed"));
     } finally {
       setPending(false);
     }
@@ -68,6 +72,9 @@ function LoginForm() {
 
   return (
     <main className="cocola-user-ui workspace-grain bg-surface-secondary flex min-h-screen flex-col items-center justify-center gap-8 p-5 text-foreground">
+      <div className="absolute right-4 top-4">
+        <LanguageMenu />
+      </div>
       <div className="flex items-center">
         <div className="flex items-center">
           <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
@@ -81,16 +88,16 @@ function LoginForm() {
       <Card className="w-full max-w-md p-6 sm:p-7">
         <form className="grid gap-5" onSubmit={submit}>
           <Card.Header className="p-0">
-            <Card.Title>Sign in to Cocola</Card.Title>
-            <Card.Description>Use an account enabled by an administrator.</Card.Description>
+            <Card.Title>{t("title")}</Card.Title>
+            <Card.Description>{t("description")}</Card.Description>
           </Card.Header>
           <Card.Content className="grid gap-4 p-0">
             <TextField isRequired value={identifier} variant="secondary" onChange={setIdentifier}>
-              <Label>Username or email</Label>
+              <Label>{t("identifier")}</Label>
               <Input autoComplete="username" autoFocus />
             </TextField>
             <TextField isRequired value={password} variant="secondary" onChange={setPassword}>
-              <Label>Password</Label>
+              <Label>{t("password")}</Label>
               <div className="relative">
                 <Input
                   autoComplete="current-password"
@@ -99,7 +106,7 @@ function LoginForm() {
                 />
                 <Button
                   isIconOnly
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? t("hidePassword") : t("showPassword")}
                   className="absolute inset-y-0 right-1 my-auto"
                   size="sm"
                   variant="ghost"
@@ -121,7 +128,7 @@ function LoginForm() {
           </Card.Content>
           <Card.Footer className="p-0">
             <Button fullWidth isPending={pending} type="submit" variant="primary">
-              {pending ? "Signing in..." : "Sign in"}
+              {pending ? t("submitting") : t("submit")}
             </Button>
           </Card.Footer>
         </form>
@@ -144,10 +151,13 @@ function safeCallbackPath(value: string | null) {
   return "/";
 }
 
-function initialLoginError(error: string | null, reason: string | null) {
+function initialLoginErrorKey(
+  error: string | null,
+  reason: string | null,
+): "accountDisabled" | "invalidCredentials" | null {
   if (reason === "account_disabled") {
-    return "This account has been disabled. Contact an administrator.";
+    return "accountDisabled";
   }
-  if (error) return "Sign in failed. Check your username/email and password.";
-  return "";
+  if (error) return "invalidCredentials";
+  return null;
 }

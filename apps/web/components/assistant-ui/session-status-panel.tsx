@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Activity, ChevronRight, FileText, X } from "lucide-react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useState, type ReactNode } from "react";
 
 export function SessionStatusButton({
@@ -19,13 +20,14 @@ export function SessionStatusButton({
   status: EnvironmentStatus;
   onClick: () => void;
 }) {
-  const summary = environmentSummary(status);
+  const t = useTranslations("chat.sessionStatus");
+  const summary = environmentSummary(status, t);
 
   return (
     <button
       type="button"
       title={summary}
-      aria-label={`Open session status: ${summary}`}
+      aria-label={t("open", { summary })}
       onClick={onClick}
       className="relative inline-flex size-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
     >
@@ -48,6 +50,7 @@ export function SessionStatusPanel({
   onOpenArtifact: () => void;
   onClose: () => void;
 }) {
+  const t = useTranslations("chat.sessionStatus");
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [mcpsOpen, setMcpsOpen] = useState(false);
   const skills = status.components.filter((component) => component.kind === "skill");
@@ -59,24 +62,24 @@ export function SessionStatusPanel({
     ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
   ).length;
   const statusCounts = [
-    connected > 0 ? `${connected} ready` : "",
-    configured > 0 ? `${configured} configured` : "",
-    connecting > 0 ? `${connecting} connecting` : "",
-    unavailable > 0 ? `${unavailable} unavailable` : "",
+    connected > 0 ? t("readyCount", { count: connected }) : "",
+    configured > 0 ? t("configuredCount", { count: configured }) : "",
+    connecting > 0 ? t("connectingCount", { count: connecting }) : "",
+    unavailable > 0 ? t("unavailableCount", { count: unavailable }) : "",
   ].filter(Boolean);
 
   return (
     <div className="flex max-h-[inherit] flex-col font-sans">
       <header className="flex min-h-14 items-center gap-3 px-4">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-foreground">Session status</div>
-          <div className="truncate text-xs text-muted">{environmentSummary(status)}</div>
+          <div className="text-sm font-medium text-foreground">{t("title")}</div>
+          <div className="truncate text-xs text-muted">{environmentSummary(status, t)}</div>
         </div>
         {artifactName ? (
           <button
             type="button"
-            title={`Open ${artifactName}`}
-            aria-label={`Open artifact ${artifactName}`}
+            title={t("openArtifact", { name: artifactName })}
+            aria-label={t("openArtifact", { name: artifactName })}
             onClick={onOpenArtifact}
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
@@ -85,8 +88,8 @@ export function SessionStatusPanel({
         ) : null}
         <button
           type="button"
-          title="Close status"
-          aria-label="Close session status"
+          title={t("close")}
+          aria-label={t("close")}
           onClick={onClose}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
         >
@@ -101,25 +104,27 @@ export function SessionStatusPanel({
             <div>
               <p className="font-medium text-foreground">
                 {status.phase === "preparing"
-                  ? "Preparing environment"
+                  ? t("preparing")
                   : status.phase === "degraded"
-                    ? "Environment unavailable"
-                    : "Environment ready"}
+                    ? t("unavailable")
+                    : t("ready")}
               </p>
               <p className="mt-1 text-xs leading-5">
                 {status.phase === "preparing"
-                  ? "Checking the connections available to this turn."
+                  ? t("preparingDescription")
                   : status.phase === "degraded"
-                    ? "The environment check did not complete for this turn."
-                    : "No environment capabilities were reported for this session."}
+                    ? t("unavailableDescription")
+                    : t("emptyDescription")}
               </p>
             </div>
           </div>
         ) : (
           <div className="divide-y divide-border/60">
             <EnvironmentGroup
-              title="Skills"
-              summary={skills.length > 0 ? `${skills.length} loaded` : "None loaded"}
+              title={t("skills")}
+              summary={
+                skills.length > 0 ? t("skillsLoaded", { count: skills.length }) : t("noneLoaded")
+              }
               icon={<Sparkle className="size-4 text-violet-500" />}
               open={skillsOpen}
               onToggle={() => setSkillsOpen((open) => !open)}
@@ -132,15 +137,13 @@ export function SessionStatusPanel({
                   />
                 ))
               ) : (
-                <EnvironmentEmptyState>
-                  No skills are loaded for this session.
-                </EnvironmentEmptyState>
+                <EnvironmentEmptyState>{t("noSkills")}</EnvironmentEmptyState>
               )}
             </EnvironmentGroup>
 
             <EnvironmentGroup
-              title="MCP servers"
-              summary={statusCounts.length > 0 ? statusCounts.join(" · ") : "None enabled"}
+              title={t("mcpServers")}
+              summary={statusCounts.length > 0 ? statusCounts.join(" · ") : t("noneEnabled")}
               icon={<PlugsConnected className="size-4 text-sky-500" />}
               open={mcpsOpen}
               onToggle={() => setMcpsOpen((open) => !open)}
@@ -153,9 +156,7 @@ export function SessionStatusPanel({
                   />
                 ))
               ) : (
-                <EnvironmentEmptyState>
-                  No MCP servers are enabled for this session.
-                </EnvironmentEmptyState>
+                <EnvironmentEmptyState>{t("noMcp")}</EnvironmentEmptyState>
               )}
             </EnvironmentGroup>
           </div>
@@ -168,7 +169,7 @@ export function SessionStatusPanel({
             href="/mcps"
             className="text-xs font-medium text-accent transition-colors hover:text-accent/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
           >
-            Open MCP settings
+            {t("openMcpSettings")}
           </Link>
         </div>
       ) : null}
@@ -220,6 +221,7 @@ function EnvironmentEmptyState({ children }: { children: ReactNode }) {
 }
 
 function EnvironmentComponentRow({ component }: { component: EnvironmentComponent }) {
+  const t = useTranslations("chat.sessionStatus");
   return (
     <div className="flex min-h-[42px] items-center gap-3 rounded-xl px-1 py-1.5 transition-colors hover:bg-surface-secondary/40">
       <span className="grid size-6 shrink-0 place-items-center text-muted">
@@ -228,20 +230,22 @@ function EnvironmentComponentRow({ component }: { component: EnvironmentComponen
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-3">
           <p className="truncate text-sm font-normal text-foreground">{component.label}</p>
-          <span className="shrink-0 text-[11px] text-muted">{componentStatusLabel(component)}</span>
+          <span className="shrink-0 text-[11px] text-muted">
+            {componentStatusLabel(component, t)}
+          </span>
         </div>
         {component.error ? (
           <p className="mt-1 break-words text-xs leading-5 text-amber-700">{component.error}</p>
         ) : component.kind === "skill" && component.version ? (
-          <p className="mt-1 text-xs text-muted">Version {component.version}</p>
+          <p className="mt-1 text-xs text-muted">{t("version", { version: component.version })}</p>
         ) : component.kind === "mcp" && component.status === "connected" ? (
           <p className="mt-1 text-xs text-muted">
             {component.toolCount > 0
-              ? `${component.toolCount} tool${component.toolCount === 1 ? "" : "s"} available`
-              : "Connection verified"}
+              ? t("toolsAvailable", { count: component.toolCount })
+              : t("connectionVerified")}
           </p>
         ) : component.kind === "mcp" && component.status === "configured" ? (
-          <p className="mt-1 text-xs text-muted">Connection will be verified on first use</p>
+          <p className="mt-1 text-xs text-muted">{t("verifyOnUse")}</p>
         ) : null}
       </div>
     </div>
@@ -277,47 +281,32 @@ function ComponentStatusIcon({ component }: { component: EnvironmentComponent })
   return <WarningCircle className="size-4 text-amber-600" />;
 }
 
-function environmentSummary(status: EnvironmentStatus): string {
+type SessionStatusTranslations = ReturnType<typeof useTranslations<"chat.sessionStatus">>;
+
+function environmentSummary(status: EnvironmentStatus, t: SessionStatusTranslations): string {
   const skills = status.components.filter((component) => component.kind === "skill");
   const mcps = status.components.filter((component) => component.kind === "mcp");
   const unavailable = mcps.filter((component) =>
     ["failed", "needs-auth", "timeout", "unavailable"].includes(component.status),
   ).length;
-  if (status.phase === "preparing") return "Preparing environment…";
-  const parts =
-    skills.length > 0 ? [`${skills.length} skill${skills.length === 1 ? "" : "s"}`] : [];
+  if (status.phase === "preparing") return t("preparingSummary");
+  const parts = skills.length > 0 ? [t("summarySkills", { count: skills.length })] : [];
   if (unavailable > 0) {
-    parts.push(`${unavailable} MCP unavailable`);
+    parts.push(t("summaryMcpUnavailable", { count: unavailable }));
     return parts.join(" · ");
   }
   const connected = mcps.filter((component) => component.status === "connected").length;
-  if (connected > 0) parts.push(`${connected} MCP ready`);
+  if (connected > 0) parts.push(t("summaryMcpReady", { count: connected }));
   const configured = mcps.filter((component) => component.status === "configured").length;
-  if (configured > 0) parts.push(`${configured} MCP configured`);
-  return parts.length > 0 ? parts.join(" · ") : "Environment ready";
+  if (configured > 0) parts.push(t("summaryMcpConfigured", { count: configured }));
+  return parts.length > 0 ? parts.join(" · ") : t("ready");
 }
 
-function componentStatusLabel(component: EnvironmentComponent): string {
-  switch (component.status) {
-    case "loaded":
-      return "Loaded";
-    case "connected":
-      return "Connected";
-    case "configured":
-      return "Configured";
-    case "needs-auth":
-      return "Needs auth";
-    case "timeout":
-      return "Timed out";
-    case "unavailable":
-      return "Unavailable";
-    case "disabled":
-      return "Disabled";
-    case "failed":
-      return "Failed";
-    default:
-      return "Connecting";
-  }
+function componentStatusLabel(
+  component: EnvironmentComponent,
+  t: SessionStatusTranslations,
+): string {
+  return t(`status.${component.status}`);
 }
 
 function environmentDotClass(phase: EnvironmentStatus["phase"]): string {

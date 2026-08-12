@@ -28,6 +28,7 @@ import { Sheet } from "@cocola/ui-compat/sheet";
 import { Sidebar } from "@cocola/ui-compat/sidebar";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { type ComponentType, useCallback, useEffect, useState } from "react";
 
 import {
@@ -45,22 +46,31 @@ type WorkspaceNavigationItem = {
   href: string;
   icon: ComponentType<{ className?: string }>;
   iconClassName: string;
-  label: string;
+  labelKey:
+    | "tasks"
+    | "agents"
+    | "skills"
+    | "mcps"
+    | "wiki"
+    | "connectors"
+    | "admin"
+    | "projects"
+    | "folders";
 };
 
 const WORKSPACE_NAVIGATION: WorkspaceNavigationItem[] = [
-  { href: "/tasks", icon: Calendar, iconClassName: "text-blue-600", label: "Tasks" },
-  { href: "/agents", icon: FaceRobot, iconClassName: "text-cyan-600", label: "Agents" },
-  { href: "/skills", icon: Sparkles, iconClassName: "text-violet-600", label: "Skills" },
-  { href: "/mcps", icon: PlugConnection, iconClassName: "text-orange-600", label: "MCP" },
-  { href: "/wiki", icon: BookOpen, iconClassName: "text-blue-600", label: "Wiki" },
-  { href: "/connectors", icon: Link, iconClassName: "text-emerald-600", label: "Connectors" },
+  { href: "/tasks", icon: Calendar, iconClassName: "text-blue-600", labelKey: "tasks" },
+  { href: "/agents", icon: FaceRobot, iconClassName: "text-cyan-600", labelKey: "agents" },
+  { href: "/skills", icon: Sparkles, iconClassName: "text-violet-600", labelKey: "skills" },
+  { href: "/mcps", icon: PlugConnection, iconClassName: "text-orange-600", labelKey: "mcps" },
+  { href: "/wiki", icon: BookOpen, iconClassName: "text-blue-600", labelKey: "wiki" },
+  { href: "/connectors", icon: Link, iconClassName: "text-emerald-600", labelKey: "connectors" },
   {
     adminOnly: true,
     href: "/admin",
     icon: ShieldCheck,
     iconClassName: "text-slate-500",
-    label: "Admin",
+    labelKey: "admin",
   },
 ];
 
@@ -72,14 +82,14 @@ const WORKSPACE_RESOURCES: WorkspaceResourceItem[] = [
     href: "/projects",
     icon: Folder,
     iconClassName: "text-indigo-600",
-    label: "Projects",
+    labelKey: "projects",
   },
   {
     createHref: "/folders?new=1",
     href: "/folders",
     icon: Folders,
     iconClassName: "text-amber-500",
-    label: "Folders",
+    labelKey: "folders",
   },
 ];
 
@@ -92,6 +102,7 @@ export function HeroUIWorkspaceSidebar({
   onPeekChange: (peeked: boolean) => void;
   onToggleImmersive: () => void;
 }) {
+  const t = useTranslations("navigation");
   return (
     <>
       <Sidebar
@@ -105,7 +116,7 @@ export function HeroUIWorkspaceSidebar({
         <HeroUIWorkspaceSidebarContents onToggleImmersive={onToggleImmersive} />
       </Sidebar>
       <Sidebar.Mobile>
-        <Sheet.Heading className="sr-only">Cocola workspace navigation</Sheet.Heading>
+        <Sheet.Heading className="sr-only">{t("sidebarAria")}</Sheet.Heading>
         <HeroUIWorkspaceSidebarContents idPrefix="mobile-" onToggleImmersive={onToggleImmersive} />
       </Sidebar.Mobile>
     </>
@@ -119,6 +130,7 @@ function HeroUIWorkspaceSidebarContents({
   idPrefix?: string;
   onToggleImmersive: () => void;
 }) {
+  const t = useTranslations("navigation");
   const { data: session } = useSession();
   const pathname = usePathname();
   const router = useRouter();
@@ -144,8 +156,8 @@ function HeroUIWorkspaceSidebarContents({
   const [taskCount, setTaskCount] = useState<number | null>(null);
 
   const isAdmin = session?.user?.role === "admin";
-  const userLabel = session?.user?.name || session?.user?.email || "User";
-  const userSubtitle = session?.user?.email || session?.user?.role || "Workspace member";
+  const userLabel = session?.user?.name || session?.user?.email || t("user");
+  const userSubtitle = session?.user?.email || session?.user?.role || t("workspaceMember");
   const userInitial = userLabel.trim().slice(0, 1).toUpperCase() || "U";
   const visibleWorkspaceNavigation = WORKSPACE_NAVIGATION.filter(
     (item) => !item.adminOnly || isAdmin,
@@ -206,31 +218,31 @@ function HeroUIWorkspaceSidebarContents({
     try {
       await renameConversation(conversationId, title);
     } catch (error) {
-      showError(error instanceof Error ? error.message : "Rename failed. Please try again.");
+      showError(error instanceof Error ? error.message : t("renameFailed"));
     }
   };
 
   const handleConversationAction = async (conversation: ConversationSummary, action: string) => {
     if (action === "rename") {
-      setDraftTitle(conversation.title || "Untitled");
+      setDraftTitle(conversation.title || t("untitled"));
       setEditingId(conversation.id);
       return;
     }
     if (action === "delete") {
       setDeleteError(null);
-      setDeleteTarget({ id: conversation.id, title: conversation.title || "Untitled" });
+      setDeleteTarget({ id: conversation.id, title: conversation.title || t("untitled") });
       return;
     }
     if (action === "move-root") {
       await moveConversation(conversation.id, null);
-      showSuccess("Moved to Chats");
+      showSuccess(t("movedChats"));
       return;
     }
     if (action.startsWith("move:")) {
       const folderId = action.slice("move:".length);
       await moveConversation(conversation.id, folderId);
       const folder = folders.find((item) => item.id === folderId);
-      showSuccess(`Moved to ${folder?.name || "folder"}`);
+      showSuccess(t("movedFolder", { name: folder?.name || t("folder") }));
     }
   };
 
@@ -242,7 +254,7 @@ function HeroUIWorkspaceSidebarContents({
       await deleteConversation(deleteTarget.id);
       setDeleteTarget(null);
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Delete failed. Please try again.");
+      setDeleteError(error instanceof Error ? error.message : t("deleteFailed"));
     } finally {
       setDeleting(false);
     }
@@ -255,12 +267,12 @@ function HeroUIWorkspaceSidebarContents({
           <CocolaCoreLogo className="size-10 shrink-0" />
           <div className="flex min-w-0 flex-1 flex-col" data-sidebar="label">
             <span className="text-foreground text-sm font-semibold leading-tight">cocola</span>
-            <span className="text-muted text-xs leading-tight">agent workspace</span>
+            <span className="text-muted text-xs leading-tight">{t("agentWorkspace")}</span>
           </div>
           <Tooltip delay={0}>
             <Button
               isIconOnly
-              aria-label="Enter immersive mode"
+              aria-label={t("enterImmersive")}
               aria-pressed="false"
               className="shrink-0"
               size="sm"
@@ -269,7 +281,7 @@ function HeroUIWorkspaceSidebarContents({
             >
               <ChevronsLeft className="size-4" />
             </Button>
-            <Tooltip.Content>Enter immersive mode</Tooltip.Content>
+            <Tooltip.Content>{t("enterImmersive")}</Tooltip.Content>
           </Tooltip>
         </div>
       </Sidebar.Header>
@@ -283,16 +295,16 @@ function HeroUIWorkspaceSidebarContents({
             <span className="cocola-web-new-chat-icon grid size-7 shrink-0 place-items-center rounded-xl">
               <Plus className="size-4" />
             </span>
-            <span className="text-sm font-semibold">New Chat</span>
+            <span className="text-sm font-semibold">{t("newChat")}</span>
           </Button>
         </Sidebar.Group>
 
         <Sidebar.Group>
-          <Sidebar.Menu aria-label="Workspace tools">
+          <Sidebar.Menu aria-label={t("workspaceTools")}>
             {visibleWorkspaceNavigation.map((item) => (
               <WorkspaceSidebarItem
                 key={item.href}
-                id={`${idPrefix}${item.label.toLowerCase()}`}
+                id={`${idPrefix}${item.labelKey}`}
                 item={item}
                 isCurrent={pathname === item.href || pathname.startsWith(`${item.href}/`)}
                 taskCount={item.href === "/tasks" ? taskCount : null}
@@ -303,13 +315,13 @@ function HeroUIWorkspaceSidebarContents({
         </Sidebar.Group>
 
         <Sidebar.Group>
-          <Sidebar.GroupLabel>Workspace</Sidebar.GroupLabel>
-          <Sidebar.Menu aria-label="Workspace resources">
+          <Sidebar.GroupLabel>{t("workspaceGroup")}</Sidebar.GroupLabel>
+          <Sidebar.Menu aria-label={t("workspaceResources")}>
             {WORKSPACE_RESOURCES.map((item) => (
               <WorkspaceSidebarItem
                 key={item.href}
                 createHref={item.createHref}
-                id={`${idPrefix}${item.label.toLowerCase()}`}
+                id={`${idPrefix}${item.labelKey}`}
                 item={item}
                 isCurrent={pathname === item.href || pathname.startsWith(`${item.href}/`)}
                 onCreate={() => navigate(item.createHref)}
@@ -320,8 +332,8 @@ function HeroUIWorkspaceSidebarContents({
         </Sidebar.Group>
 
         <Sidebar.Group>
-          <Sidebar.GroupLabel>Chats</Sidebar.GroupLabel>
-          <Sidebar.Menu aria-label="Recent chats">
+          <Sidebar.GroupLabel>{t("chats")}</Sidebar.GroupLabel>
+          <Sidebar.Menu aria-label={t("recentChats")}>
             {recentConversations.map((conversation) => (
               <ConversationSidebarItem
                 key={conversation.id}
@@ -368,13 +380,8 @@ function HeroUIWorkspaceSidebarContents({
 
       <DeleteConfirmDialog
         open={deleteTarget !== null}
-        title="Delete conversation?"
-        description={
-          <>
-            <span className="font-medium text-foreground">{deleteTarget?.title}</span> will be
-            permanently deleted. Stop its running answer first.
-          </>
-        }
+        title={t("deleteConversationTitle")}
+        description={t("deleteConversationDescription", { title: deleteTarget?.title ?? "" })}
         busy={deleting}
         error={deleteError}
         onOpenChange={(open) => {
@@ -405,19 +412,21 @@ function WorkspaceSidebarItem({
   onPress: () => void;
   taskCount?: number | null;
 }) {
+  const t = useTranslations("navigation");
   const Icon = item.icon;
+  const label = t(item.labelKey);
   return (
     <Sidebar.MenuItem
       className="cocola-sidebar-tab"
       id={id}
       isCurrent={isCurrent}
-      textValue={item.label}
+      textValue={label}
       onAction={onPress}
     >
       <Sidebar.MenuIcon className="cocola-sidebar-tab-icon">
         <Icon className={`size-4 ${item.iconClassName}`} />
       </Sidebar.MenuIcon>
-      <Sidebar.MenuLabel>{item.label}</Sidebar.MenuLabel>
+      <Sidebar.MenuLabel>{label}</Sidebar.MenuLabel>
       {taskCount !== null && taskCount !== undefined ? (
         <span
           className="bg-default text-muted ml-auto rounded-full px-2 py-0.5 text-[11px]"
@@ -430,7 +439,7 @@ function WorkspaceSidebarItem({
         <Sidebar.MenuActions className="cocola-sidebar-create-actions">
           <Button
             isIconOnly
-            aria-label={`Create ${item.label.toLowerCase()}`}
+            aria-label={t("createItem", { name: label })}
             className="size-7 min-h-7 min-w-7 p-0"
             variant="ghost"
             onPress={onCreate}
@@ -474,7 +483,8 @@ function ConversationSidebarItem({
   running: boolean;
   unread: boolean;
 }) {
-  const title = conversation.title || "Untitled";
+  const t = useTranslations("navigation");
+  const title = conversation.title || t("untitled");
   return (
     <Sidebar.MenuItem
       id={`${idPrefix}conversation-${conversation.id}`}
@@ -489,7 +499,7 @@ function ConversationSidebarItem({
         {editing ? (
           <input
             autoFocus
-            aria-label="Conversation title"
+            aria-label={t("conversationTitle")}
             className="cocola-sidebar-rename-input border-separator bg-surface h-6 w-full min-w-0 rounded-md border px-1.5 py-0 text-sm leading-5 outline-none focus:border-[var(--focus)]"
             value={draftTitle}
             onBlur={onCommitRename}
@@ -513,57 +523,57 @@ function ConversationSidebarItem({
         <Sidebar.MenuActions className="flex items-center gap-0.5">
           {running ? (
             <ArrowRotateRight
-              aria-label="Agent is answering"
+              aria-label={t("agentAnswering")}
               className="text-accent size-3.5 animate-spin"
             />
           ) : requiresUserAction ? (
             <Tooltip delay={0}>
               <span
-                aria-label="Waiting for your confirmation"
+                aria-label={t("waitingConfirmation")}
                 className="text-warning grid size-5 place-items-center"
                 role="img"
               >
                 <CircleQuestionFill className="size-3.5" />
               </span>
-              <Tooltip.Content>Waiting for your confirmation</Tooltip.Content>
+              <Tooltip.Content>{t("waitingConfirmation")}</Tooltip.Content>
             </Tooltip>
           ) : null}
           {unread && !running && !requiresUserAction ? (
-            <CircleCheck aria-label="Answer completed" className="size-3.5 text-emerald-500" />
+            <CircleCheck aria-label={t("answerCompleted")} className="size-3.5 text-emerald-500" />
           ) : null}
           <Dropdown>
             <Dropdown.Trigger
-              aria-label={`Actions for ${title}`}
+              aria-label={t("actionsFor", { title })}
               className="text-muted hover:text-foreground grid size-7 place-items-center rounded-lg"
             >
               <Ellipsis className="size-3.5" />
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu
-                aria-label={`Actions for ${title}`}
+                aria-label={t("actionsFor", { title })}
                 onAction={(key) => onAction(String(key))}
               >
                 <Dropdown.Section>
-                  <Dropdown.Item id="rename" textValue="Rename">
+                  <Dropdown.Item id="rename" textValue={t("rename")}>
                     <Pencil className="text-muted size-4 shrink-0" />
-                    <span data-slot="label">Rename</span>
+                    <span data-slot="label">{t("rename")}</span>
                   </Dropdown.Item>
                   {conversation.chat_type !== "scheduled_task" && !conversation.project_id ? (
                     <Dropdown.SubmenuTrigger>
-                      <Dropdown.Item id="move" textValue="Move to folder">
+                      <Dropdown.Item id="move" textValue={t("moveFolder")}>
                         <FolderOpen className="text-muted size-4 shrink-0" />
-                        <span data-slot="label">Move to folder</span>
+                        <span data-slot="label">{t("moveFolder")}</span>
                         <Dropdown.SubmenuIndicator />
                       </Dropdown.Item>
                       <Dropdown.Popover placement="right top">
                         <Dropdown.Menu
-                          aria-label={`Move ${title} to folder`}
+                          aria-label={t("moveToFolder", { title })}
                           onAction={(key) => onAction(String(key))}
                         >
-                          <Dropdown.Item id="move-root" textValue="No folder">
+                          <Dropdown.Item id="move-root" textValue={t("noFolder")}>
                             <Folder className="text-muted size-4 shrink-0" />
                             <span className="min-w-0 flex-1 truncate" data-slot="label">
-                              No folder
+                              {t("noFolder")}
                             </span>
                             {!conversation.folder_id ? (
                               <Check className="text-accent size-4 shrink-0" />
@@ -590,9 +600,9 @@ function ConversationSidebarItem({
                   ) : null}
                 </Dropdown.Section>
                 <Dropdown.Section className="border-separator mt-1 border-t pt-1">
-                  <Dropdown.Item id="delete" textValue="Delete" variant="danger">
+                  <Dropdown.Item id="delete" textValue={t("delete")} variant="danger">
                     <TrashBin className="size-4 shrink-0" />
-                    <span data-slot="label">Delete</span>
+                    <span data-slot="label">{t("delete")}</span>
                   </Dropdown.Item>
                 </Dropdown.Section>
               </Dropdown.Menu>

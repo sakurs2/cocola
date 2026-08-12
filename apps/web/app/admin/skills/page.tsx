@@ -23,6 +23,7 @@ import {
   TextField,
 } from "@heroui/react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import {
   Blocks,
   Bot,
@@ -125,6 +126,8 @@ function glyphFor(id: string) {
 }
 
 export default function AdminSkillsPage() {
+  const t = useTranslations("admin.skillsPage");
+  const skillsT = useTranslations("skills");
   const [skills, setSkills] = useState<Skill[]>([]);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
@@ -335,12 +338,12 @@ export default function AdminSkillsPage() {
     <AdminPage>
       <AdminPageHeader
         icon={<SkillsPageIcon className="size-5" />}
-        title="Skills"
-        description="Publish shared skills for every user sandbox."
+        title={t("title")}
+        description={t("description")}
         actions={
           <Button isDisabled={working} onPress={() => uploadInputRef.current?.click()}>
             <Upload className="size-4" />
-            Upload zip
+            {skillsT("uploadZip")}
           </Button>
         }
       />
@@ -356,20 +359,20 @@ export default function AdminSkillsPage() {
 
       <Card className="p-5">
         <Card.Header className="p-0">
-          <Card.Title>Import from Git</Card.Title>
-          <Card.Description>Scan a repository for SKILL.md packages.</Card.Description>
+          <Card.Title>{skillsT("importGit")}</Card.Title>
+          <Card.Description>{skillsT("importGitDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="mt-5 grid gap-3 p-0 lg:grid-cols-[minmax(0,1fr)_160px_180px_auto] lg:items-end">
           <TextField value={gitRepo} variant="secondary" onChange={setGitRepo}>
-            <Label>Repository</Label>
-            <Input placeholder="owner/repository or Git URL" />
+            <Label>{skillsT("repository")}</Label>
+            <Input placeholder={skillsT("repositoryPlaceholder")} />
           </TextField>
           <TextField value={gitRef} variant="secondary" onChange={setGitRef}>
-            <Label>Ref</Label>
+            <Label>{skillsT("ref")}</Label>
             <Input placeholder="main" />
           </TextField>
           <TextField value={gitPath} variant="secondary" onChange={setGitPath}>
-            <Label>Path</Label>
+            <Label>{skillsT("path")}</Label>
             <Input placeholder="skills/example" />
           </TextField>
           <Button
@@ -378,7 +381,7 @@ export default function AdminSkillsPage() {
             onPress={() => void scanGit()}
           >
             {gitScanning ? <LoaderCircle className="size-4 animate-spin" /> : null}
-            {gitScanning ? "Scanning…" : "Scan repository"}
+            {gitScanning ? skillsT("scanning") : skillsT("scanRepository")}
           </Button>
         </Card.Content>
       </Card>
@@ -388,8 +391,10 @@ export default function AdminSkillsPage() {
           <Card.Header className="flex-row flex-wrap items-center justify-between gap-3 p-0">
             <div className="flex items-center gap-2">
               <FileArchive className="size-4 text-muted" />
-              <div className="text-sm font-semibold">Archive candidates</div>
-              <div className="text-xs text-muted">{validCandidates.length} valid</div>
+              <div className="text-sm font-semibold">{t("candidateTitle")}</div>
+              <div className="text-xs text-muted">
+                {t("valid", { count: validCandidates.length })}
+              </div>
             </div>
             <div className="flex gap-2">
               <Button
@@ -403,14 +408,14 @@ export default function AdminSkillsPage() {
                   )
                 }
               >
-                {allValidSelected ? "Clear all" : "Select all"}
+                {allValidSelected ? skillsT("clearAll") : skillsT("selectAll")}
               </Button>
               <Button
                 size="sm"
                 isDisabled={working || !Object.values(selected).some(Boolean)}
                 onPress={() => void importSelected()}
               >
-                Import selected
+                {skillsT("importSelected")}
               </Button>
             </div>
           </Card.Header>
@@ -442,7 +447,7 @@ export default function AdminSkillsPage() {
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
                       <span>{candidate.path || "."}</span>
-                      <span>{candidate.file_count ?? 0} files</span>
+                      <span>{skillsT("files", { count: candidate.file_count ?? 0 })}</span>
                     </div>
                   </div>
                 </label>
@@ -454,7 +459,7 @@ export default function AdminSkillsPage() {
 
       <div className="flex items-center justify-between gap-3">
         <SearchField
-          aria-label="Search skills"
+          aria-label={skillsT("search")}
           className="w-full max-w-sm"
           value={search}
           onChange={(value) => {
@@ -464,13 +469,13 @@ export default function AdminSkillsPage() {
         >
           <SearchField.Group>
             <SearchField.SearchIcon />
-            <SearchField.Input placeholder="Search skills by name" />
+            <SearchField.Input placeholder={skillsT("search")} />
             <SearchField.ClearButton />
           </SearchField.Group>
         </SearchField>
         {searching ? (
           <span className="text-xs text-muted">
-            {visibleSkills.length} match{visibleSkills.length === 1 ? "" : "es"}
+            {t("matches", { count: visibleSkills.length })}
           </span>
         ) : null}
       </div>
@@ -479,7 +484,7 @@ export default function AdminSkillsPage() {
         {loading ? (
           <div className="col-span-full flex h-28 items-center justify-center text-muted">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
-            Loading skills
+            {t("loading")}
           </div>
         ) : visibleSkills.length ? (
           visibleSkills.map((skill) => (
@@ -497,7 +502,7 @@ export default function AdminSkillsPage() {
           ))
         ) : (
           <Card className="border-separator col-span-full border border-dashed p-8 text-center text-sm text-muted">
-            {searching ? `No skills match "${search.trim()}".` : "No skills imported yet."}
+            {searching ? t("noMatch", { query: search.trim() }) : t("empty")}
           </Card>
         )}
       </section>
@@ -508,18 +513,20 @@ export default function AdminSkillsPage() {
           count={skills.length}
           total={total}
           loading={loading}
-          label="skills"
+          label={t("pagination")}
           onPageChange={setPage}
         />
       )}
       <AdminConfirmDialog
         busy={deleteTarget !== null && working && actionSkillId === deleteTarget.id}
-        confirmLabel="Remove Skill"
-        description={`${deleteTarget ? displaySkillName(deleteTarget) : "This Skill"} will be permanently removed from the shared catalog.`}
+        confirmLabel={skillsT("remove")}
+        description={t("removeDescription", {
+          name: deleteTarget ? displaySkillName(deleteTarget) : t("thisSkill"),
+        })}
         destructive
         error={error}
         open={deleteTarget !== null}
-        title="Remove this Skill?"
+        title={skillsT("removeTitle")}
         onConfirm={() => {
           if (deleteTarget) void deleteSkill(deleteTarget);
         }}
@@ -547,6 +554,8 @@ function SkillCard({
   onDelete: () => void;
   working: boolean;
 }) {
+  const t = useTranslations("admin.skillsPage");
+  const skillsT = useTranslations("skills");
   const { Icon, style } = glyphFor(skill.id);
   return (
     <Card className="admin-skill-card h-full min-h-64 p-5">
@@ -558,7 +567,7 @@ function SkillCard({
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{displaySkillName(skill)}</div>
             <p className="mt-1 line-clamp-2 min-h-10 text-sm text-muted">
-              {skill.description || "No description"}
+              {skill.description || skillsT("noDescription")}
             </p>
           </div>
         </div>
@@ -567,13 +576,17 @@ function SkillCard({
             {skill.id}
           </Chip>
           <Chip size="sm" variant="soft">
-            {skill.source_type || "manual"}
+            {skill.source_type || t("manual")}
           </Chip>
         </div>
       </Link>
       <div className="mt-auto flex items-center justify-between gap-3 pt-4">
         <Switch
-          aria-label={`${skill.enabled ? "Disable" : "Enable"} ${displaySkillName(skill)}`}
+          aria-label={
+            skill.enabled
+              ? skillsT("disableAria", { name: displaySkillName(skill) })
+              : skillsT("enableAria", { name: displaySkillName(skill) })
+          }
           isDisabled={working}
           isSelected={skill.enabled}
           onChange={onToggle}
@@ -586,7 +599,7 @@ function SkillCard({
         </Switch>
         <Button size="sm" variant="danger-soft" isDisabled={working} onPress={onDelete}>
           <Trash2 className="size-4" />
-          Remove
+          {skillsT("remove")}
         </Button>
       </div>
     </Card>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   ArrowLeft,
   Check,
@@ -52,6 +53,7 @@ type Repository = {
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const t = useTranslations("projects.new");
   const { refreshProjects } = useCocola();
   const [connection, setConnection] = useState<Connection | null>(null);
   const [mode, setMode] = useState<Mode>("empty");
@@ -70,47 +72,50 @@ export default function NewProjectPage() {
   const loadConnection = useCallback(async () => {
     try {
       const response = await fetch("/api/connectors/github", { cache: "no-store" });
-      if (!response.ok) throw new Error("Could not check GitHub connection");
+      if (!response.ok) throw new Error(t("errors.connection"));
       setConnection((await response.json()) as Connection);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadConnection();
   }, [loadConnection]);
 
-  const loadRepositories = useCallback(async (cursor = "") => {
-    setBusy(true);
-    setError("");
-    try {
-      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-      const response = await fetch(`/api/scm/github/repositories${query}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Could not list installed repositories");
-      const page = (await response.json()) as {
-        repositories?: Repository[];
-        next_cursor?: string;
-      };
-      setRepositories((current) =>
-        cursor
-          ? [
-              ...current,
-              ...(page.repositories ?? []).filter(
-                (repository) => !current.some((item) => item.id === repository.id),
-              ),
-            ]
-          : (page.repositories ?? []),
-      );
-      setNextCursor(page.next_cursor ?? "");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const loadRepositories = useCallback(
+    async (cursor = "") => {
+      setBusy(true);
+      setError("");
+      try {
+        const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+        const response = await fetch(`/api/scm/github/repositories${query}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(t("errors.repositories"));
+        const page = (await response.json()) as {
+          repositories?: Repository[];
+          next_cursor?: string;
+        };
+        setRepositories((current) =>
+          cursor
+            ? [
+                ...current,
+                ...(page.repositories ?? []).filter(
+                  (repository) => !current.some((item) => item.id === repository.id),
+                ),
+              ]
+            : (page.repositories ?? []),
+        );
+        setNextCursor(page.next_cursor ?? "");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [t],
+  );
 
   useEffect(() => {
     if (mode === "github_import" && connection?.status === "ready") {
@@ -131,15 +136,15 @@ export default function NewProjectPage() {
   const submit = async () => {
     const projectName = name.trim() || selectedRepository?.name || "";
     if (!projectName) {
-      setError("Project name is required.");
+      setError(t("errors.projectName"));
       return;
     }
     if (mode === "github_create" && !repositoryName.trim()) {
-      setError("Repository name is required.");
+      setError(t("errors.repositoryName"));
       return;
     }
     if (mode === "github_import" && !selectedRepository) {
-      setError("Choose a repository to import.");
+      setError(t("errors.chooseRepository"));
       return;
     }
     setBusy(true);
@@ -179,7 +184,7 @@ export default function NewProjectPage() {
         error?: { message?: string };
       };
       if (!response.ok || !body.id) {
-        throw new Error(body.error?.message || "Could not create project");
+        throw new Error(body.error?.message || t("errors.create"));
       }
       createIntent.current = null;
       refreshProjects();
@@ -196,43 +201,45 @@ export default function NewProjectPage() {
   return (
     <WorkspacePageFrame>
       <header className="flex items-center gap-3">
-        <Button
-          isIconOnly
-          aria-label="Back to Projects"
-          variant="ghost"
-          onPress={() => router.back()}
-        >
+        <Button isIconOnly aria-label={t("back")} variant="ghost" onPress={() => router.back()}>
           <ArrowLeft className="size-4" />
         </Button>
         <span className="bg-accent-soft text-accent flex size-11 items-center justify-center rounded-2xl">
           <Plus className="size-5" />
         </span>
         <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.03em]">New Project</h1>
-          <p className="text-muted mt-1 text-sm">Choose a source and repository policy.</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em]">{t("title")}</h1>
+          <p className="text-muted mt-1 text-sm">{t("description")}</p>
         </div>
       </header>
 
       <ItemCardGroup className="cocola-web-item-grid" columns={3} layout="grid">
         <SourceCard
           active={mode === "empty"}
+          kind="empty"
           icon={FolderGit2}
-          title="Empty Project"
-          detail="Start from a clean local workspace."
+          title={t("sources.empty.title")}
+          detail={t("sources.empty.description")}
           onClick={() => setMode("empty")}
         />
         <SourceCard
           active={mode === "github_create"}
+          kind="github"
           icon={GitHubIcon}
-          title="Create on GitHub"
-          detail={githubReady ? `Connected as ${connection.external_login}` : "Connector required"}
+          title={t("sources.create.title")}
+          detail={
+            githubReady
+              ? t("sources.connected", { account: connection.external_login || "GitHub" })
+              : t("sources.connectorRequired")
+          }
           onClick={() => setMode("github_create")}
         />
         <SourceCard
           active={mode === "github_import"}
+          kind="import"
           icon={GitFork}
-          title="Import GitHub"
-          detail={githubReady ? "Choose an installed repository" : "Connector required"}
+          title={t("sources.import.title")}
+          detail={githubReady ? t("sources.import.description") : t("sources.connectorRequired")}
           onClick={() => setMode("github_import")}
         />
       </ItemCardGroup>
@@ -240,17 +247,14 @@ export default function NewProjectPage() {
       {mode !== "empty" && !githubReady ? (
         <Card className="border-warning/25 bg-warning/5 p-5">
           <Card.Header className="p-0">
-            <Card.Title>Connect your personal GitHub App first</Card.Title>
+            <Card.Title>{t("connect.title")}</Card.Title>
           </Card.Header>
           <Card.Content className="mt-2 p-0">
-            <p className="text-muted text-sm leading-6">
-              Empty Projects remain available without GitHub. GitHub create and import use your own
-              private App.
-            </p>
+            <p className="text-muted text-sm leading-6">{t("connect.description")}</p>
           </Card.Content>
           <Card.Footer className="mt-4 p-0">
             <Button variant="outline" onPress={() => router.push("/connectors")}>
-              Open Connectors
+              {t("connect.action")}
             </Button>
           </Card.Footer>
         </Card>
@@ -275,19 +279,19 @@ export default function NewProjectPage() {
       {(mode === "empty" || githubReady) && mode !== "github_import" ? (
         <Card className="p-5">
           <Card.Header className="p-0">
-            <Card.Title>Project details</Card.Title>
-            <Card.Description>Name and description can be changed later.</Card.Description>
+            <Card.Title>{t("details.title")}</Card.Title>
+            <Card.Description>{t("details.editable")}</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
             <ProjectField
-              label="Project name"
+              label={t("fields.projectName")}
               value={name}
               onChange={setName}
-              placeholder="My project"
+              placeholder={t("fields.projectNamePlaceholder")}
             />
             {mode === "github_create" ? (
               <ProjectField
-                label="Repository name"
+                label={t("fields.repositoryName")}
                 value={repositoryName}
                 onChange={(value) => {
                   setRepositoryName(value);
@@ -297,19 +301,19 @@ export default function NewProjectPage() {
               />
             ) : null}
             <ProjectField
-              label="Description"
+              label={t("fields.description")}
               value={description}
               onChange={setDescription}
-              placeholder="Optional"
+              placeholder={t("fields.optional")}
               wide
             />
             {mode === "github_create" ? (
               <ChoiceDropdown
-                label="Visibility"
-                value={visibility === "private" ? "Private (recommended)" : "Public"}
+                label={t("fields.visibility")}
+                value={visibility === "private" ? t("visibility.private") : t("visibility.public")}
                 options={[
-                  { id: "private", label: "Private (recommended)" },
-                  { id: "public", label: "Public" },
+                  { id: "private", label: t("visibility.private") },
+                  { id: "public", label: t("visibility.public") },
                 ]}
                 onChange={(value) => setVisibility(value as "private" | "public")}
               />
@@ -321,21 +325,21 @@ export default function NewProjectPage() {
       {mode === "github_import" && githubReady ? (
         <Card className="p-5">
           <Card.Header className="p-0">
-            <Card.Title>Project details</Card.Title>
-            <Card.Description>Name and describe the imported workspace.</Card.Description>
+            <Card.Title>{t("details.title")}</Card.Title>
+            <Card.Description>{t("details.imported")}</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
             <ProjectField
-              label="Project name"
+              label={t("fields.projectName")}
               value={name}
               onChange={setName}
-              placeholder={selectedRepository?.name || "Project name"}
+              placeholder={selectedRepository?.name || t("fields.projectName")}
             />
             <ProjectField
-              label="Description"
+              label={t("fields.description")}
               value={description}
               onChange={setDescription}
-              placeholder="Optional"
+              placeholder={t("fields.optional")}
             />
           </Card.Content>
         </Card>
@@ -352,11 +356,11 @@ export default function NewProjectPage() {
           </div>
           <div className="flex shrink-0 justify-end gap-2">
             <Button variant="outline" onPress={() => router.back()}>
-              Cancel
+              {t("actions.cancel")}
             </Button>
             <Button isDisabled={busy} isPending={busy} onPress={() => void submit()}>
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-              Create project
+              {t("actions.create")}
             </Button>
           </div>
         </div>
@@ -367,12 +371,14 @@ export default function NewProjectPage() {
 
 function SourceCard({
   active,
+  kind,
   icon: Icon,
   title,
   detail,
   onClick,
 }: {
   active: boolean;
+  kind: "empty" | "github" | "import";
   icon: typeof GitFork;
   title: string;
   detail: string;
@@ -386,9 +392,9 @@ function SourceCard({
       <PressableFeedback.Highlight />
       <ItemCard.Icon
         className={
-          title === "Empty Project"
+          kind === "empty"
             ? "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-300"
-            : title === "Create on GitHub"
+            : kind === "github"
               ? "bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"
               : "bg-indigo-100 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300"
         }
@@ -425,22 +431,23 @@ function RepositoryPicker({
   busy: boolean;
   onLoadMore: () => void;
 }) {
+  const t = useTranslations("projects.new.repositories");
   return (
     <Card className="p-5">
       <Card.Header className="flex-row items-start justify-between gap-3 p-0">
         <span>
-          <Card.Title>GitHub repositories</Card.Title>
-          <Card.Description>Choose an installed repository to import.</Card.Description>
+          <Card.Title>{t("title")}</Card.Title>
+          <Card.Description>{t("description")}</Card.Description>
         </span>
         <Chip color="success" size="sm" variant="soft">
-          Ready
+          {t("ready")}
         </Chip>
       </Card.Header>
       <Card.Content className="mt-5 p-0">
-        <SearchField aria-label="Search repositories" value={filter} onChange={onFilter}>
+        <SearchField aria-label={t("search")} value={filter} onChange={onFilter}>
           <SearchField.Group>
             <SearchField.SearchIcon />
-            <SearchField.Input placeholder="Search repositories" />
+            <SearchField.Input placeholder={t("search")} />
             <SearchField.ClearButton />
           </SearchField.Group>
         </SearchField>
@@ -478,7 +485,7 @@ function RepositoryPicker({
             onPress={onLoadMore}
           >
             <RefreshCw className={`size-3.5 ${busy ? "animate-spin" : ""}`} />
-            Load more repositories
+            {t("loadMore")}
           </Button>
         ) : null}
       </Card.Content>

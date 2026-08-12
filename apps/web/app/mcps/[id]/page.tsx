@@ -4,6 +4,7 @@ import { Button, Card, Chip } from "@heroui/react";
 import { ArrowLeft, LoaderCircle, Plug } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 type MCPServer = {
   id: string;
@@ -17,6 +18,7 @@ type MCPServer = {
 };
 
 export default function MCPDetailPage() {
+  const t = useTranslations("connectors.mcp.detail");
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [mcp, setMcp] = useState<MCPServer | null>(null);
@@ -31,7 +33,7 @@ export default function MCPDetailPage() {
         if (!response.ok) throw new Error(await readError(response));
         const data = (await response.json()) as { mcps?: MCPServer[] };
         const found = (data.mcps || []).find((item) => item.id === id);
-        if (!found) throw new Error("MCP not found");
+        if (!found) throw new Error(t("notFound"));
         if (!controller.signal.aborted) setMcp(found);
       } catch (cause) {
         if (!controller.signal.aborted)
@@ -39,7 +41,7 @@ export default function MCPDetailPage() {
       }
     })();
     return () => controller.abort();
-  }, [id]);
+  }, [id, t]);
 
   const toggle = async () => {
     if (!mcp) return;
@@ -74,7 +76,7 @@ export default function MCPDetailPage() {
       <header className="flex flex-wrap items-center gap-3">
         <Button
           isIconOnly
-          aria-label="Back to MCP"
+          aria-label={t("back")}
           variant="ghost"
           onPress={() => router.push("/mcps")}
         >
@@ -100,10 +102,10 @@ export default function MCPDetailPage() {
               {mcp.transport}
             </Chip>
             <Chip color={mcp.effective_enabled ? "success" : "warning"} size="sm" variant="soft">
-              {mcp.effective_enabled ? "Enabled" : "Disabled"}
+              {mcp.effective_enabled ? t("enabled") : t("disabled")}
             </Chip>
             <Chip size="sm" variant="soft">
-              Default {mcp.default_enabled ? "on" : "off"}
+              {mcp.default_enabled ? t("defaultOn") : t("defaultOff")}
             </Chip>
             <Button
               className="ml-auto"
@@ -111,38 +113,34 @@ export default function MCPDetailPage() {
               variant={mcp.effective_enabled ? "outline" : "primary"}
               onPress={() => void toggle()}
             >
-              {mcp.effective_enabled ? "Disable for sessions" : "Enable for sessions"}
+              {mcp.effective_enabled ? t("disable") : t("enable")}
             </Button>
           </div>
           <Card className="p-5">
             <Card.Header className="p-0">
-              <Card.Title>Connection details</Card.Title>
-              <Card.Description>
-                Published by an administrator and available to this account.
-              </Card.Description>
+              <Card.Title>{t("connection")}</Card.Title>
+              <Card.Description>{t("connectionDescription")}</Card.Description>
             </Card.Header>
             <Card.Content className="mt-5 grid gap-3 p-0 sm:grid-cols-2">
-              <Info label="Transport" value={mcp.transport} />
+              <Info label={t("transport")} value={mcp.transport} />
               <Info
-                label="Effective state"
-                value={mcp.effective_enabled ? "Enabled" : "Disabled"}
+                label={t("effective")}
+                value={mcp.effective_enabled ? t("enabled") : t("disabled")}
               />
               <Info
-                label={mcp.transport.toLowerCase() === "stdio" ? "Command" : "URL"}
+                label={mcp.transport.toLowerCase() === "stdio" ? t("command") : "URL"}
                 value={
                   mcp.transport.toLowerCase() === "stdio" ? mcp.command || "—" : mcp.url_hint || "—"
                 }
               />
-              <Info label="Default state" value={mcp.default_enabled ? "On" : "Off"} />
+              <Info label={t("defaultState")} value={mcp.default_enabled ? t("on") : t("off")} />
             </Card.Content>
           </Card>
           <Card className="p-5">
             <Card.Header className="p-0">
-              <Card.Title>Session behavior</Card.Title>
+              <Card.Title>{t("behavior")}</Card.Title>
               <Card.Description>
-                {mcp.effective_enabled
-                  ? "New Agent sessions can discover and call this server."
-                  : "The server remains published but is omitted from new sessions."}
+                {mcp.effective_enabled ? t("enabledBehavior") : t("disabledBehavior")}
               </Card.Description>
             </Card.Header>
             <Card.Content className="mt-5 p-0">

@@ -122,5 +122,5 @@ test("unsupported Markdown syntax falls back to source mode", () => {
   }
   assert.match(editorSource, /mode === "source"/);
   assert.match(editorSource, /<textarea/);
-  assert.match(editorSource, /cannot safely preserve/);
+  assert.match(editorSource, /t\("sourceWarning"\)/);
 });

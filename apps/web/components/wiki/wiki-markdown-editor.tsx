@@ -9,6 +9,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import { Markdown } from "@tiptap/markdown";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import { useTranslations } from "next-intl";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold,
@@ -32,35 +33,12 @@ import {
   Underline,
   Undo2,
 } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import type { Editor } from "@tiptap/core";
 import { TextInputDialog } from "@/components/ui/action-dialog";
 import { cn } from "@/lib/utils";
 import { isLosslessMarkdownRoundTrip } from "@/lib/wiki-markdown-compat.mjs";
 import styles from "./wiki-markdown-editor.module.css";
-
-const editorExtensions = [
-  StarterKit.configure({
-    heading: { levels: [1, 2, 3] },
-    link: {
-      autolink: true,
-      defaultProtocol: "https",
-      openOnClick: false,
-    },
-  }),
-  Highlight,
-  TableKit,
-  TaskList,
-  TaskItem.configure({ nested: true }),
-  Image.configure({ allowBase64: false }),
-  Placeholder.configure({ placeholder: "Start writing your page…" }),
-  Markdown.configure({
-    markedOptions: {
-      breaks: false,
-      gfm: true,
-    },
-  }),
-];
 
 export function WikiMarkdownEditor({
   value,
@@ -71,9 +49,26 @@ export function WikiMarkdownEditor({
   readOnly?: boolean;
   onChange: (markdown: string) => void;
 }) {
+  const t = useTranslations("wiki.editor");
   const appliedValue = useRef<string | null>(null);
   const onChangeRef = useRef(onChange);
   const [mode, setMode] = useState<"checking" | "rich" | "source">("checking");
+  const editorExtensions = useMemo(
+    () => [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        link: { autolink: true, defaultProtocol: "https", openOnClick: false },
+      }),
+      Highlight,
+      TableKit,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Image.configure({ allowBase64: false }),
+      Placeholder.configure({ placeholder: t("placeholder") }),
+      Markdown.configure({ markedOptions: { breaks: false, gfm: true } }),
+    ],
+    [t],
+  );
   onChangeRef.current = onChange;
 
   const editor = useEditor({
@@ -84,7 +79,7 @@ export function WikiMarkdownEditor({
     editable: !readOnly,
     editorProps: {
       attributes: {
-        "aria-label": "Markdown page editor",
+        "aria-label": t("richAria"),
         class: styles.proseMirror ?? "",
         spellcheck: "true",
       },
@@ -120,11 +115,10 @@ export function WikiMarkdownEditor({
     return (
       <div className={styles.editorShell}>
         <div className={styles.sourceWarning} role="status">
-          This page uses Markdown syntax that the rich-text editor cannot safely preserve. Edit the
-          source directly to keep all content intact.
+          {t("sourceWarning")}
         </div>
         <textarea
-          aria-label="Markdown source editor"
+          aria-label={t("sourceAria")}
           className={styles.sourceEditor}
           value={value}
           readOnly={readOnly}
@@ -143,13 +137,14 @@ export function WikiMarkdownEditor({
           <EditorContent editor={editor} className={styles.editorContent} />
         </>
       ) : (
-        <div className={styles.editorChecking}>Checking Markdown compatibility…</div>
+        <div className={styles.editorChecking}>{t("checking")}</div>
       )}
     </div>
   );
 }
 
 function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean }) {
+  const t = useTranslations("wiki.editor");
   const [urlDialog, setURLDialog] = useState<{
     kind: "link" | "image";
     initialValue: string;
@@ -199,9 +194,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
         current
           ? {
               ...current,
-              error: image
-                ? "Use an http(s) or site-relative image URL."
-                : "Use an http(s), mailto, tel, or site-relative URL.",
+              error: image ? t("url.imageError") : t("url.linkError"),
             }
           : null,
       );
@@ -217,10 +210,10 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
 
   return (
     <>
-      <div className={styles.toolbar} role="toolbar" aria-label="Page formatting">
+      <div className={styles.toolbar} role="toolbar" aria-label={t("toolbar")}>
         <ToolbarGroup>
           <ToolbarButton
-            label="Bold (Cmd+B)"
+            label={t("buttons.bold")}
             active={state.bold}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleBold().run()}
@@ -228,7 +221,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Bold />
           </ToolbarButton>
           <ToolbarButton
-            label="Italic (Cmd+I)"
+            label={t("buttons.italic")}
             active={state.italic}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleItalic().run()}
@@ -236,7 +229,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Italic />
           </ToolbarButton>
           <ToolbarButton
-            label="Underline (Cmd+U)"
+            label={t("buttons.underline")}
             active={state.underline}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleUnderline().run()}
@@ -244,7 +237,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Underline />
           </ToolbarButton>
           <ToolbarButton
-            label="Strikethrough"
+            label={t("buttons.strikethrough")}
             active={state.strike}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleStrike().run()}
@@ -252,7 +245,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Strikethrough />
           </ToolbarButton>
           <ToolbarButton
-            label="Highlight"
+            label={t("buttons.highlight")}
             active={state.highlight}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleHighlight().run()}
@@ -260,7 +253,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Highlighter />
           </ToolbarButton>
           <ToolbarButton
-            label="Inline code"
+            label={t("buttons.inlineCode")}
             active={state.code}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleCode().run()}
@@ -273,7 +266,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
 
         <ToolbarGroup>
           <ToolbarButton
-            label="Heading 1"
+            label={t("buttons.heading1")}
             active={state.heading1}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
@@ -281,7 +274,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Heading1 />
           </ToolbarButton>
           <ToolbarButton
-            label="Heading 2"
+            label={t("buttons.heading2")}
             active={state.heading2}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
@@ -289,7 +282,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Heading2 />
           </ToolbarButton>
           <ToolbarButton
-            label="Heading 3"
+            label={t("buttons.heading3")}
             active={state.heading3}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
@@ -302,7 +295,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
 
         <ToolbarGroup>
           <ToolbarButton
-            label="Bullet list"
+            label={t("buttons.bulletList")}
             active={state.bulletList}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleBulletList().run()}
@@ -310,7 +303,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <List />
           </ToolbarButton>
           <ToolbarButton
-            label="Ordered list"
+            label={t("buttons.orderedList")}
             active={state.orderedList}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleOrderedList().run()}
@@ -318,7 +311,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <ListOrdered />
           </ToolbarButton>
           <ToolbarButton
-            label="Task list"
+            label={t("buttons.taskList")}
             active={state.taskList}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleTaskList().run()}
@@ -326,7 +319,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <ListChecks />
           </ToolbarButton>
           <ToolbarButton
-            label="Blockquote"
+            label={t("buttons.blockquote")}
             active={state.blockquote}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleBlockquote().run()}
@@ -334,7 +327,7 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
             <Quote />
           </ToolbarButton>
           <ToolbarButton
-            label="Code block"
+            label={t("buttons.codeBlock")}
             active={state.codeBlock}
             disabled={readOnly}
             onClick={() => editor.chain().focus().toggleCodeBlock().run()}
@@ -347,25 +340,25 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
 
         <ToolbarGroup>
           <ToolbarButton
-            label="Insert or edit link"
+            label={t("buttons.link")}
             active={state.link}
             disabled={readOnly}
             onClick={openLinkDialog}
           >
             <Link2 />
           </ToolbarButton>
-          <ToolbarButton label="Insert image by URL" disabled={readOnly} onClick={openImageDialog}>
+          <ToolbarButton label={t("buttons.image")} disabled={readOnly} onClick={openImageDialog}>
             <ImageIcon />
           </ToolbarButton>
           <ToolbarButton
-            label="Horizontal rule"
+            label={t("buttons.rule")}
             disabled={readOnly}
             onClick={() => editor.chain().focus().setHorizontalRule().run()}
           >
             <Minus />
           </ToolbarButton>
           <ToolbarButton
-            label="Clear formatting"
+            label={t("buttons.clear")}
             disabled={readOnly}
             onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
           >
@@ -377,14 +370,14 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
 
         <ToolbarGroup>
           <ToolbarButton
-            label="Undo (Cmd+Z)"
+            label={t("buttons.undo")}
             disabled={readOnly || !state.canUndo}
             onClick={() => editor.chain().focus().undo().run()}
           >
             <Undo2 />
           </ToolbarButton>
           <ToolbarButton
-            label="Redo (Cmd+Shift+Z)"
+            label={t("buttons.redo")}
             disabled={readOnly || !state.canRedo}
             onClick={() => editor.chain().focus().redo().run()}
           >
@@ -395,20 +388,18 @@ function EditorToolbar({ editor, readOnly }: { editor: Editor; readOnly: boolean
 
       <TextInputDialog
         open={urlDialog !== null}
-        title={urlDialog?.kind === "image" ? "Insert image" : "Add link"}
+        title={urlDialog?.kind === "image" ? t("url.imageTitle") : t("url.linkTitle")}
         description={
-          urlDialog?.kind === "image"
-            ? "Add an image using a secure remote or site-relative URL."
-            : "Link the selected text to a web page, email address, phone number, or Wiki URL."
+          urlDialog?.kind === "image" ? t("url.imageDescription") : t("url.linkDescription")
         }
-        label={urlDialog?.kind === "image" ? "Image URL" : "Link URL"}
+        label={urlDialog?.kind === "image" ? t("url.imageLabel") : t("url.linkLabel")}
         initialValue={urlDialog?.initialValue ?? ""}
         placeholder={
           urlDialog?.kind === "image" ? "https://example.com/image.png" : "https://example.com"
         }
-        submitLabel={urlDialog?.kind === "image" ? "Insert image" : "Apply link"}
+        submitLabel={urlDialog?.kind === "image" ? t("url.insertImage") : t("url.applyLink")}
         secondaryLabel={
-          urlDialog?.kind === "link" && urlDialog.initialValue ? "Remove link" : undefined
+          urlDialog?.kind === "link" && urlDialog.initialValue ? t("url.removeLink") : undefined
         }
         error={urlDialog?.error}
         icon={urlDialog?.kind === "image" ? ImageIcon : Link2}

@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { ArrowRight } from "lucide-react";
 import { Card, ScrollShadow } from "@heroui/react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import {
   ADMIN_GROUPS,
   getAdminSection,
@@ -11,17 +12,20 @@ import {
 } from "@/components/admin/admin-navigation";
 
 export default function AdminPage() {
+  const t = useTranslations("admin");
   return (
     <ScrollShadow hideScrollBar className="h-full overflow-y-auto">
       <main className="mx-auto w-full max-w-[100rem] px-4 py-5 sm:px-6 sm:py-6">
         <div className="grid gap-4 xl:grid-cols-2">
           {ADMIN_GROUPS.map((group, groupIndex) => (
             <section
-              key={group.label}
+              key={group.id}
               className="admin-overview-group bg-surface-secondary rounded-3xl p-3 sm:p-4"
               style={{ "--overview-delay": `${Math.min(groupIndex * 35, 140)}ms` } as CSSProperties}
             >
-              <h1 className="text-foreground mb-3 px-1 text-sm font-semibold">{group.label}</h1>
+              <h1 className="text-foreground mb-3 px-1 text-sm font-semibold">
+                {t(`groups.${group.id}`)}
+              </h1>
               <div className="grid gap-3 sm:grid-cols-2">
                 {group.sectionIds.map((sectionId) => {
                   const section = getAdminSection(sectionId);
@@ -40,13 +44,13 @@ export default function AdminPage() {
                             <Icon className="size-5" />
                           </span>
                           <span className="text-foreground text-base font-semibold">
-                            {section.label}
+                            {t(`sections.${section.id}.label`)}
                           </span>
                           <span className="text-muted line-clamp-2 text-sm leading-5">
-                            {section.description}
+                            {t(`sections.${section.id}.description`)}
                           </span>
                           <span className="admin-overview-cta col-span-2 flex w-fit items-center justify-center gap-1.5 self-end rounded-full px-4 py-2 text-[13px] font-semibold text-white">
-                            Open
+                            {t("overview.open")}
                             <ArrowRight className="admin-overview-arrow size-3.5" />
                           </span>
                         </Card.Content>

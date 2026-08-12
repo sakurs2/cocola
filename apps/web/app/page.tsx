@@ -20,6 +20,7 @@ import { isProjectTaskPath } from "@/lib/workspace-routes";
 import { AnimatePresence, motion } from "framer-motion";
 import { PanelRight } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   type Dispatch,
   type PointerEvent,
@@ -34,6 +35,7 @@ export default function Home() {
 }
 
 function Workspace() {
+  const t = useTranslations("chat.workspace");
   const {
     loadConversation,
     selectedArtifact,
@@ -70,10 +72,10 @@ function Workspace() {
       setSelectedAgentID(id);
     } else {
       setSelectedAgentID(null);
-      showError("This Agent is unavailable. Standard chat is ready instead.");
+      showError(t("agentUnavailable"));
     }
     router.replace("/");
-  }, [agents, agentsLoaded, router, setSelectedAgentID, showError]);
+  }, [agents, agentsLoaded, router, setSelectedAgentID, showError, t]);
 
   useEffect(() => {
     if (!selectedArtifact) return;
@@ -125,9 +127,9 @@ function Workspace() {
             <>
               <div
                 role="separator"
-                aria-label="Resize side panel"
+                aria-label={t("resize")}
                 aria-orientation="vertical"
-                title="Resize side panel"
+                title={t("resize")}
                 onPointerDown={startWorkspaceResize}
                 className="group relative z-10 hidden w-3 shrink-0 cursor-col-resize touch-none md:block"
               >
@@ -232,6 +234,7 @@ function TopBar({
   onOpenWorkspace: () => void;
   workspaceOpen: boolean;
 }) {
+  const t = useTranslations("chat.workspace");
   const { activeSessionId, conversations } = useCocola();
   // The empty/welcome state is chrome-free (matches the reference): the status
   // bar and its Share control only appear once a conversation is under way.
@@ -250,9 +253,7 @@ function TopBar({
               <Tooltip.Trigger>
                 <Button
                   isIconOnly
-                  aria-label={
-                    canShare ? "Open workspace" : "Start a conversation to browse its workspace"
-                  }
+                  aria-label={canShare ? t("open") : t("startFirst")}
                   aria-pressed={workspaceOpen}
                   isDisabled={!canShare}
                   onPress={onOpenWorkspace}
@@ -267,9 +268,7 @@ function TopBar({
                   <PanelRight className="size-4" />
                 </Button>
               </Tooltip.Trigger>
-              <Tooltip.Content>
-                {canShare ? "Open workspace" : "Start a conversation to browse its workspace"}
-              </Tooltip.Content>
+              <Tooltip.Content>{canShare ? t("open") : t("startFirst")}</Tooltip.Content>
             </Tooltip>
           ) : null}
           {showHeaderActions ? <WorkspaceHeaderActions /> : null}

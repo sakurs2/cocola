@@ -2,15 +2,17 @@
 
 import { GitFork, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 export function GitHubCallbackPage({ step }: { step: "manifest" | "installation" | "oauth" }) {
+  const t = useTranslations("connectors.githubCallback");
   const [error, setError] = useState("");
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
     const upstreamError = query.get("error");
     if (upstreamError) {
-      setError("GitHub cancelled or rejected this connector step.");
+      setError(t("cancelled"));
       return;
     }
 
@@ -26,7 +28,7 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
           error?: { message?: string };
         };
         if (!response.ok || !result.authorization_url) {
-          throw new Error(result.error?.message || "Could not start GitHub authorization");
+          throw new Error(result.error?.message || t("authorizationFailed"));
         }
         window.location.replace(result.authorization_url);
         return;
@@ -37,7 +39,7 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
         query.get("state") ||
         (step === "manifest" ? sessionStorage.getItem("cocola.github.manifest.state") : "") ||
         "";
-      if (!code || !state) throw new Error("GitHub callback is missing its one-time state");
+      if (!code || !state) throw new Error(t("stateMissing"));
       const endpoint =
         step === "manifest"
           ? "/api/connectors/github/manifest/complete"
@@ -51,13 +53,13 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
         return_to?: string;
         error?: { message?: string };
       };
-      if (!response.ok) throw new Error(result.error?.message || "GitHub connection failed");
+      if (!response.ok) throw new Error(result.error?.message || t("connectionFailed"));
       if (step === "manifest") sessionStorage.removeItem("cocola.github.manifest.state");
       window.location.replace(result.return_to || "/connectors");
     };
 
     void run().catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-  }, [step]);
+  }, [step, t]);
 
   return (
     <div className="grid h-full place-items-center px-5">
@@ -65,7 +67,7 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
         <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-foreground text-background">
           <GitFork className="size-5" />
         </div>
-        <h1 className="mt-4 text-lg font-semibold">Connecting GitHub</h1>
+        <h1 className="mt-4 text-lg font-semibold">{t("title")}</h1>
         {error ? (
           <>
             <p role="alert" className="mt-2 text-sm text-danger">
@@ -75,12 +77,12 @@ export function GitHubCallbackPage({ step }: { step: "manifest" | "installation"
               href="/connectors"
               className="mt-5 inline-flex h-10 items-center rounded-xl bg-foreground px-4 text-sm font-medium text-background"
             >
-              Back to Connectors
+              {t("back")}
             </a>
           </>
         ) : (
           <p className="mt-2 inline-flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> Completing the secure handoff…
+            <Loader2 className="size-4 animate-spin" /> {t("completing")}
           </p>
         )}
       </div>

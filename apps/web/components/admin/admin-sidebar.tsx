@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowLeft } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { Sidebar } from "@cocola/ui-compat/sidebar";
 import { CocolaCoreLogo } from "@/components/cocola-core-logo";
@@ -12,13 +13,14 @@ import {
 } from "@/components/admin/admin-navigation";
 
 export function AdminSidebar({ activeSectionId }: { activeSectionId: AdminSectionId }) {
+  const t = useTranslations("admin.shell");
   return (
     <>
       <Sidebar>
         <AdminSidebarContents activeSectionId={activeSectionId} />
       </Sidebar>
       <Sidebar.Mobile>
-        <Sheet.Heading className="sr-only">Cocola admin navigation</Sheet.Heading>
+        <Sheet.Heading className="sr-only">{t("mobileNavigation")}</Sheet.Heading>
         <AdminSidebarContents activeSectionId={activeSectionId} idPrefix="mobile-" />
       </Sidebar.Mobile>
     </>
@@ -32,6 +34,7 @@ function AdminSidebarContents({
   activeSectionId: AdminSectionId;
   idPrefix?: string;
 }) {
+  const t = useTranslations("admin");
   const overview = getAdminSection("overview");
   const settings = getAdminSection("settings");
 
@@ -44,16 +47,16 @@ function AdminSidebarContents({
           </span>
           <div className="flex min-w-0 flex-col" data-sidebar="label">
             <span className="text-foreground text-sm font-semibold leading-tight">
-              cocola admin
+              {t("shell.title")}
             </span>
-            <span className="text-muted text-xs leading-tight">control plane</span>
+            <span className="text-muted text-xs leading-tight">{t("shell.subtitle")}</span>
           </div>
         </div>
       </Sidebar.Header>
 
       <Sidebar.Content className="overscroll-contain pb-3 pt-1">
         <Sidebar.Group>
-          <Sidebar.Menu aria-label="Admin overview">
+          <Sidebar.Menu aria-label={t("shell.overviewNavigation")}>
             <AdminSidebarItem
               activeSectionId={activeSectionId}
               idPrefix={idPrefix}
@@ -63,9 +66,9 @@ function AdminSidebarContents({
         </Sidebar.Group>
 
         {ADMIN_GROUPS.map((group) => (
-          <Sidebar.Group key={group.label}>
-            <Sidebar.GroupLabel>{group.label}</Sidebar.GroupLabel>
-            <Sidebar.Menu aria-label={`${group.label} navigation`}>
+          <Sidebar.Group key={group.id}>
+            <Sidebar.GroupLabel>{t(`groups.${group.id}`)}</Sidebar.GroupLabel>
+            <Sidebar.Menu aria-label={t(`groups.${group.id}`)}>
               {group.sectionIds.map((sectionId) => (
                 <AdminSidebarItem
                   key={sectionId}
@@ -80,24 +83,24 @@ function AdminSidebarContents({
       </Sidebar.Content>
 
       <Sidebar.Footer className="relative z-10 border-t border-separator bg-background">
-        <Sidebar.Menu aria-label="Admin settings">
+        <Sidebar.Menu aria-label={t("shell.settingsNavigation")}>
           <AdminSidebarItem
             activeSectionId={activeSectionId}
             idPrefix={idPrefix}
             section={settings}
           />
         </Sidebar.Menu>
-        <Sidebar.Menu aria-label="Workspace navigation">
+        <Sidebar.Menu aria-label={t("shell.workspaceNavigation")}>
           <Sidebar.MenuItem
             className="cocola-sidebar-tab"
             href="/"
             id={`${idPrefix}workspace`}
-            textValue="Back to workspace"
+            textValue={t("shell.backToWorkspace")}
           >
             <Sidebar.MenuIcon className="cocola-sidebar-tab-icon">
               <ArrowLeft className="text-accent size-4" />
             </Sidebar.MenuIcon>
-            <Sidebar.MenuLabel>Back to workspace</Sidebar.MenuLabel>
+            <Sidebar.MenuLabel>{t("shell.backToWorkspace")}</Sidebar.MenuLabel>
           </Sidebar.MenuItem>
         </Sidebar.Menu>
       </Sidebar.Footer>
@@ -114,6 +117,7 @@ function AdminSidebarItem({
   idPrefix: string;
   section: AdminSection;
 }) {
+  const t = useTranslations("admin");
   const Icon = section.icon;
   const href = section.id === "overview" ? "/admin" : `/admin/${section.path}`;
 
@@ -123,12 +127,12 @@ function AdminSidebarItem({
       href={href}
       id={`${idPrefix}${section.id}`}
       isCurrent={activeSectionId === section.id}
-      textValue={section.label}
+      textValue={t(`sections.${section.id}.label`)}
     >
       <Sidebar.MenuIcon className="cocola-sidebar-tab-icon">
         <Icon className={`size-4 ${section.iconClassName}`} />
       </Sidebar.MenuIcon>
-      <Sidebar.MenuLabel>{section.label}</Sidebar.MenuLabel>
+      <Sidebar.MenuLabel>{t(`sections.${section.id}.label`)}</Sidebar.MenuLabel>
     </Sidebar.MenuItem>
   );
 }

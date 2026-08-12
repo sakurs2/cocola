@@ -4,6 +4,7 @@ import { AlertTriangle, Bot, Check, CopyIcon, Loader2, RefreshCw } from "lucide-
 import { Button, Card, Tooltip } from "@heroui/react";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import { AnswerMarkdownContent, MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import {
   RailEnvironment,
@@ -158,6 +159,7 @@ function normalizeReadonlyMessages(raw: unknown): WireMessage[] {
 }
 
 export function ConversationReadOnly({ conversationId }: { conversationId: string }) {
+  const t = useTranslations("chat.readonly");
   const [state, setState] = useState<LoadState>({
     status: "loading",
     messages: [],
@@ -211,20 +213,20 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
             <Bot className="size-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold">Conversation</h1>
+            <h1 className="truncate text-sm font-semibold">{t("title")}</h1>
             <p className="truncate font-mono text-xs text-muted">{conversationId}</p>
           </div>
           <Tooltip delay={0}>
             <Button
               isIconOnly
-              aria-label="Refresh"
+              aria-label={t("refresh")}
               className="text-muted size-8 min-w-8"
               variant="ghost"
               onPress={() => void load()}
             >
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
             </Button>
-            <Tooltip.Content>{refreshing ? "Refreshing…" : "Refresh"}</Tooltip.Content>
+            <Tooltip.Content>{refreshing ? t("refreshing") : t("refresh")}</Tooltip.Content>
           </Tooltip>
         </div>
       </header>
@@ -233,7 +235,7 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
         {state.status === "loading" && state.messages.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted">
             <Loader2 className="size-4 animate-spin" />
-            Loading conversation
+            {t("loading")}
           </div>
         ) : null}
 
@@ -251,10 +253,8 @@ export function ConversationReadOnly({ conversationId }: { conversationId: strin
                 <EmptyState.Media variant="icon">
                   <Bot className="size-5" />
                 </EmptyState.Media>
-                <EmptyState.Title>No messages</EmptyState.Title>
-                <EmptyState.Description>
-                  This conversation does not contain any messages yet.
-                </EmptyState.Description>
+                <EmptyState.Title>{t("empty")}</EmptyState.Title>
+                <EmptyState.Description>{t("emptyDescription")}</EmptyState.Description>
               </EmptyState.Header>
             </EmptyState>
           </Card>
@@ -288,6 +288,7 @@ function MessageBubble({
   message: WireMessage;
   previousUserCreatedAt?: string;
 }) {
+  const t = useTranslations("chat.readonly");
   const isUser = message.role === "user";
   const parts = message.parts ?? [];
 
@@ -301,7 +302,7 @@ function MessageBubble({
                 <MessagePartView key={`${message.id}-${index}`} part={part} role={message.role} />
               ))
             ) : (
-              <span className="text-muted">No content</span>
+              <span className="text-muted">{t("noContent")}</span>
             )}
           </div>
         </div>
@@ -353,7 +354,10 @@ function MessageBubble({
 }
 
 function AssistantHeader({ message }: { message: WireMessage }) {
-  const label = message.metadata?.model_label || message.metadata?.model_alias || "Model";
+  const t = useTranslations("chat");
+  const format = useFormatter();
+  const label =
+    message.metadata?.model_label || message.metadata?.model_alias || t("modelFallback");
   const icon = message.metadata?.model_icon;
 
   return (
@@ -363,13 +367,21 @@ function AssistantHeader({ message }: { message: WireMessage }) {
         {label}
       </span>
       {message.created_at ? (
-        <span className="shrink-0 text-xs text-muted">{formatDate(message.created_at)}</span>
+        <span className="shrink-0 text-xs text-muted">
+          {format.dateTime(new Date(message.created_at), {
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
       ) : null}
     </div>
   );
 }
 
 function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "assistant" }) {
+  const t = useTranslations("chat.readonly");
   if (part.type === "text") {
     // User text stays inside the bubble as plain text; assistant text renders as
     // a rail "回答" node with markdown, identical to the live thread.
@@ -408,9 +420,11 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
       <section className="my-4 overflow-hidden rounded-2xl border border-indigo-500/25 bg-surface">
         <div className="border-b border-indigo-500/15 bg-indigo-500/[0.045] px-5 py-3.5">
           <div className="text-[10px] font-bold tracking-[0.16em] text-indigo-700 uppercase">
-            Execution plan
+            {t("executionPlan")}
           </div>
-          <h3 className="mt-0.5 text-base font-semibold">Plan v{part.version}</h3>
+          <h3 className="mt-0.5 text-base font-semibold">
+            {t("planVersion", { version: part.version })}
+          </h3>
           <p className="mt-1 text-xs capitalize text-muted">{part.status.replaceAll("_", " ")}</p>
         </div>
         <div className="px-5 py-5">
@@ -431,7 +445,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
   if (part.type === "tool-call") {
     return (
       <RailTool
-        toolName={part.toolName || "tool"}
+        toolName={part.toolName || t("tool")}
         argsText={part.argsText}
         liveOutput={part.toolOutput}
         result={part.result}
@@ -447,7 +461,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
     // Read-only page has no Artifact side panel, so omit onPreview → download only.
     return (
       <RailFile
-        filename={part.filename || "file"}
+        filename={part.filename || t("file")}
         mimeType={part.mimeType || part.mime || "application/octet-stream"}
         size={part.size ?? 0}
         downloadUrl={part.downloadUrl || part.download_url || ""}
@@ -458,6 +472,7 @@ function MessagePartView({ part, role }: { part: MessagePart; role: "user" | "as
 }
 
 function CopyMessageButton({ message }: { message: WireMessage }) {
+  const t = useTranslations("chat");
   const [copied, setCopied] = useState(false);
   const parts = message.parts ?? [];
   const text = finalAgentOutputText(parts, splitAgentTurnParts(parts).outputIndices);
@@ -474,7 +489,7 @@ function CopyMessageButton({ message }: { message: WireMessage }) {
       <Tooltip delay={0}>
         <Button
           isIconOnly
-          aria-label={copied ? "Copied" : "Copy"}
+          aria-label={copied ? t("copied") : t("copy")}
           isDisabled={!text}
           className="size-8 min-w-8"
           variant="ghost"
@@ -482,31 +497,21 @@ function CopyMessageButton({ message }: { message: WireMessage }) {
         >
           {copied ? <Check className="size-4 text-emerald-400" /> : <CopyIcon className="size-4" />}
         </Button>
-        <Tooltip.Content>{copied ? "Copied" : "Copy"}</Tooltip.Content>
+        <Tooltip.Content>{copied ? t("copied") : t("copy")}</Tooltip.Content>
       </Tooltip>
     </div>
   );
 }
 
 function TypingDots() {
+  const t = useTranslations("chat.readonly");
   return (
-    <div className="flex items-center gap-1 py-1" role="status" aria-label="Assistant is typing">
+    <div className="flex items-center gap-1 py-1" role="status" aria-label={t("typing")}>
       <span className="size-2 animate-bounce rounded-full bg-foreground/60 [animation-delay:-0.3s]" />
       <span className="size-2 animate-bounce rounded-full bg-foreground/60 [animation-delay:-0.15s]" />
       <span className="size-2 animate-bounce rounded-full bg-foreground/60" />
     </div>
   );
-}
-
-function formatDate(value: string) {
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(ms));
 }
 
 async function errorText(res: Response) {

@@ -72,9 +72,8 @@ test("all confirmation-only flows use the centered confirmation primitive", () =
     wikiSource.lastIndexOf("<ActionConfirmDialog", wikiDiscardOpen),
     wikiSource.indexOf("function WikiNavigationRow"),
   );
-  const workspaceRecoveryOpen = runtimeSource.indexOf("open={workspaceResetRequest !== null}");
   const workspaceRecovery = runtimeSource.slice(
-    runtimeSource.lastIndexOf("<ActionConfirmDialog", workspaceRecoveryOpen),
+    runtimeSource.indexOf("function RuntimeWorkspaceResetDialog"),
   );
   const nodeConfirmations = sandboxNodesSource.slice(
     sandboxNodesSource.indexOf("function OfflineDialog"),
@@ -84,24 +83,24 @@ test("all confirmation-only flows use the centered confirmation primitive", () =
   assert.doesNotMatch(wikiDiscard, /<Sheet|placement="right"/);
   assert.match(workspaceRecovery, /<ActionConfirmDialog/);
   assert.doesNotMatch(workspaceRecovery, /<Sheet|placement="right"/);
-  assert.match(nodeConfirmations, /title=\{`Offline \$\{target\.node\.name\}\?`\}/);
+  assert.match(nodeConfirmations, /title=\{t\("title", \{ node: target\.node\.name \}\)\}/);
   assert.match(nodeConfirmations, /open=\{phase === "confirm"\}/);
-  assert.match(nodeConfirmations, /title="Confirm sandbox capacity"/);
+  assert.match(nodeConfirmations, /title=\{t\("confirmTitle"\)\}/);
   assert.doesNotMatch(nodeConfirmations, /Sheet\.Heading>Confirm sandbox capacity/);
 });
 
 test("folder chat actions remain identifiable and stable while editing or deleting", () => {
   assert.match(
     foldersSource,
-    /<Dropdown\.Item id="rename" textValue="Rename">[\s\S]*?<Pencil[\s\S]*?data-slot="label">Rename/,
+    /<Dropdown\.Item id="rename" textValue=\{t\("rename"\)\}>[\s\S]*?<Pencil[\s\S]*?data-slot="label">\{t\("rename"\)\}/,
   );
   assert.match(
     foldersSource,
-    /<Dropdown\.Item id="move-root" textValue="Move to Chats">[\s\S]*?<MessagesSquare/,
+    /<Dropdown\.Item id="move-root" textValue=\{t\("moveChats"\)\}>[\s\S]*?<MessagesSquare/,
   );
   assert.match(
     foldersSource,
-    /<Dropdown\.Item id="delete" textValue="Delete" variant="danger">[\s\S]*?<Trash2/,
+    /<Dropdown\.Item id="delete" textValue=\{t\("delete"\)\} variant="danger">[\s\S]*?<Trash2/,
   );
   assert.match(foldersSource, /function ConversationRenameField/);
   assert.match(foldersSource, /dependencies=\{\[editingConversationID\]\}/);
@@ -123,6 +122,6 @@ test("folder chat actions remain identifiable and stable while editing or deleti
 test("model kind cards can shrink without overlapping", () => {
   assert.match(modelsSource, /sm:grid-cols-\[repeat\(2,minmax\(0,1fr\)\)\]/);
   assert.equal(modelsSource.match(/h-auto min-w-0 w-full flex-col items-stretch/g)?.length, 2);
-  assert.match(modelsSource, /For Agent conversations\./);
-  assert.match(modelsSource, /For Memory and knowledge\./);
+  assert.match(modelsSource, /t\("model\.chatPurpose"\)/);
+  assert.match(modelsSource, /t\("model\.embeddingPurpose"\)/);
 });

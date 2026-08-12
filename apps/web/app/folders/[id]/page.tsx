@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import { useCocola, type ConversationSummary } from "@/app/runtime-provider";
 import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { ConversationComposer } from "@/components/assistant-ui/thread";
@@ -23,6 +24,9 @@ import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 type DeleteTarget = { kind: "folder" | "conversation"; id: string; title: string };
 
 export default function FolderPage() {
+  const t = useTranslations("workspace.folders.detail");
+  const foldersT = useTranslations("workspace.folders");
+  const format = useFormatter();
   const { id: folderID } = useParams<{ id: string }>();
   const router = useRouter();
   const { showSuccess } = useWorkspaceToast();
@@ -100,7 +104,7 @@ export default function FolderPage() {
       await renameConversation(conversation.id, title);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not rename chat");
+      setError(cause instanceof Error ? cause.message : t("renameChatFailed"));
     }
   };
 
@@ -116,7 +120,7 @@ export default function FolderPage() {
       setEditingFolder(false);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not rename folder");
+      setError(cause instanceof Error ? cause.message : t("renameFolderFailed"));
     }
   };
 
@@ -125,10 +129,14 @@ export default function FolderPage() {
       await moveConversation(conversationID, destination);
       setError(null);
       showSuccess(
-        `Moved to ${destination ? folders.find((item) => item.id === destination)?.name || "folder" : "Chats"}`,
+        destination
+          ? t("movedFolder", {
+              name: folders.find((item) => item.id === destination)?.name || t("folderFallback"),
+            })
+          : t("movedChats"),
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not move conversation");
+      setError(cause instanceof Error ? cause.message : t("moveFailed"));
     }
   };
 
@@ -146,7 +154,7 @@ export default function FolderPage() {
       }
       setDeleteTarget(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete item");
+      setError(cause instanceof Error ? cause.message : t("deleteFailed"));
     } finally {
       deleteInFlightRef.current = false;
       setDeleting(false);
@@ -158,12 +166,10 @@ export default function FolderPage() {
       <div className="cocola-web-page mx-auto grid min-h-72 max-w-4xl place-items-center p-8 text-center">
         <div>
           <Folder className="text-muted mx-auto size-9" />
-          <h1 className="mt-3 text-lg font-semibold">Folder not found</h1>
-          <p className="text-muted mt-1 text-sm">
-            It may have been deleted or belongs to another account.
-          </p>
+          <h1 className="mt-3 text-lg font-semibold">{t("notFound")}</h1>
+          <p className="text-muted mt-1 text-sm">{t("notFoundDescription")}</p>
           <Button className="mt-4" onPress={() => router.push("/folders")}>
-            Back to folders
+            {t("back")}
           </Button>
         </div>
       </div>
@@ -176,7 +182,7 @@ export default function FolderPage() {
       <header className="flex flex-wrap items-center gap-3">
         <Button
           isIconOnly
-          aria-label="Back to Folders"
+          aria-label={t("back")}
           variant="ghost"
           onPress={() => router.push("/folders")}
         >
@@ -192,10 +198,10 @@ export default function FolderPage() {
               value={folderDraft}
               onChange={setFolderDraft}
             >
-              <Label className="sr-only">Folder name</Label>
+              <Label className="sr-only">{t("folderName")}</Label>
               <Input
                 ref={folderInputRef}
-                aria-label="Folder name"
+                aria-label={t("folderName")}
                 className="h-11 py-0 text-2xl font-semibold leading-11 tracking-[-0.03em]"
                 onBlur={() => void commitFolderRename()}
                 onKeyDown={(event) => {
@@ -210,8 +216,7 @@ export default function FolderPage() {
                 {folder.name}
               </h1>
               <p className="text-muted mt-1 text-sm">
-                {folderConversations.length} conversation
-                {folderConversations.length === 1 ? "" : "s"}
+                {foldersT("conversationCount", { count: folderConversations.length })}
               </p>
             </div>
           )}
@@ -227,7 +232,7 @@ export default function FolderPage() {
               }}
             >
               <Pencil className="size-3.5" />
-              Rename
+              {t("rename")}
             </Button>
           ) : null}
           <Button
@@ -236,7 +241,7 @@ export default function FolderPage() {
             onPress={() => setDeleteTarget({ kind: "folder", id: folder.id, title: folder.name })}
           >
             <Trash2 className="size-3.5" />
-            Delete
+            {t("delete")}
           </Button>
         </div>
       </header>
@@ -247,20 +252,18 @@ export default function FolderPage() {
 
       <Card className="p-5">
         <Card.Header className="p-0">
-          <Card.Title>Start a chat in {folder.name}</Card.Title>
-          <Card.Description>New conversations are automatically filed here.</Card.Description>
+          <Card.Title>{t("startTitle", { name: folder.name })}</Card.Title>
+          <Card.Description>{t("startDescription")}</Card.Description>
         </Card.Header>
         <Card.Content className="mt-4 p-0">
-          <ConversationComposer placeholder={`Start a chat in ${folder.name}...`} />
+          <ConversationComposer placeholder={t("startPlaceholder", { name: folder.name })} />
         </Card.Content>
       </Card>
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold">Recent chats</h2>
-          <p className="text-muted mt-1 text-sm">
-            Scheduled tasks are excluded from folder chat counts.
-          </p>
+          <h2 className="font-semibold">{t("recent")}</h2>
+          <p className="text-muted mt-1 text-sm">{t("recentDescription")}</p>
         </div>
         <Chip size="sm" variant="soft">
           {folderConversations.length}
@@ -269,7 +272,7 @@ export default function FolderPage() {
 
       {folderConversations.length ? (
         <ListView
-          aria-label="Folder conversations"
+          aria-label={t("listAria")}
           dependencies={[editingConversationID]}
           items={folderConversations}
           selectionMode="none"
@@ -279,7 +282,7 @@ export default function FolderPage() {
           }}
         >
           {(conversation) => (
-            <ListView.Item id={conversation.id} textValue={conversation.title || "Untitled"}>
+            <ListView.Item id={conversation.id} textValue={conversation.title || t("untitled")}>
               <ListView.ItemContent>
                 <ConversationIcon conversation={conversation} />
                 {editingConversationID === conversation.id ? (
@@ -291,9 +294,9 @@ export default function FolderPage() {
                   />
                 ) : (
                   <div className="flex min-w-0 flex-col">
-                    <ListView.Title>{conversation.title || "Untitled"}</ListView.Title>
+                    <ListView.Title>{conversation.title || t("untitled")}</ListView.Title>
                     <ListView.Description>
-                      {formatUpdatedAt(conversation.updated_at)} ·{" "}
+                      {formatUpdatedAt(conversation.updated_at, format, t("recentlyUpdated"))} ·{" "}
                       {runtimes.find((runtime) => runtime.id === conversation.runtime_id)?.label ||
                         conversation.runtime_id}
                     </ListView.Description>
@@ -303,14 +306,14 @@ export default function FolderPage() {
               <ListView.ItemAction>
                 <Dropdown>
                   <Dropdown.Trigger
-                    aria-label={`Actions for ${conversation.title || "Untitled"}`}
+                    aria-label={t("actionsFor", { name: conversation.title || t("untitled") })}
                     className="text-muted grid size-8 place-items-center rounded-xl"
                   >
                     <Ellipsis className="size-4" />
                   </Dropdown.Trigger>
                   <Dropdown.Popover placement="bottom end">
                     <Dropdown.Menu
-                      aria-label="Conversation actions"
+                      aria-label={t("conversationActions")}
                       onAction={(key) => {
                         const action = String(key);
                         if (action === "rename") {
@@ -319,7 +322,7 @@ export default function FolderPage() {
                           setDeleteTarget({
                             kind: "conversation",
                             id: conversation.id,
-                            title: conversation.title || "Untitled",
+                            title: conversation.title || t("untitled"),
                           });
                         else if (action === "move-root") void moveChat(conversation.id, null);
                         else if (action.startsWith("move:"))
@@ -327,13 +330,13 @@ export default function FolderPage() {
                       }}
                     >
                       <Dropdown.Section>
-                        <Dropdown.Item id="rename" textValue="Rename">
+                        <Dropdown.Item id="rename" textValue={t("rename")}>
                           <Pencil className="text-muted size-4 shrink-0" />
-                          <span data-slot="label">Rename</span>
+                          <span data-slot="label">{t("rename")}</span>
                         </Dropdown.Item>
-                        <Dropdown.Item id="move-root" textValue="Move to Chats">
+                        <Dropdown.Item id="move-root" textValue={t("moveChats")}>
                           <MessagesSquare className="text-muted size-4 shrink-0" />
-                          <span data-slot="label">Move to Chats</span>
+                          <span data-slot="label">{t("moveChats")}</span>
                         </Dropdown.Item>
                         {folders
                           .filter((item) => item.id !== folder.id)
@@ -341,19 +344,19 @@ export default function FolderPage() {
                             <Dropdown.Item
                               key={item.id}
                               id={`move:${item.id}`}
-                              textValue={`Move to ${item.name}`}
+                              textValue={t("moveTo", { name: item.name })}
                             >
                               <Folder className="text-muted size-4 shrink-0" />
                               <span className="min-w-0 flex-1 truncate" data-slot="label">
-                                Move to {item.name}
+                                {t("moveTo", { name: item.name })}
                               </span>
                             </Dropdown.Item>
                           ))}
                       </Dropdown.Section>
                       <Dropdown.Section className="border-separator mt-1 border-t pt-1">
-                        <Dropdown.Item id="delete" textValue="Delete" variant="danger">
+                        <Dropdown.Item id="delete" textValue={t("delete")} variant="danger">
                           <Trash2 className="size-4 shrink-0" />
-                          <span data-slot="label">Delete</span>
+                          <span data-slot="label">{t("delete")}</span>
                         </Dropdown.Item>
                       </Dropdown.Section>
                     </Dropdown.Menu>
@@ -367,24 +370,26 @@ export default function FolderPage() {
         <Card className="border-separator min-h-40 border border-dashed p-6">
           <Card.Content className="text-muted flex flex-col items-center justify-center gap-2 p-0 text-center">
             <MessagesSquare className="size-6" />
-            <span className="text-sm font-medium">No chats in this folder yet</span>
-            <span className="text-xs">Use the composer above to start the first one.</span>
+            <span className="text-sm font-medium">{t("empty")}</span>
+            <span className="text-xs">{t("emptyDescription")}</span>
           </Card.Content>
         </Card>
       )}
 
       <DeleteConfirmDialog
         busy={deleting}
-        confirmLabel="Delete"
+        confirmLabel={t("delete")}
         description={
           deleteTarget?.kind === "folder"
-            ? `${deleteTarget.title} and every chat inside it will be permanently deleted.`
-            : `${deleteTarget?.title || "This conversation"} will be permanently deleted.`
+            ? t("deleteFolderDescription", { name: deleteTarget.title })
+            : t("deleteConversationDescription", {
+                name: deleteTarget?.title || t("thisConversation"),
+              })
         }
         error={error}
         open={deleteTarget !== null}
         title={
-          deleteTarget?.kind === "folder" ? "Delete folder and chats?" : "Delete conversation?"
+          deleteTarget?.kind === "folder" ? t("deleteFolderTitle") : t("deleteConversationTitle")
         }
         onOpenChange={(open) => {
           if (!open && !deleteInFlightRef.current) {
@@ -407,9 +412,10 @@ function ConversationRenameField({
   onCancel: () => void;
   onCommit: (draft: string) => void;
 }) {
+  const t = useTranslations("workspace.folders.detail");
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
-  const [draft, setDraft] = useState(conversation.title || "Untitled");
+  const [draft, setDraft] = useState(conversation.title || t("untitled"));
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -421,10 +427,10 @@ function ConversationRenameField({
 
   return (
     <TextField className="min-w-0 flex-1" value={draft} onChange={setDraft}>
-      <Label className="sr-only">Chat name</Label>
+      <Label className="sr-only">{t("chatName")}</Label>
       <Input
         ref={inputRef}
-        aria-label="Chat name"
+        aria-label={t("chatName")}
         className="h-9"
         onBlur={(event) => onCommit(event.currentTarget.value)}
         onCompositionEnd={() => {
@@ -470,13 +476,13 @@ function ConversationIcon({ conversation }: { conversation: ConversationSummary 
   );
 }
 
-function formatUpdatedAt(value: string) {
+function formatUpdatedAt(value: string, format: ReturnType<typeof useFormatter>, fallback: string) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Recently updated";
-  return new Intl.DateTimeFormat(undefined, {
+  if (Number.isNaN(date.getTime())) return fallback;
+  return format.dateTime(date, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(date);
+  });
 }

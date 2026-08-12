@@ -1,5 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
+import { useTranslations } from "next-intl";
 
 export function DeleteConfirmDialog({
   open,
@@ -7,7 +8,7 @@ export function DeleteConfirmDialog({
   description,
   busy,
   error,
-  confirmLabel = "Delete",
+  confirmLabel,
   onOpenChange,
   onConfirm,
 }: {
@@ -20,10 +21,11 @@ export function DeleteConfirmDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const t = useTranslations("common.actions");
   return (
     <ActionConfirmDialog
       busy={busy}
-      confirmLabel={confirmLabel}
+      confirmLabel={confirmLabel ?? t("deleteDefault")}
       description={description}
       error={error}
       icon={Trash2}

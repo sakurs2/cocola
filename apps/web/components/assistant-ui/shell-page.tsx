@@ -5,6 +5,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { AlertTriangle, LoaderCircle, RefreshCw, SquareTerminal } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 import {
   decodeTerminalOutput,
@@ -43,6 +44,7 @@ export function ShellPage({
   active: boolean;
   setHeaderActions: (node: ReactNode) => void;
 }) {
+  const t = useTranslations("chat.shell");
   const hasMessages = useThread((thread) => thread.messages.length > 0);
   const environmentPreparing = useThread((thread) => thread.isRunning);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -149,7 +151,7 @@ export function ShellPage({
         socketRef.current = null;
         connectionGenerationRef.current++;
         socket.close();
-        setError("The terminal connection timed out");
+        setError(t("connectionTimeout"));
         setStatus("error");
       }, TERMINAL_CONNECT_TIMEOUT_MS);
 
@@ -208,7 +210,7 @@ export function ShellPage({
             prepareStartedAtRef.current = 0;
             prepareAttemptRef.current = 0;
           }
-          setError(frame.error || "The terminal connection failed");
+          setError(frame.error || t("connectionFailed"));
           setStatus(frame.code === "SESSION_GONE" ? "reclaimed" : "error");
         }
       };
@@ -220,7 +222,7 @@ export function ShellPage({
         clearStableConnectionTimer();
         const attempt = reconnectAttemptRef.current;
         if (attempt >= TERMINAL_RECONNECT_LIMIT) {
-          setError("The terminal connection was interrupted");
+          setError(t("interrupted"));
           setStatus("error");
           return;
         }
@@ -232,7 +234,7 @@ export function ShellPage({
         );
       };
     },
-    [clearConnectTimeout, clearRetryTimer, clearStableConnectionTimer, sendResize, sessionID],
+    [clearConnectTimeout, clearRetryTimer, clearStableConnectionTimer, sendResize, sessionID, t],
   );
 
   useEffect(() => {
@@ -257,7 +259,7 @@ export function ShellPage({
           if (Date.now() - prepareStartedAtRef.current >= TERMINAL_PREPARE_LIMIT_MS) {
             prepareStartedAtRef.current = 0;
             prepareAttemptRef.current = 0;
-            setError("The sandbox did not become ready in time");
+            setError(t("sandboxTimeout"));
             setStatus("error");
             return;
           }
@@ -280,13 +282,13 @@ export function ShellPage({
         const payload = (await response.json().catch(() => null)) as {
           error?: { message?: string };
         } | null;
-        setError(payload?.error?.message || "Could not create a terminal");
+        setError(payload?.error?.message || t("createFailed"));
         setStatus("error");
         return;
       }
 
       const body = (await response.json()) as { session_id?: string };
-      if (!body.session_id) throw new Error("Terminal session id is missing");
+      if (!body.session_id) throw new Error(t("missingSession"));
       if (!mountedRef.current) {
         void deleteTerminal(body.session_id);
         return;
@@ -302,7 +304,7 @@ export function ShellPage({
         if (Date.now() - prepareStartedAtRef.current >= TERMINAL_PREPARE_LIMIT_MS) {
           prepareStartedAtRef.current = 0;
           prepareAttemptRef.current = 0;
-          setError("The sandbox did not become ready in time");
+          setError(t("sandboxTimeout"));
           setStatus("error");
           return;
         }
@@ -315,15 +317,13 @@ export function ShellPage({
       } else {
         prepareStartedAtRef.current = 0;
         prepareAttemptRef.current = 0;
-        setError(
-          createError instanceof Error ? createError.message : "Could not create a terminal",
-        );
+        setError(createError instanceof Error ? createError.message : t("createFailed"));
         setStatus("error");
       }
     } finally {
       createInFlightRef.current = false;
     }
-  }, [clearRetryTimer, deleteTerminal, environmentPreparing, sessionID]);
+  }, [clearRetryTimer, deleteTerminal, environmentPreparing, sessionID, t]);
 
   useEffect(() => {
     createTerminalRef.current = () => void createTerminal();
@@ -382,7 +382,7 @@ export function ShellPage({
       })
       .catch((loadError: unknown) => {
         if (disposed) return;
-        setError(loadError instanceof Error ? loadError.message : "Could not load the terminal");
+        setError(loadError instanceof Error ? loadError.message : t("loadFailed"));
         setStatus("error");
       });
 
@@ -393,7 +393,7 @@ export function ShellPage({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [sendResize]);
+  }, [sendResize, t]);
 
   useEffect(() => {
     if (!active) return;
@@ -432,10 +432,10 @@ export function ShellPage({
             if (response.status === 404) void createTerminal();
             return;
           }
-          throw new Error("Could not inspect the terminal session");
+          throw new Error(t("inspectFailed"));
         }
       } catch (retryError) {
-        setError(retryError instanceof Error ? retryError.message : "Could not reconnect");
+        setError(retryError instanceof Error ? retryError.message : t("reconnectFailed"));
         setStatus("error");
         return;
       }
@@ -446,7 +446,7 @@ export function ShellPage({
       prepareAttemptRef.current = 0;
       void createTerminal();
     }
-  }, [createTerminal, sessionID]);
+  }, [createTerminal, sessionID, t]);
 
   const restart = useCallback(async () => {
     clearRetryTimer();
@@ -465,7 +465,7 @@ export function ShellPage({
 
   return (
     <div className="relative h-full min-h-0 bg-[#111827]">
-      <div ref={containerRef} className="h-full min-h-0 p-2" aria-label="Sandbox shell" />
+      <div ref={containerRef} className="h-full min-h-0 p-2" aria-label={t("aria")} />
       {status !== "ready" ? (
         <ShellOverlay
           status={status}
@@ -495,14 +495,15 @@ function ShellOverlay({
   onRetry: () => void;
   onRestart: () => void;
 }) {
+  const t = useTranslations("chat.shell");
   if (status === "connecting" || status === "waiting") {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111827] px-6 text-center">
         <LoaderCircle className="mb-3 size-7 animate-spin text-blue-400" />
         <p className="text-sm font-medium text-slate-100">
-          {status === "waiting" ? "Waiting for the environment" : "Opening shell"}
+          {status === "waiting" ? t("waiting") : t("opening")}
         </p>
-        <p className="mt-1 text-xs text-slate-400">Connecting to the sandbox terminal…</p>
+        <p className="mt-1 text-xs text-slate-400">{t("connecting")}</p>
       </div>
     );
   }
@@ -512,12 +513,10 @@ function ShellOverlay({
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111827] px-6 text-center">
         <SquareTerminal className="mb-3 size-8 text-slate-500" />
         <p className="text-sm font-medium text-slate-100">
-          {status === "reclaimed" ? "Sandbox reclaimed" : "Shell not ready"}
+          {status === "reclaimed" ? t("reclaimed") : t("notReady")}
         </p>
         <p className="mt-1 max-w-sm text-xs leading-5 text-slate-400">
-          {hasMessages
-            ? "Continue the conversation to restore the sandbox, then reopen the shell."
-            : "Send the first message to prepare the sandbox environment."}
+          {hasMessages ? t("restore") : t("startConversation")}
         </p>
       </div>
     );
@@ -527,9 +526,9 @@ function ShellOverlay({
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111827]/95 px-6 text-center">
         <SquareTerminal className="mb-3 size-8 text-slate-500" />
-        <p className="text-sm font-medium text-slate-100">Shell exited</p>
+        <p className="text-sm font-medium text-slate-100">{t("exited")}</p>
         <p className="mt-1 text-xs text-slate-400">
-          {exitCode == null ? "The shell process ended." : `Exit code ${exitCode}`}
+          {exitCode == null ? t("processEnded") : t("exitCode", { code: exitCode })}
         </p>
         <button
           type="button"
@@ -537,7 +536,7 @@ function ShellOverlay({
           className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 px-3 text-xs font-medium text-slate-100 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
         >
           <RefreshCw className="size-3.5" />
-          Start new shell
+          {t("startNew")}
         </button>
       </div>
     );
@@ -546,17 +545,15 @@ function ShellOverlay({
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111827]/95 px-6 text-center">
       <AlertTriangle className="mb-3 size-8 text-amber-400" />
-      <p className="text-sm font-medium text-slate-100">Shell unavailable</p>
-      <p className="mt-1 max-w-sm text-xs leading-5 text-slate-400">
-        {error || "The sandbox terminal could not be reached."}
-      </p>
+      <p className="text-sm font-medium text-slate-100">{t("unavailable")}</p>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-slate-400">{error || t("unreachable")}</p>
       <button
         type="button"
         onClick={onRetry}
         className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 px-3 text-xs font-medium text-slate-100 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
       >
         <RefreshCw className="size-3.5" />
-        Retry
+        {t("retry")}
       </button>
     </div>
   );

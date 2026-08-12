@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 type SandboxNode = {
   name: string;
@@ -61,14 +62,6 @@ type OfflineTarget = { node: SandboxNode; pendingPods: string[]; affectedSession
 
 type BadgeTone = "neutral" | "sky" | "green" | "amber" | "red";
 
-const STATUS_LABELS: Record<string, string> = {
-  active: "Active",
-  disabled: "Disabled",
-  offline_pending: "Offline pending",
-  offline: "Offline",
-  unhealthy: "Unhealthy",
-};
-
 const STATUS_TONES: Record<string, BadgeTone> = {
   active: "green",
   disabled: "amber",
@@ -78,6 +71,7 @@ const STATUS_TONES: Record<string, BadgeTone> = {
 };
 
 export default function SandboxNodesPage() {
+  const t = useTranslations("admin.nodesPage");
   const [nodes, setNodes] = useState<SandboxNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingNode, setActingNode] = useState<string | null>(null);
@@ -152,7 +146,7 @@ export default function SandboxNodesPage() {
           setOfflineTarget({ node: body.node, pendingPods, affectedSessions });
           return;
         }
-        setNotice(body.message || "Node offline requested");
+        setNotice(body.message || t("offlineRequested"));
       }
       await refresh();
     } catch (err) {
@@ -175,7 +169,7 @@ export default function SandboxNodesPage() {
     const raw = (capacityDrafts[node.name] ?? "").trim();
     const validationError = capacityInputError(raw);
     if (validationError) {
-      setError(validationError);
+      setError(t("capacity.invalid"));
       return false;
     }
     const max = raw === "" ? null : Number(raw);
@@ -193,7 +187,7 @@ export default function SandboxNodesPage() {
       );
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok) throw new Error(await responseError(res));
-      setNotice(max == null ? "Sandbox capacity limit cleared" : "Sandbox capacity limit saved");
+      setNotice(max == null ? t("capacityCleared") : t("capacitySaved"));
       await refresh();
       return true;
     } catch (err) {
@@ -211,14 +205,14 @@ export default function SandboxNodesPage() {
   const allColumns: DataGridColumn<SandboxNode>[] = [
     {
       id: "node",
-      header: "Node",
+      header: t("columns.node"),
       isRowHeader: true,
       minWidth: 240,
       cell: (node) => (
         <span className="block min-w-0">
           <AdminTruncatedValue
             className="font-mono text-xs font-semibold"
-            copyLabel="node name"
+            copyLabel={t("copy.nodeName")}
             value={node.name}
           />
           <span className="mt-1 flex flex-wrap gap-1">
@@ -239,17 +233,23 @@ export default function SandboxNodesPage() {
     },
     {
       id: "status",
-      header: "Status",
+      header: t("columns.status"),
       width: 150,
       cell: (node) => (
         <AdminStatusBadge tone={STATUS_TONES[node.status] ?? "neutral"} dot>
-          {STATUS_LABELS[node.status] ?? node.status}
+          {node.status === "active" ||
+          node.status === "disabled" ||
+          node.status === "offline_pending" ||
+          node.status === "offline" ||
+          node.status === "unhealthy"
+            ? t(`status.${node.status}`)
+            : node.status}
         </AdminStatusBadge>
       ),
     },
     {
       id: "resources",
-      header: "Resources",
+      header: t("columns.resources"),
       minWidth: 190,
       cell: (node) => (
         <span className="text-xs">
@@ -258,7 +258,7 @@ export default function SandboxNodesPage() {
             {node.cpu_capacity || "—"}
           </span>
           <span className="mt-1 block">
-            <span className="text-muted">Memory</span>{" "}
+            <span className="text-muted">{t("memory")}</span>{" "}
             {formatMemoryQuantity(node.memory_allocatable)} /{" "}
             {formatMemoryQuantity(node.memory_capacity)}
           </span>
@@ -267,30 +267,31 @@ export default function SandboxNodesPage() {
     },
     {
       id: "workload",
-      header: "Workload",
+      header: t("columns.workload"),
       minWidth: 180,
       cell: (node) => (
         <span className="text-xs">
-          <span className="block">{node.sandbox_pods} sandbox pods</span>
+          <span className="block">{t("sandboxPods", { count: node.sandbox_pods })}</span>
           <span className="text-muted mt-1 block">
-            {node.session_count} workspaces · {formatBytes(node.session_requested_bytes)}
+            {t("workspaces", { count: node.session_count })} ·{" "}
+            {formatBytes(node.session_requested_bytes)}
           </span>
         </span>
       ),
     },
     {
       id: "disk",
-      header: "Disk",
+      header: t("columns.disk"),
       width: 120,
       cell: (node) => (
         <AdminStatusBadge tone={node.disk_pressure ? "red" : "green"} dot>
-          {node.disk_pressure ? "Pressure" : "Normal"}
+          {node.disk_pressure ? t("disk.pressure") : t("disk.normal")}
         </AdminStatusBadge>
       ),
     },
     {
       id: "capacity",
-      header: "Max pods",
+      header: t("columns.maxPods"),
       minWidth: 150,
       cell: (node) =>
         node.labels?.["cocola.dev/runtime-mode"] === "compose" ? (
@@ -298,12 +299,12 @@ export default function SandboxNodesPage() {
         ) : (
           <span className="flex items-center gap-2">
             <span className="font-mono text-xs">
-              {node.max_sandbox_pods == null ? "Unlimited" : node.max_sandbox_pods}
+              {node.max_sandbox_pods == null ? t("unlimited") : node.max_sandbox_pods}
             </span>
             <Tooltip delay={0}>
               <Button
                 isIconOnly
-                aria-label={`Edit capacity for ${node.name}`}
+                aria-label={t("actions.editCapacityFor", { node: node.name })}
                 isDisabled={Boolean(savingCapacity)}
                 size="sm"
                 variant="outline"
@@ -311,26 +312,26 @@ export default function SandboxNodesPage() {
               >
                 <SlidersHorizontal className="size-4" />
               </Button>
-              <Tooltip.Content>Edit sandbox capacity</Tooltip.Content>
+              <Tooltip.Content>{t("actions.editCapacity")}</Tooltip.Content>
             </Tooltip>
           </span>
         ),
     },
     {
       id: "reason",
-      header: "Reason",
+      header: t("columns.reason"),
       minWidth: 190,
       cell: (node) => (
         <AdminTruncatedValue
           className="text-muted text-xs"
-          copyLabel="node reason"
+          copyLabel={t("copy.reason")}
           value={node.reason || "—"}
         />
       ),
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       width: 72,
       cell: (node) => {
@@ -340,23 +341,23 @@ export default function SandboxNodesPage() {
           <span className="text-muted text-xs">—</span>
         ) : (
           <AdminRowActions
-            label={`Actions for node ${node.name}`}
+            label={t("actions.forNode", { node: node.name })}
             busy={Boolean(actingNode)}
             actions={[
               node.schedulable
                 ? {
                     id: "disable",
-                    label: "Disable scheduling",
+                    label: t("actions.disable"),
                     icon: <Ban className="size-4" />,
                   }
                 : {
                     id: "restore",
-                    label: "Restore scheduling",
+                    label: t("actions.restore"),
                     icon: <CheckCircle2 className="size-4" />,
                   },
               {
                 id: "offline",
-                label: alreadyOffline ? "Node is offline" : "Take node offline",
+                label: alreadyOffline ? t("actions.offline") : t("actions.takeOffline"),
                 icon: <Power className="size-4" />,
                 disabled: alreadyOffline,
                 destructive: true,
@@ -381,8 +382,8 @@ export default function SandboxNodesPage() {
     <AdminPage className="admin-theme-sky">
       <AdminPageHeader
         icon={<SandboxNodesPageIcon className="size-5" />}
-        title="Nodes"
-        description="Runtime capacity and node health for Cocola sandboxes"
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton
             variant="outline"
@@ -390,14 +391,14 @@ export default function SandboxNodesPage() {
             disabled={loading}
             onClick={() => void refresh()}
           >
-            Refresh
+            {t("refresh")}
           </AdminRefreshButton>
         }
       />
 
       <AdminErrorDialog
         error={error}
-        title="Node operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
@@ -411,7 +412,7 @@ export default function SandboxNodesPage() {
         <UnsupportedState />
       ) : (
         <AdminDataGrid
-          aria-label="Sandbox nodes"
+          aria-label={t("tableAria")}
           columns={columns}
           contentClassName={composeOnly ? "min-w-[920px]" : "min-w-[1160px]"}
           data={nodes}
@@ -424,11 +425,11 @@ export default function SandboxNodesPage() {
                 <EmptyState.Media variant="icon">
                   <SandboxNodesPageIcon className="text-sky-500" />
                 </EmptyState.Media>
-                <EmptyState.Title>{loading ? "Loading nodes" : "No nodes found"}</EmptyState.Title>
+                <EmptyState.Title>
+                  {loading ? t("empty.loading") : t("empty.title")}
+                </EmptyState.Title>
                 <EmptyState.Description>
-                  {loading
-                    ? "Fetching cluster capacity…"
-                    : "Nodes will appear here once they join the k3s cluster."}
+                  {loading ? t("empty.loadingDescription") : t("empty.description")}
                 </EmptyState.Description>
               </EmptyState.Header>
             </EmptyState>
@@ -463,12 +464,13 @@ export default function SandboxNodesPage() {
 }
 
 function UnsupportedState() {
+  const t = useTranslations("admin.nodesPage");
   return (
     <Card className="p-8">
       <AdminEmptyState
         icon={<Server className="text-sky-500" />}
-        title="Cluster management is unavailable"
-        description="Start Cocola with the k3s runtime profile to enable node operations."
+        title={t("unsupported.title")}
+        description={t("unsupported.description")}
       />
     </Card>
   );
@@ -485,32 +487,24 @@ function OfflineDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const t = useTranslations("admin.nodesPage.offline");
   return (
     <ActionConfirmDialog
       open
       busy={acting}
-      title={`Offline ${target.node.name}?`}
+      title={t("title", { node: target.node.name })}
       description={
         <span className="grid gap-2">
           <span>
-            This node holds {target.affectedSessions} local Workspace
-            {target.affectedSessions === 1 ? "" : "s"} and runs {target.pendingPods.length} sandbox
-            pod{target.pendingPods.length === 1 ? "" : "s"}.
+            {t("summary", { workspaces: target.affectedSessions, pods: target.pendingPods.length })}
           </span>
           {target.affectedSessions > 0 ? (
-            <span className="text-warning">
-              Existing conversations cannot resume while this node is offline. No Workspace will be
-              cleared automatically.
-            </span>
+            <span className="text-warning">{t("workspaceWarning")}</span>
           ) : null}
-          {target.pendingPods.length > 0 ? (
-            <span>
-              Running sandboxes are not evicted and remain until they stop or are reclaimed.
-            </span>
-          ) : null}
+          {target.pendingPods.length > 0 ? <span>{t("sandboxWarning")}</span> : null}
         </span>
       }
-      confirmLabel="Cordon node"
+      confirmLabel={t("action")}
       icon={AlertTriangle}
       showHint={false}
       tone="danger"
@@ -535,10 +529,11 @@ function CapacityDialog({
   onCancel: () => void;
   onSave: () => void;
 }) {
+  const t = useTranslations("admin.nodesPage.capacity");
   const [phase, setPhase] = useState<"edit" | "confirm">("edit");
   const [inputError, setInputError] = useState("");
   const trimmedValue = value.trim();
-  const effect = capacityEffect(node, trimmedValue);
+  const effect = capacityEffect(node, trimmedValue, t);
 
   useEffect(() => {
     setPhase("edit");
@@ -548,7 +543,7 @@ function CapacityDialog({
   const reviewChange = () => {
     const validationError = capacityInputError(trimmedValue);
     if (validationError) {
-      setInputError(validationError);
+      setInputError(t("invalid"));
       return;
     }
     setInputError("");
@@ -567,25 +562,25 @@ function CapacityDialog({
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[500px]">
             <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close capacity editor" />
+              <Sheet.CloseTrigger aria-label={t("close")} />
               <Sheet.Header>
                 <span className="flex items-center gap-3">
                   <span className="bg-accent-soft text-accent grid size-10 place-items-center rounded-2xl">
                     <SlidersHorizontal className="size-5" />
                   </span>
                   <span>
-                    <Sheet.Heading>Edit sandbox capacity</Sheet.Heading>
+                    <Sheet.Heading>{t("title")}</Sheet.Heading>
                     <span className="text-muted mt-1 block text-sm">
-                      Configure the maximum number of running sandbox pods allowed on {node.name}.
+                      {t("description", { node: node.name })}
                     </span>
                   </span>
                 </span>
               </Sheet.Header>
               <Sheet.Body className="grid content-start gap-4">
                 <div className="bg-surface-secondary text-muted space-y-2 rounded-2xl p-4 text-sm">
-                  <p>Leave the value empty to allow unlimited sandbox pods.</p>
-                  <p>Set 0 to contribute no new sandbox capacity.</p>
-                  <p>Set a positive integer to cap concurrent running sandbox pods.</p>
+                  <p>{t("unlimitedHint")}</p>
+                  <p>{t("zeroHint")}</p>
+                  <p>{t("positiveHint")}</p>
                 </div>
                 <TextField
                   isDisabled={saving}
@@ -596,23 +591,23 @@ function CapacityDialog({
                     onChange(next);
                   }}
                 >
-                  <Label>Max sandbox pods</Label>
+                  <Label>{t("field")}</Label>
                   <Input
                     type="number"
                     min={0}
                     step={1}
                     inputMode="numeric"
-                    placeholder="Unlimited"
+                    placeholder={t("unlimited")}
                   />
                 </TextField>
                 {inputError ? <p className="text-danger text-sm">{inputError}</p> : null}
               </Sheet.Body>
               <Sheet.Footer className="gap-2">
                 <Button isDisabled={saving} variant="outline" onPress={onCancel}>
-                  Cancel
+                  {t("cancel")}
                 </Button>
                 <Button isDisabled={saving} onPress={reviewChange}>
-                  Continue
+                  {t("continue")}
                 </Button>
               </Sheet.Footer>
             </Sheet.Dialog>
@@ -622,9 +617,9 @@ function CapacityDialog({
       <ActionConfirmDialog
         open={phase === "confirm"}
         busy={saving}
-        title="Confirm sandbox capacity"
-        description={`${trimmedValue === "" ? "Unlimited" : trimmedValue} · ${effect.title} ${effect.description}`}
-        confirmLabel="Apply capacity"
+        title={t("confirmTitle")}
+        description={`${trimmedValue === "" ? t("unlimited") : trimmedValue} · ${effect.title} ${effect.description}`}
+        confirmLabel={t("apply")}
         icon={AlertTriangle}
         showHint={false}
         tone="warning"
@@ -641,47 +636,48 @@ function capacityInputError(raw: string) {
   if (raw === "") return "";
   const max = Number(raw);
   if (!Number.isInteger(max) || max < 0) {
-    return "Max sandbox pods must be a non-negative integer";
+    return "invalid";
   }
   return "";
 }
 
-function capacityEffect(node: SandboxNode, raw: string) {
+function capacityEffect(
+  node: SandboxNode,
+  raw: string,
+  t: ReturnType<typeof useTranslations<"admin.nodesPage.capacity">>,
+) {
   if (raw === "") {
     return {
-      title: "The node limit will be cleared.",
-      description:
-        "Existing sandbox pods keep running, and cocola may create new sandboxes when the cluster has available capacity.",
+      title: t("effects.clearedTitle"),
+      description: t("effects.clearedDescription"),
     };
   }
 
   const max = Number(raw);
   if (max === 0) {
     return {
-      title: "The node will contribute zero sandbox capacity.",
-      description:
-        "Existing sandbox pods keep running. For strict no-new-pods scheduling, use Disable to cordon the node.",
+      title: t("effects.zeroTitle"),
+      description: t("effects.zeroDescription"),
     };
   }
 
   if (node.sandbox_pods > max) {
     return {
-      title: "The new limit is below current usage.",
-      description: `This node currently has ${node.sandbox_pods} sandbox pods. Existing pods keep running, and this node will not contribute free capacity until usage drops below ${max}.`,
+      title: t("effects.belowTitle"),
+      description: t("effects.belowDescription", { pods: node.sandbox_pods, max }),
     };
   }
 
   if (node.sandbox_pods === max) {
     return {
-      title: "The node will be exactly at capacity.",
-      description:
-        "Existing sandbox pods keep running, and this node will not contribute free capacity until one of them exits.",
+      title: t("effects.exactTitle"),
+      description: t("effects.exactDescription"),
     };
   }
 
   return {
-    title: "The node will keep available sandbox capacity.",
-    description: `This node currently has ${node.sandbox_pods} sandbox pods and will allow up to ${max}.`,
+    title: t("effects.availableTitle"),
+    description: t("effects.availableDescription", { pods: node.sandbox_pods, max }),
   };
 }
 

@@ -18,6 +18,7 @@ import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
 import { Segment } from "@cocola/ui-compat/segment";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { connectorResponseError } from "@/lib/connector-response-error.mjs";
@@ -62,6 +63,8 @@ const TERMINAL_FLOW_STATES = new Set([
 ]);
 
 export function FeishuConnectorCard({ agentId }: { agentId: string }) {
+  const t = useTranslations("connectors.feishu");
+  const format = useFormatter();
   const { showError, showSuccess } = useWorkspaceToast();
   const endpoint = useMemo(
     () => `/api/agents/${encodeURIComponent(agentId)}/channels/feishu`,
@@ -151,7 +154,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
         setFlow(next);
         if (next.status === "ready") {
           await load();
-          showSuccess("Feishu authorization completed");
+          showSuccess(t("authorizationCompleted"));
           return;
         }
         if (TERMINAL_FLOW_STATES.has(next.status)) return;
@@ -169,7 +172,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [activeFlowID, endpoint, load, showError, showSuccess]);
+  }, [activeFlowID, endpoint, load, showError, showSuccess, t]);
 
   useEffect(() => {
     if (!activeFlowID) return;
@@ -229,7 +232,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
       });
       if (!response.ok) throw new Error(await connectorResponseError(response));
       setFlow(null);
-      showSuccess("Feishu authorization cancelled");
+      showSuccess(t("authorizationCancelled"));
     } catch (cause) {
       const message = errorMessage(cause);
       setError(message);
@@ -248,14 +251,14 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
           headers: { "content-type": "application/json" },
           body: "{}",
         }),
-      enabled ? "Feishu bot enabled" : "Feishu bot paused",
+      enabled ? t("enabled") : t("paused"),
     );
 
   const disconnect = async () => {
     const disconnected = await run(
       "disconnect",
       () => fetch(endpoint, { method: "DELETE" }),
-      "Feishu bot disconnected",
+      t("disconnected"),
     );
     if (!disconnected) return;
     setDisconnectOpen(false);
@@ -268,9 +271,9 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
     : 0;
   const state = connectionState(connection, loadState);
   const stateColor =
-    state.label === "Ready"
+    state.key === "ready"
       ? "success"
-      : state.label === "Unavailable" || state.label === "Needs attention"
+      : state.key === "unavailable" || state.key === "attention"
         ? "danger"
         : "warning";
   const copyValue = async (value: string, successMessage: string) => {
@@ -278,7 +281,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
       await navigator.clipboard.writeText(value);
       showSuccess(successMessage);
     } catch {
-      showError("Could not copy to clipboard");
+      showError(t("copyFailed"));
     }
   };
 
@@ -291,20 +294,18 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
               <MessageCircleMore className="size-5" />
             </span>
             <span className="min-w-0">
-              <Card.Title>Feishu Bot</Card.Title>
-              <Card.Description>
-                Give this Agent its own Feishu entry point. One Agent can have one Bot.
-              </Card.Description>
+              <Card.Title>{t("title")}</Card.Title>
+              <Card.Description>{t("description")}</Card.Description>
             </span>
           </span>
           <Chip color={stateColor} size="sm" variant="soft">
-            {state.label}
+            {t(`status.${state.key}`)}
           </Chip>
         </Card.Header>
         <Card.Content className="p-0">
           {connection?.bot_name ? (
             <div className="bg-surface-secondary flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm">
-              <span className="text-muted">Bot</span>
+              <span className="text-muted">{t("bot")}</span>
               <span className="truncate font-medium">{connection.bot_name}</span>
             </div>
           ) : null}
@@ -314,8 +315,8 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
               <div className="text-accent flex items-center gap-2 text-sm font-medium">
                 <Clock3 className="size-3.5" />
                 {flow.status === "awaiting_user"
-                  ? `Authorization expires in ${formatDuration(remainingSeconds)}`
-                  : "Preparing authorization…"}
+                  ? t("expiresIn", { time: formatDuration(remainingSeconds) })
+                  : t("preparing")}
               </div>
               {flow.verification_url ? (
                 <div className="mt-3 grid gap-2">
@@ -325,17 +326,15 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                       window.open(flow.verification_url, "_blank", "noopener,noreferrer")
                     }
                   >
-                    Continue in Feishu <ExternalLink className="size-4" />
+                    {t("continue")} <ExternalLink className="size-4" />
                   </Button>
                   <Button
                     className="w-full"
                     variant="ghost"
-                    onPress={() =>
-                      void copyValue(flow.verification_url!, "Authorization link copied")
-                    }
+                    onPress={() => void copyValue(flow.verification_url!, t("linkCopied"))}
                   >
                     <Copy className="size-4" />
-                    Copy authorization link
+                    {t("copyLink")}
                   </Button>
                 </div>
               ) : null}
@@ -345,60 +344,71 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                 variant="ghost"
                 onPress={() => void cancelRegistration()}
               >
-                {busy === "cancel" ? "Cancelling…" : "Cancel authorization"}
+                {busy === "cancel" ? t("cancelling") : t("cancelAuthorization")}
               </Button>
             </div>
           ) : null}
 
           {flow && ["denied", "expired", "failed", "interrupted"].includes(flow.status) ? (
             <StatusNotice icon={AlertTriangle} tone="danger">
-              {registrationFailureText(flow)}
+              {flow.status === "denied"
+                ? t("failure.denied")
+                : flow.status === "expired"
+                  ? t("failure.expired")
+                  : flow.status === "interrupted"
+                    ? t("failure.interrupted")
+                    : flow.error_code
+                      ? t("failure.failedCode", { code: flow.error_code })
+                      : t("failure.failed")}
             </StatusNotice>
           ) : null}
 
           {bind ? (
             <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3">
-              <p className="text-xs leading-5 text-amber-800">
-                Send this once to the bot before the code expires:
-              </p>
+              <p className="text-xs leading-5 text-amber-800">{t("bindInstruction")}</p>
               <Button
                 className="bg-surface mt-2 w-full justify-between font-mono"
                 variant="outline"
-                onPress={() => void copyValue(`/bind ${bind.code}`, "Binding command copied")}
+                onPress={() => void copyValue(`/bind ${bind.code}`, t("bindCopied"))}
               >
                 <span>/bind {bind.code}</span>
                 <Copy className="text-muted size-3.5" />
               </Button>
               <p className="mt-2 text-[11px] text-amber-700">
-                Expires {formatDate(bind.expiresAt)}
+                {t("expires", { date: format.dateTime(new Date(bind.expiresAt)) })}
               </p>
             </div>
           ) : null}
 
           {connection?.status === "awaiting_bind" && !bind ? (
             <StatusNotice icon={AlertTriangle} tone="warning">
-              This app is waiting for its owner. Re-enter its credentials to create a new binding
-              code.
+              {t("awaitingOwner")}
             </StatusNotice>
           ) : null}
 
           {connection?.status === "action_required" ? (
             <div className="mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-5 text-amber-800">
-              The bot is waiting for publishing or tenant approval in Feishu.
+              {t("awaitingApproval")}
               <a
                 href={developerConsoleURL(connection.domain)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 flex items-center gap-1 font-medium underline underline-offset-2"
               >
-                Open developer console <ExternalLink className="size-3.5" />
+                {t("openConsole")} <ExternalLink className="size-3.5" />
               </a>
             </div>
           ) : null}
 
           {connection?.status === "error" ? (
             <StatusNotice icon={AlertTriangle} tone="danger">
-              {connectorErrorText(connection.last_error_code)}
+              {connection.last_error_code === "app_not_published"
+                ? t("connectionError.app_not_published")
+                : connection.last_error_code === "tenant_approval_required"
+                  ? t("connectionError.tenant_approval_required")
+                  : connection.last_error_code === "credentials_invalid"
+                    ? t("connectionError.credentials_invalid")
+                    : t("connectionError.unknown")}
             </StatusNotice>
           ) : null}
 
@@ -414,13 +424,13 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
           <div className="mt-5 flex flex-wrap gap-2">
             {loadState === "checking" && !connection ? (
               <Button isDisabled isPending>
-                Checking…
+                {t("checking")}
               </Button>
             ) : null}
             {loadState === "failed" ? (
               <Button variant="outline" onPress={() => void load()}>
                 <RefreshCw className="size-4" />
-                Retry
+                {t("retry")}
               </Button>
             ) : null}
             {connection?.status === "not_configured" && !flow ? (
@@ -431,7 +441,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                   onPress={() => void startRegistration()}
                 >
                   <MessageCircleMore className="size-4" />
-                  Connect Feishu
+                  {t("connect")}
                 </Button>
                 <Button
                   isDisabled={busy !== ""}
@@ -439,7 +449,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                   onPress={() => setManualOpen(true)}
                 >
                   <Settings2 className="size-4" />
-                  Use existing App
+                  {t("existing")}
                 </Button>
               </>
             ) : null}
@@ -450,7 +460,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                 onPress={() => setManualOpen(true)}
               >
                 <Settings2 className="size-4" />
-                Use existing App
+                {t("existing")}
               </Button>
             ) : null}
             {connection?.connected && !connection.enabled ? (
@@ -460,7 +470,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                 onPress={() => void toggle(true)}
               >
                 <Play className="size-4" />
-                Enable
+                {t("enable")}
               </Button>
             ) : null}
             {connection?.connected && connection.enabled ? (
@@ -471,7 +481,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                 onPress={() => void toggle(false)}
               >
                 <Pause className="size-4" />
-                Pause
+                {t("pause")}
               </Button>
             ) : null}
             {connection?.connected ? (
@@ -481,7 +491,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                 onPress={() => setDisconnectOpen(true)}
               >
                 <Trash2 className="size-4" />
-                Disconnect
+                {t("disconnect")}
               </Button>
             ) : null}
             {flow && TERMINAL_FLOW_STATES.has(flow.status) && flow.status !== "ready" ? (
@@ -493,14 +503,16 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
                 }}
               >
                 <RefreshCw className="size-4" />
-                Try again
+                {t("tryAgain")}
               </Button>
             ) : null}
           </div>
 
           {connection?.last_connected_at ? (
             <p className="text-muted mt-4 text-xs">
-              Last connected {formatDate(connection.last_connected_at)}
+              {t("lastConnected", {
+                date: format.dateTime(new Date(connection.last_connected_at)),
+              })}
             </p>
           ) : null}
         </Card.Content>
@@ -528,7 +540,7 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
             setConnection(result.connection);
             setBind({ code: result.bind_code, expiresAt: result.expires_at });
             setManualOpen(false);
-            showSuccess("Existing Feishu app connected");
+            showSuccess(t("existingConnected"));
           } catch (cause) {
             const message = errorMessage(cause);
             setError(message);
@@ -542,12 +554,12 @@ export function FeishuConnectorCard({ agentId }: { agentId: string }) {
 
       <ActionConfirmDialog
         busy={busy === "disconnect"}
-        confirmLabel="Disconnect"
-        description="Cocola will delete the encrypted app credential and owner binding. Conversation history remains."
+        confirmLabel={t("disconnect")}
+        description={t("disconnectDescription")}
         error={error || null}
         icon={Trash2}
         open={disconnectOpen}
-        title="Disconnect Feishu Bot?"
+        title={t("disconnectTitle")}
         tone="danger"
         onConfirm={() => void disconnect()}
         onOpenChange={setDisconnectOpen}
@@ -567,6 +579,7 @@ function ManualAppDialog({
   onOpenChange: (open: boolean) => void;
   onSubmit: (domain: "feishu" | "lark", appID: string, appSecret: string) => Promise<void>;
 }) {
+  const t = useTranslations("connectors.feishu.manual");
   const [domain, setDomain] = useState<"feishu" | "lark">("feishu");
   const [appID, setAppID] = useState("");
   const [appSecret, setAppSecret] = useState("");
@@ -602,19 +615,17 @@ function ManualAppDialog({
       <Sheet.Backdrop>
         <Sheet.Content className="w-full md:w-[460px]">
           <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close existing Feishu App settings" />
+            <Sheet.CloseTrigger aria-label={t("close")} />
             <Sheet.Header>
-              <Sheet.Heading>Use Existing App</Sheet.Heading>
-              <p className="text-muted text-sm">
-                Cocola encrypts the App Secret and returns a one-time command to bind the Bot owner.
-              </p>
+              <Sheet.Heading>{t("title")}</Sheet.Heading>
+              <p className="text-muted text-sm">{t("description")}</p>
             </Sheet.Header>
             <form className="contents" onSubmit={(event) => void submit(event)}>
               <Sheet.Body className="grid content-start gap-4">
                 <div>
-                  <Label>Platform</Label>
+                  <Label>{t("platform")}</Label>
                   <Segment
-                    aria-label="Feishu platform"
+                    aria-label={t("platformAria")}
                     className="mt-2"
                     selectedKey={domain}
                     onSelectionChange={(key) => setDomain(String(key) as "feishu" | "lark")}
@@ -639,14 +650,14 @@ function ManualAppDialog({
               </Sheet.Body>
               <Sheet.Footer className="gap-2">
                 <Button isDisabled={busy} variant="outline" onPress={() => onOpenChange(false)}>
-                  Cancel
+                  {t("cancel")}
                 </Button>
                 <Button
                   isDisabled={!appID.trim() || !appSecret.trim()}
                   isPending={busy}
                   type="submit"
                 >
-                  Connect App
+                  {t("connect")}
                 </Button>
               </Sheet.Footer>
             </form>
@@ -711,42 +722,36 @@ function ConnectorButton({
 function connectionState(
   connection: FeishuConnection | null,
   loadState: ConnectionLoadState,
-): { label: string; className: string } {
+): {
+  key:
+    | "checking"
+    | "unavailable"
+    | "notConnected"
+    | "ready"
+    | "paused"
+    | "attention"
+    | "connecting";
+  className: string;
+} {
   if (loadState === "checking") {
-    return { label: "Checking", className: "bg-surface-secondary text-muted" };
+    return { key: "checking", className: "bg-surface-secondary text-muted" };
   }
   if (loadState === "failed") {
-    return { label: "Unavailable", className: "bg-red-500/10 text-red-700" };
+    return { key: "unavailable", className: "bg-red-500/10 text-red-700" };
   }
   if (!connection || connection.status === "not_configured") {
-    return { label: "Not connected", className: "bg-surface-secondary text-muted" };
+    return { key: "notConnected", className: "bg-surface-secondary text-muted" };
   }
   if (connection.status === "ready") {
-    return { label: "Ready", className: "bg-emerald-500/10 text-emerald-700" };
+    return { key: "ready", className: "bg-emerald-500/10 text-emerald-700" };
   }
   if (connection.status === "disabled") {
-    return { label: "Paused", className: "bg-slate-500/10 text-slate-700" };
+    return { key: "paused", className: "bg-slate-500/10 text-slate-700" };
   }
   if (connection.status === "error") {
-    return { label: "Needs attention", className: "bg-red-500/10 text-red-700" };
+    return { key: "attention", className: "bg-red-500/10 text-red-700" };
   }
-  return { label: "Connecting", className: "bg-amber-500/10 text-amber-700" };
-}
-
-function registrationFailureText(flow: RegistrationFlow) {
-  if (flow.status === "denied") return "Feishu authorization was denied.";
-  if (flow.status === "expired") return "Feishu authorization expired.";
-  if (flow.status === "interrupted") return "Feishu authorization was interrupted.";
-  return flow.error_code
-    ? `Feishu authorization failed (${flow.error_code}).`
-    : "Feishu authorization failed.";
-}
-
-function connectorErrorText(code?: string) {
-  if (code === "app_not_published") return "Publish the app in Feishu, then reconnect.";
-  if (code === "tenant_approval_required") return "The app is waiting for tenant approval.";
-  if (code === "credentials_invalid") return "The app credentials are no longer valid.";
-  return "The Feishu bot could not connect. Retry or check the app configuration.";
+  return { key: "connecting", className: "bg-amber-500/10 text-amber-700" };
 }
 
 function developerConsoleURL(domain?: string) {
@@ -757,11 +762,6 @@ function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 function errorMessage(cause: unknown) {

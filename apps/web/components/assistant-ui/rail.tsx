@@ -33,6 +33,7 @@ import {
 import { CheckCircle2, ChevronRight, CircleX, Download, ExternalLink, Eye } from "lucide-react";
 import Image from "next/image";
 import { Button, Card, Tooltip } from "@heroui/react";
+import { useTranslations } from "next-intl";
 import { useEffect, useState, type FC, type ReactNode } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { formatAgentDuration } from "@/lib/agent-turn-summary.mjs";
@@ -54,6 +55,7 @@ export const RailProcessSummary: FC<{
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 }> = ({ durationMs, children, expanded: controlledExpanded, onExpandedChange }) => {
+  const t = useTranslations("chat.rail");
   const [localExpanded, setLocalExpanded] = useState(false);
   const expanded = controlledExpanded ?? localExpanded;
   const duration = formatAgentDuration(durationMs);
@@ -75,7 +77,9 @@ export const RailProcessSummary: FC<{
         <span className="flex items-center justify-center">
           <CheckCircle2 className="size-4 shrink-0 text-emerald-500" aria-hidden="true" />
         </span>
-        <span className="truncate">{duration ? `Processed in ${duration}` : "Processed"}</span>
+        <span className="truncate">
+          {duration ? t("processedIn", { duration }) : t("processed")}
+        </span>
         <ChevronRight
           className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")}
           aria-hidden="true"
@@ -132,24 +136,28 @@ export const RailRow: FC<{
 // each surface can supply its own source: the live thread renders the streaming
 // <MarkdownText/> (reads the part from context), while the read-only page passes
 // <MarkdownContent value={...}/>. While streaming, the icon spins in place.
-export const RailText: FC<{ running?: boolean; children: ReactNode }> = ({ running, children }) => (
-  <RailRow icon={ChatCircle} label="Answer" running={running} color="text-indigo-500">
-    {children}
-  </RailRow>
-);
+export const RailText: FC<{ running?: boolean; children: ReactNode }> = ({ running, children }) => {
+  const t = useTranslations("chat.rail");
+  return (
+    <RailRow icon={ChatCircle} label={t("answer")} running={running} color="text-indigo-500">
+      {children}
+    </RailRow>
+  );
+};
 
 export const RailEnvironment: FC<{
   environment: EnvironmentPreparationSnapshot;
 }> = ({ environment }) => {
+  const t = useTranslations("chat.rail");
   const running = environment.state === "preparing";
   const degraded = environment.state === "degraded";
   const label = running
-    ? "Preparing environment"
+    ? t("environment.preparing")
     : degraded
-      ? "Environment ready with limits"
+      ? t("environment.limited")
       : environment.state === "ready"
-        ? "Environment ready"
-        : "Environment updated";
+        ? t("environment.ready")
+        : t("environment.updated");
   const summaries = environment.components.map((component) =>
     component.summary ? `${component.label}: ${component.summary}` : component.label,
   );
@@ -170,22 +178,26 @@ export const RailEnvironment: FC<{
 
 // Ephemeral hand-off between environment preparation and the first real
 // response part. It is derived from the live thread state and is never stored.
-export const RailResponsePending: FC = () => (
-  <RailRow icon={ChatCircle} label="Starting response" running color="text-indigo-500" />
-);
+export const RailResponsePending: FC = () => {
+  const t = useTranslations("chat.rail");
+  return (
+    <RailRow icon={ChatCircle} label={t("startingResponse")} running color="text-indigo-500" />
+  );
+};
 
 export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ items, pinned }) => {
+  const t = useTranslations("chat.rail");
   const normalized = normalizeProgressItems(items);
   const completed = normalized.filter((item) => item.status === "completed").length;
   const label = normalized.length ? (
     <span className="flex items-baseline gap-1.5">
-      <span>Plan</span>
+      <span>{t("plan")}</span>
       <span className="text-xs font-normal tabular-nums text-muted">
         {completed}/{normalized.length}
       </span>
     </span>
   ) : (
-    "Plan"
+    t("plan")
   );
 
   const content = normalized.length ? (
@@ -219,13 +231,13 @@ export const RailProgress: FC<{ items?: unknown[]; pinned?: boolean }> = ({ item
       })}
     </ol>
   ) : (
-    <p className="text-[13px] leading-5 text-muted">No plan items.</p>
+    <p className="text-[13px] leading-5 text-muted">{t("noPlan")}</p>
   );
 
   if (pinned) {
     return (
       <section
-        aria-label="Current plan"
+        aria-label={t("currentPlan")}
         aria-live="polite"
         className="rounded-2xl border border-border/80 bg-surface px-4 py-3 shadow-surface"
       >
@@ -256,18 +268,19 @@ export const RailMemoryRecall: FC<{
   count?: number;
   content?: string;
 }> = ({ status, count = 0, content = "" }) => {
+  const t = useTranslations("chat.rail");
   const [expanded, setExpanded] = useState(false);
   const recalled = Math.max(0, Math.floor(count));
-  const usedLabel = `Used ${recalled} ${recalled === 1 ? "memory" : "memories"}`;
+  const usedLabel = t("memory.used", { count: recalled });
   const unavailable = status === "unavailable";
   const degraded = status === "degraded";
   const label =
     status === "running"
-      ? "Recalling memories"
+      ? t("memory.recalling")
       : unavailable
-        ? "Memory unavailable"
+        ? t("memory.unavailable")
         : degraded
-          ? `${usedLabel} with limits`
+          ? t("memory.limited", { label: usedLabel })
           : usedLabel;
   const expandable = content.length > 0;
   const labelContent = expandable ? (
@@ -300,9 +313,7 @@ export const RailMemoryRecall: FC<{
     >
       {unavailable || degraded ? (
         <p className="text-[13px] leading-5 text-muted">
-          {unavailable
-            ? "The answer continued without recalled memory."
-            : "Some memory sources were unavailable; the answer used the memories that were returned."}
+          {unavailable ? t("memory.continued") : t("memory.partial")}
         </p>
       ) : null}
       {expanded && expandable ? (
@@ -322,14 +333,15 @@ export const RailSCMApproval: FC<{
   error?: string;
   onDecision?: (decision: "approved" | "denied") => void;
 }> = ({ status, category, commandLabel, busy, error, onDecision }) => {
+  const t = useTranslations("chat.rail");
   const label =
     status === "pending"
-      ? "GitHub action needs approval"
+      ? t("approval.pending")
       : status === "approved"
-        ? "GitHub action approved"
+        ? t("approval.approved")
         : status === "denied"
-          ? "GitHub action denied"
-          : "GitHub approval expired";
+          ? t("approval.denied")
+          : t("approval.expired");
   return (
     <RailRow
       icon={ShieldAlert}
@@ -339,8 +351,8 @@ export const RailSCMApproval: FC<{
       <div className="space-y-2">
         <p className="text-[13px] leading-5 text-muted">
           {commandLabel ? `${commandLabel}. ` : ""}
-          {category ? `Category: ${category}. ` : ""}
-          Approval applies once to this exact command and expires after five minutes.
+          {category ? `${t("approval.category", { category })} ` : ""}
+          {t("approval.description")}
         </p>
         {status === "pending" && onDecision ? (
           <div className="flex items-center gap-2">
@@ -350,7 +362,7 @@ export const RailSCMApproval: FC<{
               onClick={() => onDecision("approved")}
               className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
             >
-              Approve once
+              {t("approval.approve")}
             </button>
             <button
               type="button"
@@ -358,7 +370,7 @@ export const RailSCMApproval: FC<{
               onClick={() => onDecision("denied")}
               className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
             >
-              Deny
+              {t("approval.deny")}
             </button>
           </div>
         ) : null}
@@ -369,86 +381,106 @@ export const RailSCMApproval: FC<{
 };
 
 // Reasoning / chain-of-thought node with a collapsible body.
-export const RailReasoning: FC<{ text: string; running?: boolean }> = ({ text, running }) => (
-  <RailRow
-    icon={Brain}
-    label={running ? "Thinking" : "Reasoning"}
-    running={running}
-    color="text-purple-500"
-  >
-    <details className="aui-details group text-sm">
-      <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-[13px] text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-        <span>Show reasoning</span>
-      </summary>
-      <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-sm leading-6 text-muted">
-        {text}
-      </div>
-    </details>
-  </RailRow>
-);
+export const RailReasoning: FC<{ text: string; running?: boolean }> = ({ text, running }) => {
+  const t = useTranslations("chat.rail");
+  return (
+    <RailRow
+      icon={Brain}
+      label={running ? t("reasoning.thinking") : t("reasoning.reasoning")}
+      running={running}
+      color="text-purple-500"
+    >
+      <details className="aui-details group text-sm">
+        <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-[13px] text-muted transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+          <span>{t("reasoning.show")}</span>
+        </summary>
+        <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3 text-sm leading-6 text-muted">
+          {text}
+        </div>
+      </details>
+    </RailRow>
+  );
+};
 
 type ToolMeta = { icon: RailIcon; running: string; done: string; color: string };
 
 // Map SDK tool names (Claude Agent SDK: Bash/Read/Write/Edit/Glob/Grep/
 // WebSearch/WebFetch/Task/TodoWrite/Skill; MCP tools carry an mcp__ prefix)
 // to an icon + progress phrases. Unknown names fall back to a generic wrench.
-const getToolMeta = (rawName: string): ToolMeta => {
+type RailTranslations = ReturnType<typeof useTranslations<"chat.rail">>;
+
+const getToolMeta = (rawName: string, t: RailTranslations): ToolMeta => {
   const name = rawName.replace(/^mcp__/, "").toLowerCase();
   if (name.includes("websearch") || name.includes("search"))
     return {
       icon: MagnifyingGlass,
-      running: "Searching",
-      done: "Searched",
+      running: t("tools.searching"),
+      done: t("tools.searched"),
       color: "text-violet-500",
     };
   if (name.includes("webfetch") || name.includes("fetch") || name.includes("browser"))
-    return { icon: PhGlobe, running: "Reading page", done: "Read page", color: "text-sky-500" };
+    return {
+      icon: PhGlobe,
+      running: t("tools.readingPage"),
+      done: t("tools.readPage"),
+      color: "text-sky-500",
+    };
   if (name.startsWith("read") || name.includes("read_file"))
-    return { icon: PhFileText, running: "Reading file", done: "Read file", color: "text-blue-500" };
+    return {
+      icon: PhFileText,
+      running: t("tools.readingFile"),
+      done: t("tools.readFile"),
+      color: "text-blue-500",
+    };
   if (name.startsWith("write") || name.includes("write_file"))
     return {
       icon: PencilSimple,
-      running: "Writing file",
-      done: "Wrote file",
+      running: t("tools.writingFile"),
+      done: t("tools.wroteFile"),
       color: "text-emerald-500",
     };
   if (name.startsWith("edit") || name.includes("str_replace") || name.includes("edit_file"))
     return {
       icon: PencilSimple,
-      running: "Editing file",
-      done: "Edited file",
+      running: t("tools.editingFile"),
+      done: t("tools.editedFile"),
       color: "text-amber-500",
     };
   if (name.startsWith("glob") || name.startsWith("grep") || name.includes("find"))
     return {
       icon: FolderOpen,
-      running: "Searching code",
-      done: "Searched code",
+      running: t("tools.searchingCode"),
+      done: t("tools.searchedCode"),
       color: "text-cyan-600",
     };
   if (isCommandTool(rawName))
     return {
       icon: TerminalWindow,
-      running: "Running command",
-      done: "Ran command",
+      running: t("tools.runningCommand"),
+      done: t("tools.ranCommand"),
       color: "text-orange-500",
     };
   if (name.startsWith("todo") || name.includes("task"))
     return {
       icon: ListChecks,
-      running: "Planning tasks",
-      done: "Updated tasks",
+      running: t("tools.planningTasks"),
+      done: t("tools.updatedTasks"),
       color: "text-fuchsia-500",
     };
   if (name.startsWith("skill") || name.includes("load"))
     return {
       icon: Sparkle,
-      running: "Loading skill",
-      done: "Loaded skill",
+      running: t("tools.loadingSkill"),
+      done: t("tools.loadedSkill"),
       color: "text-yellow-500",
     };
-  return { icon: PhWrench, running: "Calling tool", done: "Called tool", color: "text-slate-400" };
+  return {
+    icon: PhWrench,
+    running: t("tools.calling"),
+    done: t("tools.called"),
+    color: "text-slate-400",
+  };
 };
 
 // Best-effort chips from the tool input JSON. Never throws; returns [] on any
@@ -507,6 +539,7 @@ const CommandExecutionCard: FC<{
   running?: boolean;
   isError?: boolean;
 }> = ({ command, output = "", running, isError }) => {
+  const t = useTranslations("chat.rail");
   const [expanded, setExpanded] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -520,7 +553,11 @@ const CommandExecutionCard: FC<{
     return () => window.clearInterval(timer);
   }, [running]);
 
-  const status = running ? "Running" : isError ? "Failed" : "Finished";
+  const status = running
+    ? t("command.running")
+    : isError
+      ? t("command.failed")
+      : t("command.finished");
   const duration = running ? formatAgentDuration(elapsedSeconds * 1000) : "";
   const statusLabel = duration ? `${status} · ${duration}` : status;
   const latestOutput = output.trimEnd().split("\n").at(-1) ?? "";
@@ -571,7 +608,7 @@ const CommandExecutionCard: FC<{
         <Tooltip>
           <Button
             isIconOnly
-            aria-label={expanded ? "Hide command details" : "Show command details"}
+            aria-label={expanded ? t("command.hide") : t("command.show")}
             className="size-7 min-h-7 min-w-7 rounded-full"
             size="sm"
             variant="ghost"
@@ -582,7 +619,9 @@ const CommandExecutionCard: FC<{
               aria-hidden="true"
             />
           </Button>
-          <Tooltip.Content>{expanded ? "Hide details" : "Show details"}</Tooltip.Content>
+          <Tooltip.Content>
+            {expanded ? t("command.hideShort") : t("command.showShort")}
+          </Tooltip.Content>
         </Tooltip>
       </Card.Header>
       {expanded ? (
@@ -595,7 +634,7 @@ const CommandExecutionCard: FC<{
           {output ? (
             <section className="overflow-hidden rounded-lg border border-border/70 bg-background">
               <header className="flex h-7 items-center border-b border-border/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-                Output
+                {t("command.output")}
               </header>
               <div className="max-h-72 overflow-auto">
                 <pre className="min-w-max whitespace-pre px-3 py-2 font-mono text-[11.5px] leading-5 text-foreground">
@@ -704,7 +743,8 @@ export const RailTool: FC<{
   outcome?: string;
   running?: boolean;
 }> = ({ toolName, argsText, liveOutput, result, isError, outcome, running }) => {
-  const meta = getToolMeta(toolName);
+  const t = useTranslations("chat.rail");
+  const meta = getToolMeta(toolName, t);
   const Icon = meta.icon;
   const chips = extractToolChips(argsText ?? "");
   const command = extractCommand(argsText ?? "");
@@ -767,7 +807,7 @@ export const RailTool: FC<{
         <details className="aui-details group mt-1.5 text-sm">
           <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-            <span>{commandFailure ? "View command output" : "View error details"}</span>
+            <span>{commandFailure ? t("command.viewOutput") : t("command.viewError")}</span>
           </summary>
           <div className="aui-details-body mt-1 border-l-2 border-danger/30 pl-3">
             <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted">
@@ -780,7 +820,7 @@ export const RailTool: FC<{
         <details className="aui-details group mt-1.5 text-sm">
           <summary className="flex w-fit cursor-pointer select-none items-center gap-1 py-0.5 text-xs text-muted/70 transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
-            <span>View arguments</span>
+            <span>{t("command.viewArguments")}</span>
           </summary>
           <div className="aui-details-body mt-1 border-l-2 border-border/70 pl-3">
             <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words py-1 font-mono text-[11px] leading-5 text-muted">
@@ -803,11 +843,12 @@ export const RailFile: FC<{
   downloadUrl: string;
   onPreview?: () => void;
 }> = ({ filename, mimeType, size, downloadUrl, onPreview }) => {
+  const t = useTranslations("chat.rail");
   const kind = resolveFileType(filename, mimeType);
   const showThumbnail = kind.isImage && Boolean(downloadUrl);
 
   return (
-    <RailRow icon={FilePlus} label="Generated file" color="text-teal-500">
+    <RailRow icon={FilePlus} label={t("file.generated")} color="text-teal-500">
       <div className="inline-flex w-fit max-w-full items-center gap-3 rounded-xl border border-border/60 bg-surface-secondary/40 p-3 text-sm">
         <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background">
           {showThumbnail ? (
@@ -834,13 +875,13 @@ export const RailFile: FC<{
               {kind.badge}
             </span>
             <span aria-hidden>·</span>
-            <span className="truncate">{formatBytes(size)}</span>
+            <span className="truncate">{formatBytes(size, t("file.unknownSize"))}</span>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {onPreview && kind.previewable ? (
             <TooltipIconButton
-              tooltip="Preview"
+              tooltip={t("file.preview")}
               variant="ghost"
               className="size-8 rounded-full p-2"
               onClick={onPreview}
@@ -852,8 +893,8 @@ export const RailFile: FC<{
             <a
               href={downloadUrl}
               download={filename}
-              title="Download"
-              aria-label={`Download ${filename}`}
+              title={t("file.download")}
+              aria-label={t("file.downloadNamed", { name: filename })}
               className="inline-flex size-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
             >
               <Download className="size-4" />
@@ -865,8 +906,8 @@ export const RailFile: FC<{
   );
 };
 
-export const formatBytes = (bytes: number): string => {
-  if (!bytes) return "Unknown size";
+export const formatBytes = (bytes: number, unknownSize = "Unknown size"): string => {
+  if (!bytes) return unknownSize;
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;
   let unit = 0;

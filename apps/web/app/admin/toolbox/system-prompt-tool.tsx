@@ -2,6 +2,7 @@
 
 import { CircleAlert, LoaderCircle, Save, ScrollText } from "lucide-react";
 import { Button, Card, Label, Switch, TextArea, TextField } from "@heroui/react";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminAlert, AdminDrawer } from "@/components/admin/admin-ui";
 import { ToolboxCard } from "./toolbox-card";
@@ -25,6 +26,7 @@ export function SystemPromptTool({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("admin.toolboxPage.systemPrompt");
   const [prompt, setPrompt] = useState<AgentPrompt>(EMPTY_PROMPT);
   const [draft, setDraft] = useState("");
   const [enabled, setEnabled] = useState(false);
@@ -95,9 +97,9 @@ export function SystemPromptTool({
       <ToolboxCard
         icon={ScrollText}
         iconClassName="bg-cyan-100 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-300"
-        status={promptStatusLabel(loading, Boolean(loadError), prompt.enabled)}
-        summary="Set the global behavior policy applied to new agent turns."
-        title="System Prompt"
+        status={promptStatusLabel(loading, Boolean(loadError), prompt.enabled, t)}
+        summary={t("summary")}
+        title={t("title")}
         onPress={() => setOpen(true)}
       />
 
@@ -105,13 +107,13 @@ export function SystemPromptTool({
         className="admin-theme-cyan"
         open={open}
         onOpenChange={setOpen}
-        title="System Prompt"
-        description="Set the global behavior policy applied to new agent turns."
+        title={t("title")}
+        description={t("summary")}
         size="lg"
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button variant="outline" isDisabled={saving} onPress={() => setOpen(false)}>
-              Cancel
+              {t("cancel")}
             </Button>
             <Button
               className="min-w-32 gap-2"
@@ -123,7 +125,7 @@ export function SystemPromptTool({
               ) : (
                 <Save className="size-4" />
               )}
-              {saving ? "Saving…" : "Save changes"}
+              {saving ? t("saving") : t("save")}
             </Button>
           </div>
         }
@@ -132,7 +134,7 @@ export function SystemPromptTool({
           {loading ? (
             <div className="flex min-h-48 items-center justify-center text-sm text-muted">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
-              Loading system prompt
+              {t("loadingPrompt")}
             </div>
           ) : (
             <>
@@ -141,7 +143,7 @@ export function SystemPromptTool({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <span>{loadError}</span>
                     <Button variant="outline" size="sm" onPress={() => void load()}>
-                      Retry
+                      {t("retry")}
                     </Button>
                   </div>
                 </AdminAlert>
@@ -154,9 +156,9 @@ export function SystemPromptTool({
 
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-foreground">Global system prompt</div>
+                  <div className="text-sm font-semibold text-foreground">{t("globalPrompt")}</div>
                   <p className="mt-1 max-w-xl text-xs leading-5 text-muted">
-                    Saved content is injected server-side and is never copied into trace metadata.
+                    {t("globalPromptDescription")}
                   </p>
                 </div>
                 <Switch
@@ -168,7 +170,7 @@ export function SystemPromptTool({
                     <Switch.Control>
                       <Switch.Thumb />
                     </Switch.Control>
-                    {enabled ? "Enabled" : "Disabled"}
+                    {enabled ? t("enabled") : t("disabled")}
                   </Switch.Content>
                 </Switch>
               </div>
@@ -179,19 +181,21 @@ export function SystemPromptTool({
                 variant="secondary"
                 onChange={setDraft}
               >
-                <Label className="sr-only">Global system prompt</Label>
+                <Label className="sr-only">{t("globalPrompt")}</Label>
                 <TextArea
                   className="min-h-80 text-sm leading-6"
-                  placeholder="Write the global behavior policy for agents..."
+                  placeholder={t("placeholder")}
                   spellCheck={false}
                 />
               </TextField>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <PromptMeta label="Version" value={prompt.version || 0} />
-                <PromptMeta label="Characters" value={draft.length} />
+                <PromptMeta label={t("version")} value={prompt.version || 0} />
+                <PromptMeta label={t("characters")} value={draft.length} />
               </div>
-              <div className="text-xs text-muted">{dirty ? "Unsaved changes" : "Up to date"}</div>
+              <div className="text-xs text-muted">
+                {dirty ? t("unsavedChanges") : t("upToDate")}
+              </div>
             </>
           )}
         </div>
@@ -200,10 +204,15 @@ export function SystemPromptTool({
   );
 }
 
-function promptStatusLabel(loading: boolean, error: boolean, enabled: boolean) {
-  if (loading) return "Loading";
-  if (error) return "Unavailable";
-  return enabled ? "Enabled" : "Disabled";
+function promptStatusLabel(
+  loading: boolean,
+  error: boolean,
+  enabled: boolean,
+  t: ReturnType<typeof useTranslations<"admin.toolboxPage.systemPrompt">>,
+) {
+  if (loading) return t("loading");
+  if (error) return t("unavailable");
+  return enabled ? t("enabled") : t("disabled");
 }
 
 function PromptMeta({ label, value }: { label: string; value: string | number }) {

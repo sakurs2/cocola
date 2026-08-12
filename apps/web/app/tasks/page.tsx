@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useFormatter, useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   WorkspacePageAction,
@@ -25,9 +26,7 @@ import {
 import { TaskConfirmDialog, TaskDrawer } from "@/components/scheduled-tasks/task-drawer";
 import { Badge } from "@/components/ui/badge";
 import {
-  formatDateTime,
   normalizeModelOptions,
-  scheduleLabel,
   sortTasks,
   taskIsToday,
   taskPayload,
@@ -52,6 +51,9 @@ const taskResultBadgeVariant = {
 type Tab = "today" | "all";
 
 export default function TasksPage() {
+  const t = useTranslations("tasks");
+  const common = useTranslations("common.actions");
+  const format = useFormatter();
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
   const ownerID = session?.user?.id ?? "";
@@ -226,10 +228,41 @@ export default function TasksPage() {
     if (action === "delete") setDeleteTarget(task);
   };
 
+  const localizedDateTime = (value?: string) => {
+    if (!value || Number.isNaN(Date.parse(value))) return "—";
+    return format.dateTime(new Date(value), {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const localizedScheduleLabel = (task: ScheduledTask) => {
+    const spec = task.schedule_spec ?? {};
+    const minute = String(Number(spec.minute ?? 0)).padStart(2, "0");
+    const hour = String(Number(spec.hour ?? 0)).padStart(2, "0");
+    const time = `${hour}:${minute}`;
+    if (task.schedule_kind === "once") {
+      return t("schedule.once", { date: localizedDateTime(String(spec.run_at ?? "")) });
+    }
+    if (task.schedule_kind === "hourly") return t("schedule.hourly", { minute });
+    if (task.schedule_kind === "daily") return t("schedule.daily", { time });
+    if (task.schedule_kind === "weekly") {
+      const weekday = Math.min(7, Math.max(1, Number(spec.weekday ?? 1)));
+      const date = new Date(Date.UTC(2024, 0, weekday));
+      return t("schedule.weekly", {
+        time,
+        weekday: format.dateTime(date, { weekday: "long", timeZone: "UTC" }),
+      });
+    }
+    return t("schedule.monthly", { day: Number(spec.day ?? 1), time });
+  };
+
   const columns: DataGridColumn<ScheduledTask>[] = [
     {
       id: "task",
-      header: "Task",
+      header: t("columns.task"),
       isRowHeader: true,
       minWidth: 300,
       cell: (task) => (
@@ -248,39 +281,39 @@ export default function TasksPage() {
     },
     {
       id: "schedule",
-      header: "Schedule",
+      header: t("columns.schedule"),
       minWidth: 210,
       cell: (task) => (
         <span className="text-muted block min-w-0 text-sm">
           <span className="flex items-center gap-2 truncate">
             <CalendarClock className="size-4 shrink-0" />
-            {scheduleLabel(task)}
+            {localizedScheduleLabel(task)}
           </span>
           <span className="mt-1 block truncate pl-6 text-xs">
-            Next: {formatDateTime(task.next_run_at)}
+            {t("next", { date: localizedDateTime(task.next_run_at) })}
           </span>
         </span>
       ),
     },
     {
       id: "lastResult",
-      header: "Last result",
+      header: t("columns.lastResult"),
       minWidth: 190,
       cell: (task) => <TaskLastResult task={task} />,
     },
     {
       id: "status",
-      header: "Status",
+      header: t("columns.status"),
       minWidth: 110,
       cell: (task) => (
         <Chip color={statusColor(task.status)} size="sm" variant="soft">
-          {statusLabel(task.status)}
+          {t(`status.${task.status}`)}
         </Chip>
       ),
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       pinned: "end",
       width: 80,
@@ -288,38 +321,38 @@ export default function TasksPage() {
         <Dropdown>
           <Tooltip delay={0}>
             <Dropdown.Trigger
-              aria-label={`Actions for ${task.name}`}
+              aria-label={t("actionsFor", { name: task.name })}
               className="text-muted hover:bg-surface-secondary hover:text-foreground mx-auto grid size-9 place-items-center rounded-xl"
             >
               <Ellipsis className="size-4" />
             </Dropdown.Trigger>
-            <Tooltip.Content>Task actions</Tooltip.Content>
+            <Tooltip.Content>{t("taskActions")}</Tooltip.Content>
           </Tooltip>
           <Dropdown.Popover placement="bottom end">
             <Dropdown.Menu
-              aria-label={`Actions for ${task.name}`}
+              aria-label={t("actionsFor", { name: task.name })}
               onAction={(key) => handleAction(task, String(key))}
             >
-              <Dropdown.Item id="edit" textValue="Edit">
-                Edit
+              <Dropdown.Item id="edit" textValue={t("edit")}>
+                {t("edit")}
               </Dropdown.Item>
               {task.status === "active" || task.status === "paused" ? (
                 <Dropdown.Item
                   id="toggle"
-                  textValue={task.status === "paused" ? "Resume" : "Pause"}
+                  textValue={task.status === "paused" ? t("resume") : t("pause")}
                 >
-                  {task.status === "paused" ? "Resume" : "Pause"}
+                  {task.status === "paused" ? t("resume") : t("pause")}
                 </Dropdown.Item>
               ) : null}
               <Dropdown.Item
                 id="result"
                 isDisabled={!task.conversation_id || task.run_count === 0}
-                textValue="View latest result"
+                textValue={t("viewResult")}
               >
-                View latest result
+                {t("viewResult")}
               </Dropdown.Item>
-              <Dropdown.Item id="delete" textValue="Delete">
-                Delete
+              <Dropdown.Item id="delete" textValue={common("delete")}>
+                {common("delete")}
               </Dropdown.Item>
             </Dropdown.Menu>
           </Dropdown.Popover>
@@ -334,12 +367,12 @@ export default function TasksPage() {
         action={
           <WorkspacePageAction isDisabled={!modelsLoaded} onPress={openCreate}>
             <Plus className="size-4" />
-            New task
+            {t("new")}
           </WorkspacePageAction>
         }
-        description="Schedule prompts to run once or on a recurring cadence."
+        description={t("description")}
         icon={<Clock className="size-5" />}
-        title="Tasks"
+        title={t("title")}
       />
 
       {error || modelError ? (
@@ -349,13 +382,13 @@ export default function TasksPage() {
       ) : null}
 
       <Segment
-        aria-label="Task filter"
+        aria-label={t("filter")}
         className="self-start"
         selectedKey={tab}
         onSelectionChange={(key) => setTab(String(key) as Tab)}
       >
-        <Segment.Item id="today">Today · {todayCount}</Segment.Item>
-        <Segment.Item id="all">All · {tasks.length}</Segment.Item>
+        <Segment.Item id="today">{t("today", { count: todayCount })}</Segment.Item>
+        <Segment.Item id="all">{t("all", { count: tasks.length })}</Segment.Item>
       </Segment>
 
       {loading ? (
@@ -363,11 +396,11 @@ export default function TasksPage() {
           {showLoadingIndicator ? (
             <LoaderCircle className="text-muted size-5 animate-spin" />
           ) : null}
-          <span className="sr-only">Loading tasks</span>
+          <span className="sr-only">{t("loading")}</span>
         </div>
       ) : (
         <DataGrid
-          aria-label="Scheduled tasks"
+          aria-label={t("grid")}
           className="cocola-web-task-grid"
           columns={columns}
           contentClassName="min-w-[880px]"
@@ -384,20 +417,18 @@ export default function TasksPage() {
                   <Clock className="text-blue-500" />
                 </EmptyState.Media>
                 <EmptyState.Title>
-                  {tab === "today" && tasks.length
-                    ? "Nothing scheduled for today"
-                    : "Create your first task"}
+                  {tab === "today" && tasks.length ? t("todayEmpty") : t("empty")}
                 </EmptyState.Title>
                 <EmptyState.Description>
                   {tab === "today" && tasks.length
-                    ? "Your other tasks are available under All."
-                    : "Describe the work once, then let Cocola run it at the right time."}
+                    ? t("todayEmptyDescription")
+                    : t("emptyDescription")}
                 </EmptyState.Description>
               </EmptyState.Header>
               <EmptyState.Content>
                 {tab === "today" && tasks.length ? (
                   <Button size="sm" variant="outline" onPress={() => setTab("all")}>
-                    Show all tasks
+                    {t("showAll")}
                   </Button>
                 ) : (
                   <Button
@@ -406,7 +437,7 @@ export default function TasksPage() {
                     variant="outline"
                     onPress={openCreate}
                   >
-                    <Plus className="size-4" /> New task
+                    <Plus className="size-4" /> {t("new")}
                   </Button>
                 )}
               </EmptyState.Content>
@@ -430,11 +461,11 @@ export default function TasksPage() {
       />
       <TaskConfirmDialog
         busy={saving}
-        confirmLabel="Delete task"
-        description={`“${deleteTarget?.name ?? "This task"}” and its schedule will be removed. Its existing conversation history will remain.`}
+        confirmLabel={t("deleteConfirm")}
+        description={t("deleteDescription", { name: deleteTarget?.name ?? t("thisTask") })}
         destructive
         open={deleteTarget !== null}
-        title="Delete task?"
+        title={t("deleteTitle")}
         onConfirm={() => deleteTarget && void mutate(deleteTarget, "delete")}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
       />
@@ -448,28 +479,28 @@ function statusColor(status: ScheduledTask["status"]) {
   return "danger" as const;
 }
 
-function statusLabel(status: ScheduledTask["status"]) {
-  return status.charAt(0).toUpperCase() + status.slice(1);
-}
-
 function TaskLastResult({ task }: { task: ScheduledTask }) {
+  const t = useTranslations("tasks.lastResult");
   const result = scheduledTaskResultView(task);
-  const hasAdditionalDetail = result.detail !== result.label;
+  const label = result.key === "unknown" ? result.fallbackLabel || t("unknown") : t(result.key);
+  const detail = result.detail || label;
+  const hasAdditionalDetail = detail !== label;
 
   return (
     <span className="flex min-w-0 items-center gap-1">
       <Tooltip delay={0}>
         <span className="inline-flex min-w-0">
-          <Badge variant={taskResultBadgeVariant[result.tone]}>{result.label}</Badge>
+          <Badge variant={taskResultBadgeVariant[result.tone]}>{label}</Badge>
         </span>
-        <Tooltip.Content className="max-w-sm break-words">{result.detail}</Tooltip.Content>
+        <Tooltip.Content className="max-w-sm break-words">{detail}</Tooltip.Content>
       </Tooltip>
-      {hasAdditionalDetail ? <TaskResultCopyButton detail={result.detail} /> : null}
+      {hasAdditionalDetail ? <TaskResultCopyButton detail={detail} /> : null}
     </span>
   );
 }
 
 function TaskResultCopyButton({ detail }: { detail: string }) {
+  const t = useTranslations("tasks");
   const [copied, setCopied] = useState(false);
 
   async function copyDetail() {
@@ -482,7 +513,7 @@ function TaskResultCopyButton({ detail }: { detail: string }) {
     <Tooltip delay={0}>
       <Button
         isIconOnly
-        aria-label={copied ? "Last result copied" : "Copy full last result"}
+        aria-label={copied ? t("lastResultCopied") : t("copyFullResult")}
         className="text-muted size-7 min-w-7 shrink-0"
         size="sm"
         variant="ghost"
@@ -491,7 +522,7 @@ function TaskResultCopyButton({ detail }: { detail: string }) {
       >
         {copied ? <Check className="text-success size-3.5" /> : <Copy className="size-3.5" />}
       </Button>
-      <Tooltip.Content>{copied ? "Copied" : "Copy full result"}</Tooltip.Content>
+      <Tooltip.Content>{copied ? t("copied") : t("copyResult")}</Tooltip.Content>
     </Tooltip>
   );
 }

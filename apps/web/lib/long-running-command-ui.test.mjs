@@ -15,10 +15,7 @@ const runtimeSource = readFileSync(new URL("../app/runtime-provider.tsx", import
 test("running composer exposes an enabled HeroUI stop control", () => {
   assert.match(threadSource, /<ComposerPrimitive\.Cancel asChild>/);
   assert.match(threadSource, /const ComposerStopButton/);
-  assert.match(
-    threadSource,
-    /aria-label=\{stopping \? "Stopping current run" : "Stop current run"\}/,
-  );
+  assert.match(threadSource, /aria-label=\{stopping \? t\("stopping"\) : t\("stop"\)\}/);
   assert.doesNotMatch(threadSource, /<ComposerPrimitive\.Cancel asChild>\s*<PromptInput\.Send/s);
 });
 
@@ -32,7 +29,7 @@ test("command execution uses a compact HeroUI activity card", () => {
   assert.match(railSource, /<CodeBlock[\s\S]*?language="shell"/);
   assert.match(railSource, /text-foreground\/85/);
   assert.doesNotMatch(railSource, /rounded-md bg-zinc-950 px-2 py-1/);
-  assert.match(railSource, />\s*Output\s*</);
+  assert.match(railSource, /\{t\("command\.output"\)\}/);
   assert.match(railSource, /aria-label=\{statusLabel\}/);
   assert.match(railSource, /role="status"/);
   assert.match(railSource, /title=\{statusTooltip\}/);

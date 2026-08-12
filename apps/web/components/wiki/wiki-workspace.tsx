@@ -19,6 +19,7 @@ import {
   Upload,
 } from "lucide-react";
 import { Button, Card, Chip, Input, Label, SearchField, TextField, Tooltip } from "@heroui/react";
+import { useTranslations } from "next-intl";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   Fragment,
@@ -112,6 +113,7 @@ function previewKind(node: WikiNode): "markdown" | "code" | "pdf" | undefined {
 }
 
 export function WikiWorkspace() {
+  const t = useTranslations("wiki.workspace");
   const [nodes, setNodes] = useState<WikiNode[]>([]);
   const [selectedID, setSelectedID] = useState("");
   const [currentFolderID, setCurrentFolderID] = useState("");
@@ -258,7 +260,7 @@ export function WikiWorkspace() {
   const createMarkdown = () => {
     runAfterDiscardCheck(() => {
       setNameDialogError("");
-      setNameDraft("Untitled.md");
+      setNameDraft(t("untitledFilename"));
       setNameDialog({ kind: "markdown" });
     });
   };
@@ -319,7 +321,7 @@ export function WikiWorkspace() {
     if (files.length === 0) return;
     const oversized = files.find((file) => file.size > maxFileBytes);
     if (oversized) {
-      setError(`${oversized.name} exceeds the ${formatBytes(maxFileBytes)} file limit.`);
+      setError(t("fileTooLarge", { name: oversized.name, limit: formatBytes(maxFileBytes) }));
       return;
     }
     setBusy(true);
@@ -489,23 +491,23 @@ export function WikiWorkspace() {
               <span className="bg-accent text-accent-foreground grid size-9 place-items-center rounded-2xl">
                 <BookOpenText className="size-4.5" />
               </span>
-              <h1 className="text-lg font-semibold tracking-[-0.02em]">Wiki</h1>
+              <h1 className="text-lg font-semibold tracking-[-0.02em]">{t("title")}</h1>
             </div>
             <Tooltip delay={0}>
               <Button
                 isIconOnly
-                aria-label="Refresh Wiki"
+                aria-label={t("refresh")}
                 size="sm"
                 variant="ghost"
                 onPress={() => void loadTree()}
               >
                 <RefreshCw className={cn("size-4", loading && "animate-spin")} />
               </Button>
-              <Tooltip.Content>Refresh Wiki</Tooltip.Content>
+              <Tooltip.Content>{t("refresh")}</Tooltip.Content>
             </Tooltip>
           </div>
           <SearchField
-            aria-label="Search this Wiki"
+            aria-label={t("search")}
             className="mt-4 w-full"
             value={query}
             onChange={setQuery}
@@ -514,7 +516,7 @@ export function WikiWorkspace() {
               <SearchField.SearchIcon>
                 <Search className="size-4" />
               </SearchField.SearchIcon>
-              <SearchField.Input placeholder="Search this Wiki" />
+              <SearchField.Input placeholder={t("search")} />
               <SearchField.ClearButton />
             </SearchField.Group>
           </SearchField>
@@ -522,7 +524,7 @@ export function WikiWorkspace() {
             <Tooltip delay={0}>
               <Button
                 isIconOnly
-                aria-label="Go to parent folder"
+                aria-label={t("parentFolder")}
                 isDisabled={!currentFolder}
                 size="sm"
                 variant="ghost"
@@ -530,10 +532,10 @@ export function WikiWorkspace() {
               >
                 <ArrowLeft className="size-3.5" />
               </Button>
-              <Tooltip.Content>Parent folder</Tooltip.Content>
+              <Tooltip.Content>{t("parentFolder")}</Tooltip.Content>
             </Tooltip>
             <nav
-              aria-label="Wiki folder path"
+              aria-label={t("folderPath")}
               className="flex min-w-0 flex-1 items-center overflow-hidden text-xs"
             >
               <Button
@@ -541,7 +543,7 @@ export function WikiWorkspace() {
                 variant="ghost"
                 onPress={() => navigateToFolder("")}
               >
-                All files
+                {t("allFiles")}
               </Button>
               {folderTrail.map((folder, index) => (
                 <Fragment key={folder.id}>
@@ -575,7 +577,7 @@ export function WikiWorkspace() {
                 <SearchResult key={node.id} node={node} onSelect={() => selectNode(node)} />
               ))
             ) : (
-              <EmptyTree label="No matching pages" />
+              <EmptyTree label={t("noMatches")} />
             )
           ) : visibleNodes.length ? (
             visibleNodes.map((node) => (
@@ -588,16 +590,21 @@ export function WikiWorkspace() {
               />
             ))
           ) : loading ? (
-            <EmptyTree label="Loading your Wiki…" />
+            <EmptyTree label={t("loadingTree")} />
           ) : (
-            <EmptyTree label="Create your first page or upload a file." />
+            <EmptyTree label={t("emptyTree")} />
           )}
         </div>
         <footer className="border-separator border-t p-3">
           <div className="grid grid-cols-3 gap-1.5">
-            <QuickAction icon={Folder} label="Folder" disabled={busy} onClick={createFolder} />
-            <QuickAction icon={Plus} label="Page" disabled={busy} onClick={createMarkdown} />
-            <QuickAction icon={Upload} label="Upload" disabled={busy} onClick={requestUpload} />
+            <QuickAction icon={Folder} label={t("folder")} disabled={busy} onClick={createFolder} />
+            <QuickAction icon={Plus} label={t("page")} disabled={busy} onClick={createMarkdown} />
+            <QuickAction
+              icon={Upload}
+              label={t("upload")}
+              disabled={busy}
+              onClick={requestUpload}
+            />
           </div>
           <input
             ref={uploadRef}
@@ -608,13 +615,13 @@ export function WikiWorkspace() {
             onChange={upload}
           />
           <p className="text-muted mt-2 text-center text-[10px]">
-            {formatBytes(maxFileBytes)} max per file
+            {t("fileLimit", { size: formatBytes(maxFileBytes) })}
           </p>
         </footer>
       </aside>
       <div
         role="separator"
-        aria-label="Resize Wiki sidebar"
+        aria-label={t("resizeSidebar")}
         aria-orientation="vertical"
         aria-valuemin={MIN_SIDEBAR_WIDTH}
         aria-valuemax={MAX_SIDEBAR_WIDTH}
@@ -650,7 +657,7 @@ export function WikiWorkspace() {
           <div className="bg-danger/10 text-danger absolute right-5 top-4 z-30 max-w-lg rounded-2xl px-4 py-3 text-sm shadow-lg">
             {error}
             <button type="button" onClick={() => setError("")} className="ml-3 font-semibold">
-              Dismiss
+              {t("dismiss")}
             </button>
           </div>
         ) : null}
@@ -696,35 +703,35 @@ export function WikiWorkspace() {
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[430px]">
             <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close Wiki action" />
+              <Sheet.CloseTrigger aria-label={t("dialog.close")} />
               <Sheet.Header>
                 <Sheet.Heading>
                   {nameDialog?.kind === "folder"
-                    ? "Create folder"
+                    ? t("dialog.createFolder")
                     : nameDialog?.kind === "markdown"
-                      ? "Create Markdown page"
-                      : "Rename item"}
+                      ? t("dialog.createMarkdown")
+                      : t("dialog.renameItem")}
                 </Sheet.Heading>
                 <p className="text-muted text-sm">
                   {nameDialog?.kind === "folder"
-                    ? "Add a folder to the current Wiki location."
+                    ? t("dialog.folderDescription")
                     : nameDialog?.kind === "markdown"
-                      ? "Create an editable Markdown page in the current Wiki location."
-                      : "Choose a new name. The file type must stay supported by Wiki."}
+                      ? t("dialog.markdownDescription")
+                      : t("dialog.renameDescription")}
                 </p>
               </Sheet.Header>
               <Sheet.Body className="grid content-start gap-4">
                 <TextField value={nameDraft} variant="secondary" onChange={setNameDraft}>
                   <Label>
                     {nameDialog?.kind === "folder"
-                      ? "Folder name"
+                      ? t("dialog.folderName")
                       : nameDialog?.kind === "markdown"
-                        ? "Filename"
-                        : "New name"}
+                        ? t("dialog.filename")
+                        : t("dialog.newName")}
                   </Label>
                   <Input
                     autoFocus
-                    placeholder={nameDialog?.kind === "markdown" ? "Notes.md" : "Name"}
+                    placeholder={nameDialog?.kind === "markdown" ? "Notes.md" : t("dialog.name")}
                   />
                 </TextField>
                 {nameDialogError ? (
@@ -735,14 +742,14 @@ export function WikiWorkspace() {
               </Sheet.Body>
               <Sheet.Footer className="gap-2">
                 <Button variant="outline" onPress={() => setNameDialog(null)}>
-                  Cancel
+                  {t("dialog.cancel")}
                 </Button>
                 <Button
                   isDisabled={!nameDraft.trim()}
                   isPending={busy}
                   onPress={() => void submitNameDialog(nameDraft)}
                 >
-                  {nameDialog?.kind === "rename" ? "Rename" : "Create"}
+                  {nameDialog?.kind === "rename" ? t("dialog.rename") : t("dialog.create")}
                 </Button>
               </Sheet.Footer>
             </Sheet.Dialog>
@@ -752,15 +759,15 @@ export function WikiWorkspace() {
 
       <DeleteConfirmDialog
         busy={busy}
-        confirmLabel="Delete"
+        confirmLabel={t("delete.action")}
         description={
           deleteTarget?.kind === "folder"
-            ? `${deleteTarget.name} and everything inside it will be permanently deleted.`
-            : `${deleteTarget?.name || "This file"} will be permanently deleted.`
+            ? t("delete.folderDescription", { name: deleteTarget.name })
+            : t("delete.fileDescription", { name: deleteTarget?.name || t("delete.thisFile") })
         }
         error={deleteError}
         open={deleteTarget !== null}
-        title={deleteTarget?.kind === "folder" ? "Delete folder?" : "Delete file?"}
+        title={deleteTarget?.kind === "folder" ? t("delete.folderTitle") : t("delete.fileTitle")}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setDeleteTarget(null);
@@ -772,10 +779,10 @@ export function WikiWorkspace() {
 
       <ActionConfirmDialog
         open={discardDialogOpen}
-        title="Discard unsaved changes?"
-        description="This page has changes that have not been saved. Continue only if you do not need them."
-        confirmLabel="Discard and continue"
-        cancelLabel="Keep editing"
+        title={t("discard.title")}
+        description={t("discard.description")}
+        confirmLabel={t("discard.confirm")}
+        cancelLabel={t("discard.cancel")}
         tone="danger"
         onOpenChange={(open) => {
           setDiscardDialogOpen(open);
@@ -896,13 +903,14 @@ function PageActions({
   onRename: () => void;
   onDelete: () => void;
 }) {
+  const t = useTranslations("wiki.workspace.actions");
   return (
     <div className="flex items-center gap-1">
       {node.kind === "file" ? (
         <Tooltip delay={0}>
           <Button
             isIconOnly
-            aria-label={`Download ${node.name}`}
+            aria-label={t("downloadNamed", { name: node.name })}
             variant="ghost"
             onPress={() =>
               window.location.assign(`/api/wiki/files/${encodeURIComponent(node.id)}/download`)
@@ -910,20 +918,30 @@ function PageActions({
           >
             <Download className="size-4" />
           </Button>
-          <Tooltip.Content>Download</Tooltip.Content>
+          <Tooltip.Content>{t("download")}</Tooltip.Content>
         </Tooltip>
       ) : null}
       <Tooltip delay={0}>
-        <Button isIconOnly aria-label={`Rename ${node.name}`} variant="ghost" onPress={onRename}>
+        <Button
+          isIconOnly
+          aria-label={t("renameNamed", { name: node.name })}
+          variant="ghost"
+          onPress={onRename}
+        >
           <Pencil className="size-4" />
         </Button>
-        <Tooltip.Content>Rename</Tooltip.Content>
+        <Tooltip.Content>{t("rename")}</Tooltip.Content>
       </Tooltip>
       <Tooltip delay={0}>
-        <Button isIconOnly aria-label={`Delete ${node.name}`} variant="ghost" onPress={onDelete}>
+        <Button
+          isIconOnly
+          aria-label={t("deleteNamed", { name: node.name })}
+          variant="ghost"
+          onPress={onDelete}
+        >
           <Trash2 className="text-danger size-4" />
         </Button>
-        <Tooltip.Content>Delete</Tooltip.Content>
+        <Tooltip.Content>{t("delete")}</Tooltip.Content>
       </Tooltip>
     </div>
   );
@@ -942,6 +960,7 @@ function FolderView({
   onRename: () => void;
   onDelete: () => void;
 }) {
+  const t = useTranslations("wiki.workspace.folderView");
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8 lg:py-9">
@@ -953,7 +972,7 @@ function FolderView({
             <div className="min-w-0">
               <h2 className="truncate text-2xl font-semibold tracking-[-0.03em]">{folder.name}</h2>
               <p className="text-muted mt-1 truncate text-sm">
-                {nodes.length} {nodes.length === 1 ? "item" : "items"} · {folder.logical_path}
+                {t("items", { count: nodes.length })} · {folder.logical_path}
               </p>
             </div>
           </div>
@@ -977,7 +996,7 @@ function FolderView({
                       </span>
                       <p className="mt-4 truncate text-sm font-semibold">{node.name}</p>
                       <p className="text-muted mt-1 text-xs">
-                        {node.kind === "folder" ? "Folder" : formatBytes(node.size_bytes)}
+                        {node.kind === "folder" ? t("folder") : formatBytes(node.size_bytes)}
                       </p>
                     </Card.Content>
                   </Card>
@@ -986,7 +1005,7 @@ function FolderView({
             })}
           </div>
         ) : (
-          <div className="text-muted mt-20 text-center text-sm">This folder is empty.</div>
+          <div className="text-muted mt-20 text-center text-sm">{t("empty")}</div>
         )}
       </div>
     </div>
@@ -1006,6 +1025,7 @@ function FileView({
   onSaved: (node: WikiNode) => void;
   onUnsavedChange: (nodeID: string, unsaved: boolean) => void;
 }) {
+  const t = useTranslations("wiki.workspace.fileView");
   const markdown = node.extension === ".md";
   const [content, setContent] = useState("");
   const [revision, setRevision] = useState(node.revision ?? 1);
@@ -1107,12 +1127,8 @@ function FileView({
                     <FileText className="size-8" />
                   )}
                 </span>
-                <h3 className="mt-5 text-lg font-semibold">Ready for Agent reading</h3>
-                <p className="text-muted mt-2 text-sm leading-6">
-                  Cocola preserves the original Office file. Reference it with @ in a chat and the
-                  Agent can extract its document, slide, or spreadsheet content. Web preview and
-                  online Office editing are not included.
-                </p>
+                <h3 className="mt-5 text-lg font-semibold">{t("office.title")}</h3>
+                <p className="text-muted mt-2 text-sm leading-6">{t("office.description")}</p>
                 <Button
                   className="mt-5"
                   onPress={() =>
@@ -1122,7 +1138,7 @@ function FileView({
                   }
                 >
                   <Download className="size-4" />
-                  Download original
+                  {t("office.download")}
                 </Button>
               </div>
             </Card>
@@ -1160,7 +1176,7 @@ function FileView({
           }
           onPress={() => void save()}
         >
-          {state === "saving" ? "Saving…" : "Save"}
+          {state === "saving" ? t("saving") : t("save")}
         </Button>
       </FileHeader>
       <div className="bg-surface-secondary min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
@@ -1168,7 +1184,7 @@ function FileView({
           <Card className="grid h-full min-h-72 place-items-center p-6">
             <div className="text-muted text-center text-sm">
               <RefreshCw className="mx-auto mb-3 size-5 animate-spin text-accent" />
-              Loading page…
+              {t("loading")}
             </div>
           </Card>
         ) : loadError ? (
@@ -1180,11 +1196,11 @@ function FileView({
               <span className="bg-danger-soft text-danger mx-auto grid size-11 place-items-center rounded-2xl">
                 <FileText className="size-5" />
               </span>
-              <h3 className="mt-4 text-base font-semibold">Couldn&apos;t open this page</h3>
+              <h3 className="mt-4 text-base font-semibold">{t("loadError")}</h3>
               <p className="text-muted mt-2 text-sm leading-6">{loadError}</p>
               <Button className="mt-5" size="sm" variant="outline" onPress={loadMarkdown}>
                 <RefreshCw className="mr-2 size-3.5" />
-                Try again
+                {t("tryAgain")}
               </Button>
             </div>
           </div>
@@ -1202,11 +1218,9 @@ function FileView({
       </div>
       {state === "conflict" ? (
         <div className="border-warning/25 bg-warning-soft text-warning-soft-foreground flex items-center justify-between border-t px-5 py-3 text-sm">
-          <span>
-            This page changed in another tab. Reload before continuing to avoid overwriting it.
-          </span>
+          <span>{t("conflict")}</span>
           <Button size="sm" variant="outline" onPress={() => window.location.reload()}>
-            Reload
+            {t("reload")}
           </Button>
         </div>
       ) : null}
@@ -1227,15 +1241,8 @@ function FileHeader({
   onDelete: () => void;
   children?: ReactNode;
 }) {
-  const status = {
-    loading: "Loading…",
-    "load-error": "Load failed",
-    saved: "Saved",
-    dirty: "Unsaved",
-    saving: "Saving…",
-    conflict: "Edit conflict",
-    error: "Save failed",
-  }[state];
+  const t = useTranslations("wiki.workspace.fileView");
+  const status = t(`status.${state}`);
   return (
     <header className="border-separator flex h-[4.75rem] shrink-0 items-center justify-between gap-4 border-b px-6">
       <div className="min-w-0">
@@ -1263,25 +1270,23 @@ function FileHeader({
 }
 
 function WikiWelcome({ onCreate, onUpload }: { onCreate: () => void; onUpload: () => void }) {
+  const t = useTranslations("wiki.workspace.welcome");
   return (
     <div className="flex h-full items-center justify-center p-8">
       <div className="max-w-xl text-center">
         <Card className="mx-auto grid size-20 place-items-center p-0">
           <BookOpenText className="text-accent size-8" />
         </Card>
-        <h2 className="mt-8 text-3xl font-semibold tracking-[-0.04em]">Build your working Wiki</h2>
-        <p className="text-muted mx-auto mt-4 max-w-lg text-sm leading-6">
-          Organize durable context in folders, write Markdown with source fidelity, and reference
-          exact files in any Agent conversation with @.
-        </p>
+        <h2 className="mt-8 text-3xl font-semibold tracking-[-0.04em]">{t("title")}</h2>
+        <p className="text-muted mx-auto mt-4 max-w-lg text-sm leading-6">{t("description")}</p>
         <div className="mt-7 flex justify-center gap-3">
           <Button className="cocola-web-page-primary-action" onPress={onCreate}>
             <Plus className="size-4" />
-            New Markdown
+            {t("newMarkdown")}
           </Button>
           <Button variant="outline" onPress={onUpload}>
             <Upload className="size-4" />
-            Upload files
+            {t("upload")}
           </Button>
         </div>
       </div>

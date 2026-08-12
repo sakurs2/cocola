@@ -1,0 +1,60 @@
+{
+  "metadata": { "description": "开源企业智能体平台" },
+  "githubPage": "前往 GitHub 页面",
+  "switchTheme": "切换到{mode}模式",
+  "themes": { "light": "浅色", "dark": "深色" },
+  "language": {
+    "label": "语言",
+    "menuLabel": "选择语言",
+    "english": "English",
+    "simplifiedChinese": "简体中文",
+    "changeFailed": "语言切换失败。"
+  },
+  "actions": {
+    "cancel": "取消",
+    "close": "关闭",
+    "confirm": "确认",
+    "copy": "复制",
+    "delete": "删除",
+    "edit": "编辑",
+    "refresh": "刷新",
+    "retry": "重试",
+    "save": "保存",
+    "search": "搜索",
+    "deleteDefault": "删除"
+  },
+  "dialog": {
+    "cannotUndo": "此操作无法撤销。",
+    "confirmContinue": "请确认后继续此操作。",
+    "closeEditor": "关闭编辑器",
+    "closeDetails": "关闭详情",
+    "discardTitle": "放弃未保存的更改？",
+    "discardDescription": "此 Wiki 页面有尚未保存的更改。仅在不再需要这些更改时继续。",
+    "discard": "放弃并继续",
+    "keepEditing": "继续编辑"
+  },
+  "states": {
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "active": "活跃",
+    "inactive": "未活跃",
+    "unknown": "未知"
+  },
+  "rawDebug": {
+    "title": "cocola — 对话测试工具",
+    "description": "仅供开发环境测试 Gateway SSE 链路，不是产品界面。",
+    "bearerToken": "Bearer Token",
+    "tokenPlaceholder": "Cocola 签发的 Token（禁用鉴权时留空）",
+    "sessionId": "会话 ID",
+    "prompt": "提示词",
+    "streaming": "传输中…",
+    "send": "发送",
+    "stop": "停止",
+    "eventStream": "事件流",
+    "noEvents": "暂无事件。",
+    "noResponseBody": "响应内容为空",
+    "reused": "已复用"
+  }
+}

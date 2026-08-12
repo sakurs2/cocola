@@ -29,15 +29,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FC, type Key } from "react";
+import { useTranslations } from "next-intl";
 
 import { useCocola, type PlanStatus, type UiPlanPart } from "@/app/runtime-provider";
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
-import {
-  PLAN_ACTION_LABELS,
-  PLAN_GATE_COPY,
-  PLAN_STATUS_LABELS,
-  normalizePlanStatus,
-} from "@/lib/plan-mode.mjs";
+import { normalizePlanStatus } from "@/lib/plan-mode.mjs";
 
 type PlanStatusColor = "accent" | "danger" | "default" | "success" | "warning";
 
@@ -59,6 +55,7 @@ export const PlanCardPart: FC<
     contentMarkdown: string;
   }>
 > = ({ data }) => {
+  const t = useTranslations("chat.plan");
   const { executePlan, cancelPlan, revisingPlanId, revisePlan, questionInputLocked } = useCocola();
   const isRunning = useThread((thread) => thread.isRunning);
   const status = normalizePlanStatus(data.status) as PlanStatus;
@@ -88,10 +85,10 @@ export const PlanCardPart: FC<
   const hasDecisionFooter = ["ready", "stopped", "failed"].includes(status);
   const footerNotice =
     status === "ready"
-      ? PLAN_GATE_COPY.approveNotice
+      ? t("approveNotice")
       : status === "stopped"
-        ? PLAN_GATE_COPY.continueNotice
-        : PLAN_GATE_COPY.replanNotice;
+        ? t("continueNotice")
+        : t("replanNotice");
   const FooterIcon = status === "failed" ? CircleX : ShieldCheck;
 
   useEffect(
@@ -109,7 +106,7 @@ export const PlanCardPart: FC<
     try {
       await action();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "The plan action failed.");
+      setError(actionError instanceof Error ? actionError.message : t("actionFailed"));
     } finally {
       setPendingAction(null);
     }
@@ -128,7 +125,7 @@ export const PlanCardPart: FC<
         copiedTimeoutRef.current = null;
       }, 1_400);
     } catch {
-      setError(PLAN_GATE_COPY.copyFailed);
+      setError(t("copyFailed"));
     }
   };
 
@@ -142,7 +139,7 @@ export const PlanCardPart: FC<
     if (!feedback) return;
     setError("");
     if (!revisePlan(plan, feedback)) {
-      setError("A revised plan cannot be started right now.");
+      setError(t("revisionUnavailable"));
       return;
     }
     setRevisionText("");
@@ -168,10 +165,10 @@ export const PlanCardPart: FC<
           </span>
           <div className="min-w-0">
             <Card.Title id={planTitleId} className="text-base tracking-[-0.02em]">
-              Implementation plan
+              {t("title")}
             </Card.Title>
             <Card.Description className="mt-0.5 text-xs tabular-nums">
-              Plan v{data.version}
+              {t("version", { version: data.version })}
             </Card.Description>
           </div>
         </div>
@@ -183,13 +180,13 @@ export const PlanCardPart: FC<
             ) : StatusIcon ? (
               <StatusIcon className="size-3.5" aria-hidden="true" />
             ) : null}
-            {PLAN_STATUS_LABELS[status]}
+            {t(`status.${status}`)}
           </Chip>
           {canCollapse ? (
             <Tooltip delay={0}>
               <Button
                 isIconOnly
-                aria-label={expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
+                aria-label={expanded ? t("hide") : t("show")}
                 aria-expanded={expanded}
                 size="sm"
                 variant="ghost"
@@ -197,19 +194,17 @@ export const PlanCardPart: FC<
               >
                 {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
               </Button>
-              <Tooltip.Content>
-                {expanded ? PLAN_GATE_COPY.hidePlan : PLAN_GATE_COPY.showPlan}
-              </Tooltip.Content>
+              <Tooltip.Content>{expanded ? t("hide") : t("show")}</Tooltip.Content>
             </Tooltip>
           ) : null}
           <Dropdown>
             <Dropdown.Trigger
               aria-label={
                 pendingAction === "cancel"
-                  ? PLAN_GATE_COPY.cancelling
+                  ? t("cancelling")
                   : copied
-                    ? PLAN_GATE_COPY.copied
-                    : PLAN_GATE_COPY.moreActions
+                    ? t("copied")
+                    : t("moreActions")
               }
               className="text-muted hover:bg-default hover:text-foreground inline-flex size-8 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
               isDisabled={pendingAction === "cancel"}
@@ -223,20 +218,20 @@ export const PlanCardPart: FC<
               )}
             </Dropdown.Trigger>
             <Dropdown.Popover className="min-w-44" placement="bottom end">
-              <Dropdown.Menu aria-label="More plan actions" onAction={handleMenuAction}>
-                <Dropdown.Item id="copy" isDisabled={busy} textValue={PLAN_ACTION_LABELS.copy}>
+              <Dropdown.Menu aria-label={t("moreActions")} onAction={handleMenuAction}>
+                <Dropdown.Item id="copy" isDisabled={busy} textValue={t("copy")}>
                   <CopyIcon className="text-muted size-4 shrink-0" aria-hidden="true" />
-                  <span data-slot="label">{PLAN_ACTION_LABELS.copy}</span>
+                  <span data-slot="label">{t("copy")}</span>
                 </Dropdown.Item>
                 {canCancel ? (
                   <Dropdown.Item
                     id="cancel"
                     isDisabled={approvalDisabled}
-                    textValue={PLAN_ACTION_LABELS.cancel}
+                    textValue={t("cancel")}
                     variant="danger"
                   >
                     <Ban className="size-4 shrink-0" aria-hidden="true" />
-                    <span data-slot="label">{PLAN_ACTION_LABELS.cancel}</span>
+                    <span data-slot="label">{t("cancel")}</span>
                   </Dropdown.Item>
                 ) : null}
               </Dropdown.Menu>
@@ -262,10 +257,8 @@ export const PlanCardPart: FC<
           <Separator />
           <Card.Content className="grid gap-2.5 px-4 py-3">
             <div>
-              <p className="text-sm font-medium text-foreground">What should change?</p>
-              <p className="mt-0.5 text-xs text-muted">
-                Your feedback will be sent as the next message in Plan mode.
-              </p>
+              <p className="text-sm font-medium text-foreground">{t("whatChange")}</p>
+              <p className="mt-0.5 text-xs text-muted">{t("feedback")}</p>
             </div>
             <TextField
               className="w-full"
@@ -273,12 +266,12 @@ export const PlanCardPart: FC<
               variant="secondary"
               onChange={setRevisionText}
             >
-              <Label className="sr-only">Requested plan changes</Label>
+              <Label className="sr-only">{t("requestedChanges")}</Label>
               <TextArea
                 autoFocus
                 className="min-h-20 resize-y"
                 maxLength={16 * 1024}
-                placeholder="Describe the changes you want in the plan…"
+                placeholder={t("placeholder")}
                 rows={3}
               />
             </TextField>
@@ -291,10 +284,10 @@ export const PlanCardPart: FC<
                   setRevisionText("");
                 }}
               >
-                {PLAN_ACTION_LABELS.cancelRevision}
+                {t("cancelRevision")}
               </Button>
               <Button isDisabled={!revisionText.trim()} size="sm" onPress={submitRevision}>
-                {PLAN_ACTION_LABELS.generateRevision}
+                {t("generateRevision")}
               </Button>
             </div>
           </Card.Content>
@@ -306,7 +299,7 @@ export const PlanCardPart: FC<
           <Separator />
           <div className="bg-accent-soft text-accent flex items-center gap-2 px-4 py-2 text-xs font-medium">
             <RotateCcw className="size-3.5" aria-hidden="true" />
-            {PLAN_GATE_COPY.revisionInProgress}
+            {t("revisionProgress")}
           </div>
         </>
       ) : null}
@@ -344,7 +337,7 @@ export const PlanCardPart: FC<
                   variant="outline"
                   onPress={revise}
                 >
-                  {status === "ready" ? PLAN_ACTION_LABELS.revise : PLAN_ACTION_LABELS.replan}
+                  {status === "ready" ? t("revise") : t("replan")}
                 </Button>
               ) : null}
               {status === "failed" ? (
@@ -354,7 +347,7 @@ export const PlanCardPart: FC<
                   size="sm"
                   onPress={revise}
                 >
-                  {PLAN_ACTION_LABELS.replan}
+                  {t("replan")}
                 </Button>
               ) : (
                 <Button
@@ -365,10 +358,10 @@ export const PlanCardPart: FC<
                   onPress={() => void runAction("execute", () => executePlan(plan))}
                 >
                   {pendingAction === "execute"
-                    ? PLAN_GATE_COPY.startingExecution
+                    ? t("starting")
                     : status === "ready"
-                      ? PLAN_ACTION_LABELS.approve
-                      : PLAN_ACTION_LABELS.continue}
+                      ? t("approve")
+                      : t("continue")}
                 </Button>
               )}
             </div>

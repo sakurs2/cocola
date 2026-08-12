@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { ConversationFolder, ConversationSummary } from "@/app/runtime-provider";
 import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 
 export function ConversationActionsMenu({
   conversation,
@@ -28,12 +29,14 @@ export function ConversationActionsMenu({
   onMove: (folderId: string | null) => void;
   triggerClassName?: string;
 }) {
+  const t = useTranslations("navigation");
+  const title = conversation.title || t("untitled");
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          aria-label={`Actions for ${conversation.title || "Untitled"}`}
+          aria-label={t("actionsFor", { title })}
           className={cn(
             "grid size-7 shrink-0 place-items-center rounded-lg text-muted opacity-0 transition hover:bg-black/5 hover:text-foreground focus:opacity-100 focus:outline-none group-hover:opacity-100 data-[state=open]:opacity-100",
             triggerClassName,
@@ -50,13 +53,13 @@ export function ConversationActionsMenu({
         >
           <MenuItem onSelect={onRename}>
             <PencilSimple className="size-4" />
-            Rename
+            {t("rename")}
           </MenuItem>
           {conversation.chat_type !== "scheduled_task" && !conversation.project_id ? (
             <DropdownMenu.Sub>
               <DropdownMenu.SubTrigger className="flex cursor-default select-none items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent">
                 <FolderOpen className="size-4" />
-                <span className="flex-1">Move to folder</span>
+                <span className="flex-1">{t("moveFolder")}</span>
                 <CaretRight className="size-3.5" />
               </DropdownMenu.SubTrigger>
               <DropdownMenu.Portal>
@@ -67,7 +70,7 @@ export function ConversationActionsMenu({
                 >
                   <MenuItem onSelect={() => onMove(null)}>
                     <Folder className="size-4" />
-                    <span className="flex-1">No folder</span>
+                    <span className="flex-1">{t("noFolder")}</span>
                     {!conversation.folder_id ? <Check className="size-4" /> : null}
                   </MenuItem>
                   {folders.length > 0 ? (
@@ -87,7 +90,7 @@ export function ConversationActionsMenu({
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <MenuItem destructive onSelect={onDelete}>
             <Trash className="size-4" />
-            Delete
+            {t("delete")}
           </MenuItem>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

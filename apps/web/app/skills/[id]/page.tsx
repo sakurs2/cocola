@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { DeleteConfirmDialog } from "@/components/assistant-ui/delete-confirm-dialog";
 import { SkillIcon } from "@/components/ui/skill-icon";
 
@@ -32,6 +33,8 @@ type Skill = {
 };
 
 export default function SkillDetailPage() {
+  const t = useTranslations("skills.detail");
+  const skillsT = useTranslations("skills");
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [skill, setSkill] = useState<Skill | null>(null);
@@ -108,7 +111,7 @@ export default function SkillDetailPage() {
       <header className="flex flex-wrap items-center gap-3">
         <Button
           isIconOnly
-          aria-label="Back to Skills"
+          aria-label={t("back")}
           variant="ghost"
           onPress={() => router.push("/skills")}
         >
@@ -118,7 +121,9 @@ export default function SkillDetailPage() {
           <SkillIcon name={skill?.name || id} size="sm" />
         </span>
         <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold tracking-[-0.03em]">{skill?.name || "Skill"}</h1>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em]">
+            {skill?.name || t("fallback")}
+          </h1>
           <p className="text-muted mt-1 text-sm">{skill?.description || skill?.id || id}</p>
         </div>
       </header>
@@ -134,11 +139,11 @@ export default function SkillDetailPage() {
               <AlertTriangle className="size-5" />
             </span>
             <span className="min-w-0 flex-1">
-              <Card.Title>This Skill is unavailable</Card.Title>
+              <Card.Title>{t("unavailable")}</Card.Title>
               <Card.Description className="mt-1">
                 {skill.unavailable_reason === "disabled_by_administrator"
-                  ? "An administrator has disabled this Skill. It cannot be opened, enabled, or added to an Agent."
-                  : "This Skill is no longer available in your workspace."}
+                  ? t("adminDisabled")
+                  : t("workspaceUnavailable")}
               </Card.Description>
               <Button
                 className="mt-4"
@@ -146,7 +151,7 @@ export default function SkillDetailPage() {
                 variant="outline"
                 onPress={() => router.push("/skills")}
               >
-                Back to Skills
+                {t("back")}
               </Button>
             </span>
           </Card.Content>
@@ -155,19 +160,19 @@ export default function SkillDetailPage() {
         <>
           <div className="flex flex-wrap items-center gap-2">
             <Chip size="sm" variant="soft">
-              {skill.scope === "user" ? "Personal" : "Shared"}
+              {skill.scope === "user" ? t("personal") : t("shared")}
             </Chip>
             <Chip size="sm" variant="soft">
-              {skill.source_type || "manual"}
+              {skill.source_type || t("manual")}
             </Chip>
             <Chip color={skill.enabled ? "success" : "warning"} size="sm" variant="soft">
-              {skill.enabled ? "Enabled" : "Disabled"}
+              {skill.enabled ? t("enabled") : t("disabled")}
             </Chip>
             <div className="ml-auto flex gap-2">
               {skill.scope === "user" ? (
                 <Button size="sm" variant="danger-soft" onPress={() => setRemoveOpen(true)}>
                   <Trash2 className="size-3.5" />
-                  Remove
+                  {t("remove")}
                 </Button>
               ) : null}
               <Button
@@ -176,7 +181,7 @@ export default function SkillDetailPage() {
                 variant={skill.enabled ? "outline" : "primary"}
                 onPress={() => void toggle()}
               >
-                {skill.enabled ? "Disable" : "Enable"}
+                {skill.enabled ? t("disable") : t("enable")}
               </Button>
             </div>
           </div>
@@ -184,17 +189,17 @@ export default function SkillDetailPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <InfoCard
               icon={<Folder className="size-4" />}
-              label="Source path"
+              label={t("sourcePath")}
               value={skill.source_path || "—"}
             />
             <InfoCard
               icon={<FileText className="size-4" />}
-              label="Files"
+              label={t("files")}
               value={String(skill.file_count ?? 0)}
             />
             <InfoCard
               icon={<FileText className="size-4" />}
-              label="Size"
+              label={t("size")}
               value={formatBytes(skill.size_bytes ?? 0)}
             />
             <InfoCard
@@ -207,13 +212,11 @@ export default function SkillDetailPage() {
           <Card className="p-5">
             <Card.Header className="p-0">
               <Card.Title>SKILL.md</Card.Title>
-              <Card.Description>
-                Full instructions loaded when the Skill matches a request.
-              </Card.Description>
+              <Card.Description>{t("instructionsDescription")}</Card.Description>
             </Card.Header>
             <Card.Content className="mt-5 p-0">
               <pre className="bg-surface-secondary max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-2xl p-5 font-mono text-sm leading-7">
-                {skill.skill_md || "No SKILL.md captured."}
+                {skill.skill_md || t("noInstructions")}
               </pre>
             </Card.Content>
           </Card>
@@ -222,11 +225,11 @@ export default function SkillDetailPage() {
 
       <DeleteConfirmDialog
         busy={busy}
-        confirmLabel="Remove Skill"
-        description="This personal Skill will no longer be available to Agents or new chats."
+        confirmLabel={skillsT("remove")}
+        description={t("removeDescription")}
         error={error || null}
         open={removeOpen}
-        title="Remove this Skill?"
+        title={skillsT("removeTitle")}
         onConfirm={() => void remove()}
         onOpenChange={setRemoveOpen}
       />

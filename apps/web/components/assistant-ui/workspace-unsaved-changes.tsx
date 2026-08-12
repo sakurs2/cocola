@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
+import { useTranslations } from "next-intl";
 
 type WorkspaceUnsavedChangesValue = {
   dirty: boolean;
@@ -29,6 +30,7 @@ const cleanWorkspace: WorkspaceUnsavedChangesValue = {
 const WorkspaceUnsavedChangesContext = createContext<WorkspaceUnsavedChangesValue>(cleanWorkspace);
 
 export function WorkspaceUnsavedChangesProvider({ children }: { children: ReactNode }) {
+  const t = useTranslations("common.dialog");
   const [dirty, setDirty] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const pendingAction = useRef<(() => void | Promise<void>) | null>(null);
@@ -61,10 +63,10 @@ export function WorkspaceUnsavedChangesProvider({ children }: { children: ReactN
       {children}
       <ActionConfirmDialog
         open={dialogOpen}
-        title="Discard unsaved changes?"
-        description="This Wiki page has changes that have not been saved. Continue only if you do not need them."
-        confirmLabel="Discard and continue"
-        cancelLabel="Keep editing"
+        title={t("discardTitle")}
+        description={t("discardDescription")}
+        confirmLabel={t("discard")}
+        cancelLabel={t("keepEditing")}
         tone="warning"
         onOpenChange={(open) => {
           setDialogOpen(open);

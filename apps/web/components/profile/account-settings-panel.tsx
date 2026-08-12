@@ -5,11 +5,14 @@ import { Sheet } from "@cocola/ui-compat/sheet";
 import type { SessionUser } from "@/lib/server-auth";
 import { AlertCircle, CheckCircle2, KeyRound, Lock, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useMemo, useState, type FormEvent } from "react";
 
 type Notice = { tone: "success" | "error"; message: string } | null;
 
 export function AccountSettingsPanel({ initialAccount }: { initialAccount: SessionUser }) {
+  const t = useTranslations("profile.account");
+  const common = useTranslations("common.actions");
   const router = useRouter();
   const [account, setAccount] = useState(initialAccount);
   const [profile, setProfile] = useState({
@@ -39,7 +42,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
     event.preventDefault();
     setProfileNotice(null);
     if (emailChanged && !profile.currentPassword) {
-      setProfileNotice({ tone: "error", message: "Enter your current password to change email." });
+      setProfileNotice({ tone: "error", message: t("emailPasswordRequired") });
       return;
     }
     setSavingProfile(true);
@@ -56,7 +59,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
         }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(accountError(body, "Could not save account details."));
+      if (!response.ok) throw new Error(accountError(body, t("saveFailed"), t("versionConflict")));
       const next = body as SessionUser;
       setAccount(next);
       setProfile({
@@ -65,12 +68,12 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
         email: next.email,
         currentPassword: "",
       });
-      setProfileNotice({ tone: "success", message: "Account details updated." });
+      setProfileNotice({ tone: "success", message: t("updated") });
       router.refresh();
     } catch (cause) {
       setProfileNotice({
         tone: "error",
-        message: cause instanceof Error ? cause.message : "Could not save account details.",
+        message: cause instanceof Error ? cause.message : t("saveFailed"),
       });
     } finally {
       setSavingProfile(false);
@@ -93,16 +96,17 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
         }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(accountError(body, "Could not change password."));
+      if (!response.ok)
+        throw new Error(accountError(body, t("passwordFailed"), t("versionConflict")));
       setAccount(body as SessionUser);
       setPassword({ current: "", next: "", confirm: "" });
       setPasswordSheetOpen(false);
-      setProfileNotice({ tone: "success", message: "Password changed." });
+      setProfileNotice({ tone: "success", message: t("passwordChanged") });
       router.refresh();
     } catch (cause) {
       setPasswordNotice({
         tone: "error",
-        message: cause instanceof Error ? cause.message : "Could not change password.",
+        message: cause instanceof Error ? cause.message : t("passwordFailed"),
       });
     } finally {
       setSavingPassword(false);
@@ -124,20 +128,20 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
         <Card className="p-5">
           <form onSubmit={saveProfile}>
             <Card.Header className="p-0">
-              <Card.Title>Personal information</Card.Title>
-              <Card.Description>Update your display name and sign-in identity.</Card.Description>
+              <Card.Title>{t("personal")}</Card.Title>
+              <Card.Description>{t("personalDescription")}</Card.Description>
             </Card.Header>
             <Card.Content className="mt-5 grid gap-4 p-0 sm:grid-cols-2">
               <AccountField
                 autoComplete="name"
-                label="Display name"
+                label={t("displayName")}
                 maxLength={128}
                 value={profile.name}
                 onChange={(name) => setProfile((current) => ({ ...current, name }))}
               />
               <AccountField
                 autoComplete="username"
-                label="Username"
+                label={t("username")}
                 maxLength={64}
                 value={profile.username}
                 onChange={(username) => setProfile((current) => ({ ...current, username }))}
@@ -145,7 +149,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
               <AccountField
                 autoComplete="email"
                 className="sm:col-span-2"
-                label="Email"
+                label={t("email")}
                 maxLength={254}
                 type="email"
                 value={profile.email}
@@ -155,7 +159,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
                 <AccountField
                   autoComplete="current-password"
                   className="sm:col-span-2"
-                  label="Current password"
+                  label={t("currentPassword")}
                   type="password"
                   value={profile.currentPassword}
                   onChange={(currentPassword) =>
@@ -176,7 +180,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
                 variant="primary"
               >
                 <Save className="size-4" />
-                {savingProfile ? "Saving…" : "Save changes"}
+                {savingProfile ? t("saving") : t("save")}
               </Button>
             </Card.Footer>
           </form>
@@ -184,8 +188,8 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
 
         <Card className="self-start p-5">
           <Card.Header className="p-0">
-            <Card.Title>Sign-in security</Card.Title>
-            <Card.Description>Manage how you sign in to Cocola.</Card.Description>
+            <Card.Title>{t("security")}</Card.Title>
+            <Card.Description>{t("securityDescription")}</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 p-0">
             <div className="bg-surface-secondary flex items-center gap-3 rounded-2xl p-4">
@@ -193,17 +197,17 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
                 <Lock className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold">Password</span>
-                <span className="text-muted mt-0.5 block text-xs">At least 8 characters</span>
+                <span className="block text-sm font-semibold">{t("password")}</span>
+                <span className="text-muted mt-0.5 block text-xs">{t("passwordLength")}</span>
               </span>
               <Chip color="success" size="sm" variant="soft">
-                Configured
+                {t("configured")}
               </Chip>
             </div>
           </Card.Content>
           <Card.Footer className="mt-4 justify-end p-0">
             <Button variant="outline" onPress={() => setPasswordOpen(true)}>
-              Change password
+              {t("changePassword")}
             </Button>
           </Card.Footer>
         </Card>
@@ -213,45 +217,43 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[440px]">
             <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close password settings" />
+              <Sheet.CloseTrigger aria-label={t("closePassword")} />
               <Sheet.Header>
-                <Sheet.Heading>Change password</Sheet.Heading>
-                <p className="text-muted text-sm leading-6">
-                  Use at least 8 characters and avoid reusing a password from another service.
-                </p>
+                <Sheet.Heading>{t("changePassword")}</Sheet.Heading>
+                <p className="text-muted text-sm leading-6">{t("changePasswordDescription")}</p>
               </Sheet.Header>
               <Sheet.Body>
                 <form className="grid gap-4" id="change-password-form" onSubmit={changePassword}>
                   <AccountField
                     autoComplete="current-password"
-                    label="Current password"
+                    label={t("currentPassword")}
                     type="password"
                     value={password.current}
                     onChange={(current) => setPassword((value) => ({ ...value, current }))}
                   />
                   <AccountField
                     autoComplete="new-password"
-                    label="New password"
+                    label={t("newPassword")}
                     type="password"
                     value={password.next}
                     onChange={(next) => setPassword((value) => ({ ...value, next }))}
                   />
                   <AccountField
                     autoComplete="new-password"
-                    label="Confirm password"
+                    label={t("confirmPassword")}
                     type="password"
                     value={password.confirm}
                     onChange={(confirm) => setPassword((value) => ({ ...value, confirm }))}
                   />
                   {password.confirm && password.next !== password.confirm ? (
-                    <p className="text-danger text-xs">The passwords do not match.</p>
+                    <p className="text-danger text-xs">{t("passwordMismatch")}</p>
                   ) : null}
                   <NoticeLine notice={passwordNotice} />
                 </form>
               </Sheet.Body>
               <Sheet.Footer className="gap-2">
                 <Button variant="outline" onPress={() => setPasswordOpen(false)}>
-                  Cancel
+                  {common("cancel")}
                 </Button>
                 <Button
                   form="change-password-form"
@@ -261,7 +263,7 @@ export function AccountSettingsPanel({ initialAccount }: { initialAccount: Sessi
                   variant="primary"
                 >
                   <KeyRound className="size-4" />
-                  Change password
+                  {t("changePassword")}
                 </Button>
               </Sheet.Footer>
             </Sheet.Dialog>
@@ -321,10 +323,10 @@ function NoticeLine({ notice }: { notice: Notice }) {
   );
 }
 
-function accountError(body: unknown, fallback: string): string {
+function accountError(body: unknown, fallback: string, versionConflict: string): string {
   const envelope = body as { error?: { code?: string; message?: string } };
   if (envelope?.error?.code === "VERSION_CONFLICT") {
-    return "Your account changed in another tab. Refresh and try again.";
+    return versionConflict;
   }
   return envelope?.error?.message || fallback;
 }

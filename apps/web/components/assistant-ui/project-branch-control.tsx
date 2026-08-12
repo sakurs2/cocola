@@ -14,6 +14,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useTranslations } from "next-intl";
 
 type ProjectComposerContextValue = {
   control: ReactNode;
@@ -64,15 +65,19 @@ type BranchPage = {
 
 export const PROJECT_TASK_BRANCH_PREFIX = "cocola/task-";
 
-export function projectTaskBranchError(branch: string) {
-  if (!branch.startsWith(PROJECT_TASK_BRANCH_PREFIX)) return "Keep the Cocola task prefix.";
+type ProjectTaskBranchErrorCode = "prefix" | "empty" | "tooLong" | "invalid";
+
+function projectTaskBranchErrorCode(branch: string): ProjectTaskBranchErrorCode | null {
+  if (!branch.startsWith(PROJECT_TASK_BRANCH_PREFIX)) return "prefix";
   const suffix = branch.slice(PROJECT_TASK_BRANCH_PREFIX.length);
-  if (!suffix) return "Enter a branch name.";
-  if (suffix.length > 48) return "Use 48 characters or fewer.";
-  if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(suffix)) {
-    return "Use lowercase letters, numbers, dots, underscores, or hyphens; start and end with a letter or number.";
-  }
-  return "";
+  if (!suffix) return "empty";
+  if (suffix.length > 48) return "tooLong";
+  if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(suffix)) return "invalid";
+  return null;
+}
+
+export function projectTaskBranchError(branch: string) {
+  return projectTaskBranchErrorCode(branch) || "";
 }
 
 function normalizeTaskBranchInput(nextValue: string) {
@@ -98,7 +103,9 @@ export function ProjectTaskBranchField({
   onChange: (branch: string) => void;
   disabled?: boolean;
 }) {
-  const error = projectTaskBranchError(value);
+  const t = useTranslations("projects.branch");
+  const errorCode = projectTaskBranchErrorCode(value);
+  const error = errorCode ? t(`errors.${errorCode}`) : "";
   return (
     <div className="grid gap-1.5">
       <TextField
@@ -109,14 +116,14 @@ export function ProjectTaskBranchField({
         variant="secondary"
         onChange={(nextValue) => onChange(normalizeTaskBranchInput(nextValue))}
       >
-        <Label>Task branch</Label>
+        <Label>{t("taskBranch")}</Label>
         <Input className="font-mono text-[13px]" spellCheck={false} />
       </TextField>
       <p
         className={error ? "text-xs text-danger" : "text-xs text-muted"}
         role={error ? "alert" : undefined}
       >
-        {error || "Editable until the first message. Cocola keeps the protected task prefix."}
+        {error || t("editableHint")}
       </p>
     </div>
   );
@@ -133,6 +140,7 @@ export function ProjectBaseBranchPicker({
   onChange: (branch: string) => void;
   disabled?: boolean;
 }) {
+  const t = useTranslations("projects.branch");
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [nextCursor, setNextCursor] = useState("");
@@ -167,7 +175,7 @@ export function ProjectBaseBranchPicker({
         );
         const body = (await response.json().catch(() => ({}))) as BranchPage;
         if (!response.ok) {
-          throw new Error(body.error?.message || "Could not load branches");
+          throw new Error(body.error?.message || t("loadFailed"));
         }
         if (requestVersion !== requestVersionRef.current) return;
         const incoming = Array.isArray(body.items) ? body.items : [];
@@ -180,7 +188,7 @@ export function ProjectBaseBranchPicker({
         setLoaded(true);
       } catch (loadError) {
         if (requestVersion !== requestVersionRef.current) return;
-        setError(loadError instanceof Error ? loadError.message : "Could not load branches");
+        setError(loadError instanceof Error ? loadError.message : t("loadFailed"));
       } finally {
         if (requestVersion === requestVersionRef.current) {
           loadingRef.current = false;
@@ -188,7 +196,7 @@ export function ProjectBaseBranchPicker({
         }
       }
     },
-    [projectID],
+    [projectID, t],
   );
 
   useEffect(() => {
@@ -206,12 +214,12 @@ export function ProjectBaseBranchPicker({
         <button
           type="button"
           disabled={disabled}
-          aria-label="Select base branch"
-          title="Select the branch this new task starts from"
+          aria-label={t("selectBase")}
+          title={t("selectBaseDescription")}
           className="flex max-w-[12rem] min-w-0 items-center gap-1.5 rounded-full border border-border px-2.5 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-surface-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-70"
         >
           <GitBranch className="size-4 shrink-0 text-indigo-600" />
-          <span className="truncate">{value || "Select branch"}</span>
+          <span className="truncate">{value || t("select")}</span>
           <ChevronDown className="size-3.5 shrink-0 text-muted" />
         </button>
       </Popover.Trigger>
@@ -226,14 +234,14 @@ export function ProjectBaseBranchPicker({
             <div className="flex items-center gap-2 border-b border-border px-3">
               <Search className="size-4 text-muted" />
               <Command.Input
-                placeholder="Find a branch..."
+                placeholder={t("find")}
                 className="h-10 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
               />
             </div>
             <Command.List className="max-h-64 overflow-auto p-1.5">
               {!loading && !error ? (
                 <Command.Empty className="px-3 py-8 text-center text-sm text-muted">
-                  No branch found.
+                  {t("notFound")}
                 </Command.Empty>
               ) : null}
               {options.map((branch) => (
@@ -249,7 +257,9 @@ export function ProjectBaseBranchPicker({
                   <GitBranch className="size-4 shrink-0 text-muted" />
                   <span className="min-w-0 flex-1 truncate font-medium">{branch.name}</span>
                   {branch.is_default ? (
-                    <span className="text-[10px] uppercase tracking-wide text-muted">Default</span>
+                    <span className="text-[10px] uppercase tracking-wide text-muted">
+                      {t("default")}
+                    </span>
                   ) : null}
                   {branch.name === value ? <Check className="size-4 shrink-0" /> : null}
                 </Command.Item>
@@ -257,7 +267,7 @@ export function ProjectBaseBranchPicker({
               {loading ? (
                 <div className="flex items-center justify-center gap-2 px-3 py-5 text-xs text-muted">
                   <Loader2 className="size-3.5 animate-spin" />
-                  Loading branches
+                  {t("loading")}
                 </div>
               ) : null}
               {error ? (
@@ -268,7 +278,7 @@ export function ProjectBaseBranchPicker({
                     className="font-medium underline underline-offset-2"
                     onClick={() => void load()}
                   >
-                    Try again
+                    {t("tryAgain")}
                   </button>
                 </div>
               ) : null}
@@ -281,7 +291,7 @@ export function ProjectBaseBranchPicker({
                   onClick={() => void load(nextCursor)}
                   className="w-full rounded-xl px-3 py-2 text-left text-xs font-medium text-muted hover:bg-accent hover:text-foreground disabled:opacity-60"
                 >
-                  Load more branches
+                  {t("loadMore")}
                 </button>
               </div>
             ) : null}
@@ -301,13 +311,14 @@ export function ProjectBranchBadge({
   baseRef?: string;
   baseSHA?: string;
 }) {
+  const t = useTranslations("projects.branch");
   const title =
     baseRef && baseSHA
-      ? `Based on ${baseRef} @ ${baseSHA.slice(0, 7)}`
+      ? t("basedOnSha", { branch: baseRef, sha: baseSHA.slice(0, 7) })
       : baseRef
-        ? `Based on ${baseRef}`
-        : "Current project task branch";
-  const branchLabel = branch || "Loading branch";
+        ? t("basedOn", { branch: baseRef })
+        : t("currentTaskBranch");
+  const branchLabel = branch || t("loadingBranch");
   return (
     <Tooltip delay={150}>
       <Tooltip.Trigger>

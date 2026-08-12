@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 
 type MemorySettings = {
@@ -35,15 +36,16 @@ type MemoryItem = {
 
 type MemoryCategory = "profile" | "preferences" | "entities" | "events";
 
-const CATEGORIES: Array<{ id: MemoryCategory; label: string; icon: LucideIcon }> = [
-  { id: "profile", label: "Profile", icon: UserRound },
-  { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
-  { id: "entities", label: "Entities", icon: Tag },
-  { id: "events", label: "Events", icon: CalendarClock },
+const CATEGORIES: Array<{ id: MemoryCategory; icon: LucideIcon }> = [
+  { id: "profile", icon: UserRound },
+  { id: "preferences", icon: SlidersHorizontal },
+  { id: "entities", icon: Tag },
+  { id: "events", icon: CalendarClock },
 ];
 const DEFAULT_CATEGORY = CATEGORIES[0]!;
 
 export function MemoryPanel() {
+  const t = useTranslations("profile.memory");
   const [settings, setSettings] = useState<MemorySettings>({
     global_enabled: false,
     use_enabled: false,
@@ -165,7 +167,7 @@ export function MemoryPanel() {
       const detail = (await response.json()) as MemoryItem;
       setDetails((current) => ({
         ...current,
-        [item.id]: detail.content || detail.abstract || "No additional detail.",
+        [item.id]: detail.content || detail.abstract || t("noDetail"),
       }));
     } catch (cause) {
       setExpandedID(null);
@@ -214,12 +216,12 @@ export function MemoryPanel() {
   };
 
   const stateLabel = degraded
-    ? "Degraded"
+    ? t("degraded")
     : settings.global_enabled
       ? settings.use_enabled || settings.learn_enabled
-        ? "Active"
-        : "Paused"
-      : "Disabled";
+        ? t("active")
+        : t("paused")
+      : t("disabled");
   const stateColor = degraded ? "danger" : settings.global_enabled ? "success" : "default";
   const currentCategory = useMemo(
     () => CATEGORIES.find((candidate) => candidate.id === category) ?? DEFAULT_CATEGORY,
@@ -230,7 +232,7 @@ export function MemoryPanel() {
     <>
       <ItemCardGroup>
         <ItemCardGroup.Header>
-          <ItemCardGroup.Title>Memory</ItemCardGroup.Title>
+          <ItemCardGroup.Title>{t("title")}</ItemCardGroup.Title>
         </ItemCardGroup.Header>
         <Card className="overflow-hidden">
           <Card.Header className="flex-row items-center gap-3 border-b border-divider p-4">
@@ -238,10 +240,8 @@ export function MemoryPanel() {
               <BrainCircuit className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <Card.Title className="text-sm">Personal memory</Card.Title>
-              <Card.Description className="mt-0.5 text-xs">
-                Facts Cocola can recall across conversations.
-              </Card.Description>
+              <Card.Title className="text-sm">{t("personal")}</Card.Title>
+              <Card.Description className="mt-0.5 text-xs">{t("description")}</Card.Description>
             </div>
             <Chip color={stateColor} size="sm" variant="soft">
               {stateLabel}
@@ -251,23 +251,23 @@ export function MemoryPanel() {
           <Card.Content className="space-y-4 p-4">
             <div className="grid gap-2 sm:grid-cols-2">
               <MemorySwitch
-                description="Recall relevant personal facts."
+                description={t("useDescription")}
                 disabled={!settings.global_enabled || saving}
-                label="Use memory"
+                label={t("use")}
                 selected={settings.use_enabled}
                 onChange={(value) => void updateSettings({ use_enabled: value })}
               />
               <MemorySwitch
-                description="Learn from successful chats."
+                description={t("learnDescription")}
                 disabled={!settings.global_enabled || saving}
-                label="Learn from conversations"
+                label={t("learn")}
                 selected={settings.learn_enabled}
                 onChange={(value) => void updateSettings({ learn_enabled: value })}
               />
             </div>
 
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {CATEGORIES.map(({ id, label, icon: Icon }) => (
+              {CATEGORIES.map(({ id, icon: Icon }) => (
                 <Button
                   key={id}
                   className="shrink-0"
@@ -276,14 +276,14 @@ export function MemoryPanel() {
                   onPress={() => setCategory(id)}
                 >
                   <Icon className="size-3.5" />
-                  {label}
+                  {t(id)}
                 </Button>
               ))}
               <Tooltip delay={0}>
                 <Tooltip.Trigger>
                   <Button
                     isIconOnly
-                    aria-label="Refresh memory"
+                    aria-label={t("refresh")}
                     className="ml-auto shrink-0"
                     isDisabled={loading}
                     size="sm"
@@ -293,7 +293,7 @@ export function MemoryPanel() {
                     <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
                   </Button>
                 </Tooltip.Trigger>
-                <Tooltip.Content>Refresh</Tooltip.Content>
+                <Tooltip.Content>{t("refresh")}</Tooltip.Content>
               </Tooltip>
             </div>
 
@@ -301,16 +301,16 @@ export function MemoryPanel() {
               {loading ? (
                 <div className="flex min-h-24 items-center justify-center gap-2 text-sm text-muted">
                   <LoaderCircle className="size-4 animate-spin" />
-                  Loading
+                  {t("loading")}
                 </div>
               ) : degraded ? (
-                <MemoryEmpty icon={CircleAlert} label="Memory is temporarily unavailable." />
+                <MemoryEmpty icon={CircleAlert} label={t("unavailable")} />
               ) : !settings.global_enabled ? (
-                <MemoryEmpty icon={Database} label="Memory is disabled by your administrator." />
+                <MemoryEmpty icon={Database} label={t("adminDisabled")} />
               ) : items.length === 0 ? (
                 <MemoryEmpty
                   icon={currentCategory.icon}
-                  label={`No ${currentCategory.label.toLowerCase()} saved yet.`}
+                  label={t("empty", { category: t(currentCategory.id) })}
                 />
               ) : (
                 items.map((item) => (
@@ -335,7 +335,7 @@ export function MemoryPanel() {
                   variant="outline"
                   onPress={() => void load(true, nextCursor, true)}
                 >
-                  Load more
+                  {t("loadMore")}
                 </Button>
               </div>
             ) : null}
@@ -349,7 +349,7 @@ export function MemoryPanel() {
                   onPress={() => setClearOpen(true)}
                 >
                   <Trash2 className="size-3.5" />
-                  Clear all memory
+                  {t("clearAll")}
                 </Button>
               </div>
             ) : null}
@@ -359,22 +359,22 @@ export function MemoryPanel() {
 
       <ActionConfirmDialog
         busy={deletingID === "*"}
-        confirmLabel="Clear all memory"
-        description="Deletes all profile, preference, entity, and event memories."
+        confirmLabel={t("clearAll")}
+        description={t("clearDescription")}
         icon={Trash2}
         open={clearOpen}
-        title="Clear all personal memory?"
+        title={t("clearTitle")}
         tone="danger"
         onConfirm={() => void clearAll()}
         onOpenChange={setClearOpen}
       />
       <ActionConfirmDialog
         busy={Boolean(deleteTarget && deletingID === deleteTarget.id)}
-        confirmLabel="Delete memory"
-        description={deleteTarget ? `Deletes “${deleteTarget.title}” from your memory.` : ""}
+        confirmLabel={t("delete")}
+        description={deleteTarget ? t("deleteDescription", { title: deleteTarget.title }) : ""}
         icon={Trash2}
         open={Boolean(deleteTarget)}
-        title="Delete this memory?"
+        title={t("deleteTitle")}
         tone="danger"
         onConfirm={() => void deleteItem()}
         onOpenChange={(open) => {
@@ -435,6 +435,7 @@ function MemoryRow({
   onDelete: () => void;
   onToggle: () => void;
 }) {
+  const t = useTranslations("profile.memory");
   return (
     <div className="p-3">
       <div className="flex min-w-0 items-center gap-2">
@@ -446,7 +447,7 @@ function MemoryRow({
           <Tooltip.Trigger>
             <Button
               isIconOnly
-              aria-label={`Delete ${item.title}`}
+              aria-label={t("deleteAria", { title: item.title })}
               isPending={deleting}
               size="sm"
               variant="ghost"
@@ -455,14 +456,14 @@ function MemoryRow({
               <Trash2 className="size-3.5 text-danger" />
             </Button>
           </Tooltip.Trigger>
-          <Tooltip.Content>Delete</Tooltip.Content>
+          <Tooltip.Content>{t("delete")}</Tooltip.Content>
         </Tooltip>
       </div>
       {expanded ? (
         <div className="mx-2 mt-2 whitespace-pre-wrap break-words rounded-lg bg-surface-secondary px-3 py-2 text-sm leading-6 text-muted">
           {content === undefined ? (
             <span className="inline-flex items-center gap-2">
-              <LoaderCircle className="size-3.5 animate-spin" /> Loading
+              <LoaderCircle className="size-3.5 animate-spin" /> {t("loading")}
             </span>
           ) : (
             content
@@ -493,6 +494,8 @@ function MemoryErrorDialog({
   onDismiss: () => void;
   onRetry: () => void;
 }) {
+  const t = useTranslations("profile.memory");
+  const common = useTranslations("common.actions");
   return (
     <AlertDialog isOpen={Boolean(error)} onOpenChange={(open) => !open && onDismiss()}>
       <AlertDialog.Backdrop isDismissable>
@@ -503,8 +506,8 @@ function MemoryErrorDialog({
                 <CircleAlert className="size-5" />
               </AlertDialog.Icon>
               <div className="min-w-0">
-                <AlertDialog.Heading>Memory unavailable</AlertDialog.Heading>
-                <p className="mt-1 text-sm text-muted">Your conversations are not affected.</p>
+                <AlertDialog.Heading>{t("errorTitle")}</AlertDialog.Heading>
+                <p className="mt-1 text-sm text-muted">{t("errorDescription")}</p>
               </div>
             </AlertDialog.Header>
             <AlertDialog.Body>
@@ -514,7 +517,7 @@ function MemoryErrorDialog({
             </AlertDialog.Body>
             <AlertDialog.Footer>
               <Button variant="outline" onPress={onDismiss}>
-                Close
+                {common("close")}
               </Button>
               <Button
                 variant="danger"
@@ -523,7 +526,7 @@ function MemoryErrorDialog({
                   onRetry();
                 }}
               >
-                Try again
+                {t("tryAgain")}
               </Button>
             </AlertDialog.Footer>
           </AlertDialog.Dialog>

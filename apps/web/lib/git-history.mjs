@@ -1,16 +1,22 @@
-export function formatGitRelativeTime(value, now = Date.now()) {
+export function formatGitRelativeTime(
+  value,
+  now = Date.now(),
+  locale,
+  unknownTime = "Unknown time",
+) {
   const timestamp = Date.parse(value ?? "");
-  if (!Number.isFinite(timestamp)) return "Unknown time";
+  if (!Number.isFinite(timestamp)) return unknownTime;
 
   const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
-  if (seconds < 60) return seconds < 10 ? "just now" : `${seconds}s ago`;
+  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" });
+  if (seconds < 60) return relative.format(-seconds, "second");
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return relative.format(-minutes, "minute");
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return relative.format(-hours, "hour");
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString(undefined, {
+  if (days < 30) return relative.format(-days, "day");
+  return new Date(timestamp).toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
     year: new Date(timestamp).getFullYear() === new Date(now).getFullYear() ? undefined : "numeric",

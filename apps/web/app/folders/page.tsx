@@ -4,6 +4,7 @@ import { Button, Card, Chip, Input, Label, TextField } from "@heroui/react";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { FolderOpen, Folders, Loader2, MessagesSquare, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useCocola } from "@/app/runtime-provider";
 import {
@@ -16,12 +17,10 @@ import {
   WorkspaceSectionHeader,
 } from "@/components/heroui-workspace/workspace-ui";
 
-function relativeDate(iso: string) {
-  const timestamp = Date.parse(iso);
-  return Number.isNaN(timestamp) ? "recently" : new Date(timestamp).toLocaleDateString();
-}
-
 export default function FoldersPage() {
+  const t = useTranslations("workspace.folders");
+  const common = useTranslations("common.actions");
+  const format = useFormatter();
   const router = useRouter();
   const { conversations, folders, foldersLoaded, createFolder } = useCocola();
   const [isCreating, setIsCreating] = useState(false);
@@ -71,7 +70,7 @@ export default function FoldersPage() {
       setName("");
       router.push(`/folders/${encodeURIComponent(folder.id)}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create folder");
+      setError(cause instanceof Error ? cause.message : t("createFailed"));
     } finally {
       setBusy(false);
     }
@@ -83,17 +82,17 @@ export default function FoldersPage() {
         action={
           <WorkspacePageAction onPress={() => setIsCreating(true)}>
             <Plus className="size-4" />
-            New folder
+            {t("new")}
           </WorkspacePageAction>
         }
-        description="Organize independent chats without changing their workspace."
+        description={t("description")}
         icon={<Folders className="size-5" />}
-        title="Folders"
+        title={t("title")}
       />
 
       <WorkspaceSectionHeader
-        description={`${folderRows.length} conversation group${folderRows.length === 1 ? "" : "s"}`}
-        title="All folders"
+        description={t("count", { count: folderRows.length })}
+        title={t("all")}
       />
 
       {!foldersLoaded ? (
@@ -105,21 +104,25 @@ export default function FoldersPage() {
           {folderRows.map((folder) => (
             <WorkspaceCatalogCard
               key={folder.id}
-              description="Keep related conversations together without changing their workspace."
-              footerLabel="Open folder"
-              footerMeta={`Updated ${relativeDate(folder.updated_at)}`}
+              description={t("cardDescription")}
+              footerLabel={t("open")}
+              footerMeta={t("updated", {
+                date: Number.isNaN(Date.parse(folder.updated_at))
+                  ? t("recently")
+                  : format.dateTime(new Date(folder.updated_at), { dateStyle: "medium" }),
+              })}
               href={`/folders/${encodeURIComponent(folder.id)}`}
               icon={<FolderOpen className="size-5" />}
               iconClassName="bg-amber-500/15 text-amber-500"
               metadata={
                 <Chip size="sm" variant="soft">
                   <MessagesSquare className="size-3.5" />
-                  {folder.chatCount} {folder.chatCount === 1 ? "conversation" : "conversations"}
+                  {t("conversationCount", { count: folder.chatCount })}
                 </Chip>
               }
               status={
                 <Chip size="sm" variant="soft">
-                  Workspace
+                  {t("workspace")}
                 </Chip>
               }
               title={folder.name}
@@ -133,15 +136,13 @@ export default function FoldersPage() {
               <EmptyState.Media variant="icon">
                 <FolderOpen className="text-amber-500" />
               </EmptyState.Media>
-              <EmptyState.Title>No folders yet</EmptyState.Title>
-              <EmptyState.Description>
-                Create a folder to organize related chats.
-              </EmptyState.Description>
+              <EmptyState.Title>{t("emptyTitle")}</EmptyState.Title>
+              <EmptyState.Description>{t("emptyDescription")}</EmptyState.Description>
             </EmptyState.Header>
             <EmptyState.Content>
               <Button size="sm" variant="outline" onPress={() => setIsCreating(true)}>
                 <Plus className="size-4" />
-                New folder
+                {t("new")}
               </Button>
             </EmptyState.Content>
           </EmptyState>
@@ -149,15 +150,15 @@ export default function FoldersPage() {
       )}
 
       <WorkspaceEntitySheet
-        description="Create a lightweight group for related conversations."
+        description={t("sheetDescription")}
         isOpen={isCreating}
-        title="New folder"
+        title={t("new")}
         onOpenChange={changeOpen}
       >
         <form className="grid gap-5" onSubmit={submit}>
           <TextField autoFocus value={name} onChange={setName}>
-            <Label>Folder name</Label>
-            <Input placeholder="e.g. Product launch" />
+            <Label>{t("name")}</Label>
+            <Input placeholder={t("namePlaceholder")} />
           </TextField>
           {error ? (
             <p className="text-danger text-sm" role="alert">
@@ -166,11 +167,11 @@ export default function FoldersPage() {
           ) : null}
           <div className="flex justify-end gap-2">
             <Button isDisabled={busy} variant="ghost" onPress={() => changeOpen(false)}>
-              Cancel
+              {common("cancel")}
             </Button>
             <Button isDisabled={busy || !name.trim()} type="submit" variant="primary">
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-              Create folder
+              {t("create")}
             </Button>
           </div>
         </form>

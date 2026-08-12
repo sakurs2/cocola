@@ -25,6 +25,7 @@ import { DataGrid, type DataGridProps } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { cn } from "@/lib/utils";
 
@@ -149,6 +150,7 @@ export function AdminPagination({
   onPageChange: (page: number) => void;
   variant?: "card" | "embedded";
 }) {
+  const t = useTranslations("admin.pagination");
   const start = count > 0 ? page * pageSize + 1 : 0;
   const end = count > 0 ? page * pageSize + count : 0;
   const pageCount = total === undefined ? undefined : Math.max(1, Math.ceil(total / pageSize));
@@ -165,31 +167,34 @@ export function AdminPagination({
       )}
     >
       <div className="text-xs tabular-nums text-muted">
-        {total === undefined ? `${start}–${end} ${label}` : `${start}–${end} of ${total} ${label}`}
+        {total === undefined
+          ? t("rangeUnknown", { start, end, label })
+          : t("range", { start, end, total, label })}
       </div>
       <div className="flex items-center gap-2">
         <span className="min-w-20 text-center text-xs tabular-nums text-muted">
-          Page {page + 1}
-          {pageCount === undefined ? "" : ` of ${pageCount}`}
+          {pageCount === undefined
+            ? t("page", { page: page + 1 })
+            : t("pageOf", { page: page + 1, total: pageCount })}
         </span>
         <Button
           size="sm"
           variant="outline"
-          aria-label={`Previous page of ${label}`}
+          aria-label={t("previousAria", { label })}
           isDisabled={page === 0 || loading}
           onPress={() => onPageChange(Math.max(0, page - 1))}
         >
           <ChevronLeft className="size-4" />
-          Previous
+          {t("previous")}
         </Button>
         <Button
           size="sm"
           variant="outline"
-          aria-label={`Next page of ${label}`}
+          aria-label={t("nextAria", { label })}
           isDisabled={!canGoNext || loading}
           onPress={() => onPageChange(page + 1)}
         >
-          Next
+          {t("next")}
           <ChevronRight className="size-4" />
         </Button>
       </div>
@@ -228,6 +233,7 @@ export function AdminDataGrid<T extends object>({
   scrollContainerClassName,
   ...props
 }: DataGridProps<T>) {
+  const t = useTranslations("admin.shared");
   const wrapperRef = useRef<HTMLDivElement>(null);
   const floatingRef = useRef<HTMLDivElement>(null);
   const [floatingScrollbar, setFloatingScrollbar] = useState({
@@ -317,7 +323,7 @@ export function AdminDataGrid<T extends object>({
       <div
         ref={floatingRef}
         aria-hidden={!floatingScrollbar.visible}
-        aria-label="Horizontal table scrollbar"
+        aria-label={t("horizontalScrollbar")}
         className="admin-data-grid-floating-scrollbar fixed bottom-0 z-50"
         data-visible={floatingScrollbar.visible || undefined}
         tabIndex={floatingScrollbar.visible ? 0 : -1}
@@ -441,6 +447,7 @@ export function AdminTruncatedValue({
   href?: string;
   onPress?: () => void;
 }) {
+  const t = useTranslations("admin.shared");
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -475,7 +482,9 @@ export function AdminTruncatedValue({
       {value !== "—" ? (
         <Button
           isIconOnly
-          aria-label={copied ? `${copyLabel} copied` : `Copy ${copyLabel}`}
+          aria-label={
+            copied ? t("copiedValue", { value: copyLabel }) : t("copyValue", { value: copyLabel })
+          }
           className="size-6 min-w-6 shrink-0 opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100"
           size="sm"
           variant="ghost"
@@ -525,8 +534,8 @@ export function AdminAlert({
 
 export function AdminErrorDialog({
   error,
-  title = "Operation failed",
-  retryLabel = "Try again",
+  title,
+  retryLabel,
   onDismiss,
   onRetry,
 }: {
@@ -536,6 +545,7 @@ export function AdminErrorDialog({
   onDismiss: () => void;
   onRetry?: () => void;
 }) {
+  const t = useTranslations("admin.shared");
   return (
     <AlertDialog
       isOpen={Boolean(error)}
@@ -551,9 +561,9 @@ export function AdminErrorDialog({
                 <CircleAlert className="size-5" />
               </AlertDialog.Icon>
               <div className="min-w-0">
-                <AlertDialog.Heading>{title}</AlertDialog.Heading>
+                <AlertDialog.Heading>{title || t("operationFailed")}</AlertDialog.Heading>
                 <p className="mt-1 text-sm leading-6 text-muted">
-                  Cocola could not complete the requested admin operation.
+                  {t("operationFailedDescription")}
                 </p>
               </div>
             </AlertDialog.Header>
@@ -564,7 +574,7 @@ export function AdminErrorDialog({
             </AlertDialog.Body>
             <AlertDialog.Footer>
               <Button variant="outline" onPress={onDismiss}>
-                Close
+                {t("close")}
               </Button>
               {onRetry ? (
                 <Button
@@ -574,7 +584,7 @@ export function AdminErrorDialog({
                     onRetry();
                   }}
                 >
-                  {retryLabel}
+                  {retryLabel || t("tryAgain")}
                 </Button>
               ) : null}
             </AlertDialog.Footer>
@@ -627,6 +637,7 @@ export function AdminDrawer({
   size?: "md" | "lg";
   className?: string;
 }) {
+  const t = useTranslations("common.actions");
   return (
     <Sheet isOpen={open} placement="right" onOpenChange={onOpenChange}>
       <Sheet.Backdrop>
@@ -634,7 +645,7 @@ export function AdminDrawer({
           className={cn(size === "lg" ? "w-full md:w-[672px]" : "w-full md:w-[480px]", className)}
         >
           <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close" />
+            <Sheet.CloseTrigger aria-label={t("close")} />
             <Sheet.Header>
               <Sheet.Heading>{title}</Sheet.Heading>
               {description ? <p className="text-muted text-sm leading-6">{description}</p> : null}
@@ -653,7 +664,7 @@ export function AdminConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
+  confirmLabel,
   busy = false,
   destructive = false,
   error = null,
@@ -671,11 +682,12 @@ export function AdminConfirmDialog({
   onConfirm: () => void;
   className?: string;
 }) {
+  const t = useTranslations("common.actions");
   return (
     <ActionConfirmDialog
       busy={busy}
       className={className}
-      confirmLabel={confirmLabel}
+      confirmLabel={confirmLabel || t("confirm")}
       description={description}
       error={error}
       open={open}

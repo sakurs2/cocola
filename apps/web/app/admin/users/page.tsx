@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 
 type Role = "user" | "admin";
 
@@ -78,6 +79,8 @@ const EMPTY_FORM: UserForm = {
 };
 
 export default function AdminUsersPage() {
+  const t = useTranslations("admin.usersPage");
+  const format = useFormatter();
   const { data: session } = useSession();
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -185,7 +188,7 @@ export default function AdminUsersPage() {
       if (drawerMode === "create") {
         const password = form.autoPassword ? generatePassword() : form.password;
         if (!password) {
-          setError("Password is required");
+          setError(t("errors.passwordRequired"));
           setSaving(false);
           return;
         }
@@ -203,7 +206,7 @@ export default function AdminUsersPage() {
         if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
         if (!res.ok) throw new Error(await responseError(res));
         closeDrawer();
-        setNotice("User created");
+        setNotice(t("notices.created"));
         setCredential({ email: form.email.trim(), password });
         await refresh();
       } else if (editTarget) {
@@ -219,7 +222,7 @@ export default function AdminUsersPage() {
         if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
         if (!res.ok) throw new Error(await responseError(res));
         closeDrawer();
-        setNotice("User updated");
+        setNotice(t("notices.updated"));
         await refresh();
       }
     } catch (err) {
@@ -265,7 +268,7 @@ export default function AdminUsersPage() {
     if (!resetTarget) return;
     const password = resetAuto ? generatePassword() : resetPasswordValue.trim();
     if (!password) {
-      setError("Password is required");
+      setError(t("errors.passwordRequired"));
       return;
     }
     setError("");
@@ -282,7 +285,7 @@ export default function AdminUsersPage() {
       if (!res.ok) throw new Error(await responseError(res));
       const email = resetTarget.email;
       setResetTarget(null);
-      setNotice("Password reset");
+      setNotice(t("notices.passwordReset"));
       setCredential({ email, password });
       await refresh();
     } catch (err) {
@@ -306,7 +309,7 @@ export default function AdminUsersPage() {
       if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
       if (!res.ok) throw new Error(await responseError(res));
       setDeleteTarget(null);
-      setNotice("User deleted");
+      setNotice(t("notices.deleted"));
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -324,7 +327,7 @@ export default function AdminUsersPage() {
   const columns: DataGridColumn<AuthUser>[] = [
     {
       id: "user",
-      header: "User",
+      header: t("columns.user"),
       isRowHeader: true,
       minWidth: 320,
       cell: (user) => (
@@ -335,36 +338,43 @@ export default function AdminUsersPage() {
           <span className="block min-w-0 flex-1">
             <AdminTruncatedValue
               className="text-sm font-semibold"
-              copyLabel="user name"
+              copyLabel={t("copy.name")}
               value={user.name || user.username || user.email}
             />
             <AdminTruncatedValue
               className="text-muted mt-0.5 text-xs"
-              copyLabel="username and email"
+              copyLabel={t("copy.identity")}
               value={`${user.username} · ${user.email}`}
             />
           </span>
         </span>
       ),
     },
-    { id: "role", header: "Role", width: 130, cell: (user) => <RolePill role={user.role} /> },
+    {
+      id: "role",
+      header: t("columns.role"),
+      width: 130,
+      cell: (user) => <RolePill role={user.role} />,
+    },
     {
       id: "status",
-      header: "Status",
+      header: t("columns.status"),
       width: 130,
       cell: (user) => <StatusPill enabled={user.enabled} />,
     },
     {
       id: "login",
-      header: "Last login",
+      header: t("columns.lastLogin"),
       minWidth: 180,
       cell: (user) => (
-        <span className="text-muted text-sm tabular-nums">{formatTime(user.last_login_at)}</span>
+        <span className="text-muted text-sm tabular-nums">
+          {formatUserTime(user.last_login_at, format)}
+        </span>
       ),
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       width: 80,
       cell: (user) => {
@@ -377,7 +387,7 @@ export default function AdminUsersPage() {
         return (
           <Dropdown>
             <Dropdown.Trigger
-              aria-label={`Actions for ${user.username}`}
+              aria-label={t("actionsFor", { username: user.username })}
               className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"
               isDisabled={busy}
             >
@@ -389,7 +399,7 @@ export default function AdminUsersPage() {
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu
-                aria-label={`Actions for ${user.username}`}
+                aria-label={t("actionsFor", { username: user.username })}
                 onAction={(key) => {
                   if (key === "edit") openEdit(user);
                   if (key === "reset") openReset(user);
@@ -397,44 +407,48 @@ export default function AdminUsersPage() {
                     void patchUser(
                       user,
                       { role: user.role === "admin" ? "user" : "admin" },
-                      "User updated",
+                      t("notices.updated"),
                     );
                   if (key === "toggle")
                     void patchUser(
                       user,
                       { enabled: !user.enabled },
-                      user.enabled ? "User disabled" : "User enabled",
+                      user.enabled ? t("notices.disabled") : t("notices.enabled"),
                     );
                   if (key === "delete") setDeleteTarget(user);
                 }}
               >
-                <Dropdown.Item id="edit" textValue="Edit">
+                <Dropdown.Item id="edit" textValue={t("actions.edit")}>
                   <UserCog className="size-4" />
-                  Edit
+                  {t("actions.edit")}
                 </Dropdown.Item>
-                <Dropdown.Item id="reset" textValue="Reset password">
+                <Dropdown.Item id="reset" textValue={t("actions.resetPassword")}>
                   <KeyRound className="size-4" />
-                  Reset password
+                  {t("actions.resetPassword")}
                 </Dropdown.Item>
                 <Dropdown.Item
                   id="role"
                   isDisabled={roleLocked}
-                  textValue={user.role === "admin" ? "Make user" : "Make admin"}
+                  textValue={user.role === "admin" ? t("actions.makeUser") : t("actions.makeAdmin")}
                 >
                   <ShieldCheck className="size-4" />
-                  {user.role === "admin" ? "Make user" : "Make admin"}
+                  {user.role === "admin" ? t("actions.makeUser") : t("actions.makeAdmin")}
                 </Dropdown.Item>
                 <Dropdown.Item
                   id="toggle"
                   isDisabled={disableLocked}
-                  textValue={user.enabled ? "Disable" : "Enable"}
+                  textValue={user.enabled ? t("actions.disable") : t("actions.enable")}
                 >
                   <Power className="size-4" />
-                  {user.enabled ? "Disable" : "Enable"}
+                  {user.enabled ? t("actions.disable") : t("actions.enable")}
                 </Dropdown.Item>
-                <Dropdown.Item id="delete" isDisabled={deleteLocked} textValue="Delete">
+                <Dropdown.Item
+                  id="delete"
+                  isDisabled={deleteLocked}
+                  textValue={t("actions.delete")}
+                >
                   <Trash2 className="text-danger size-4" />
-                  <span className="text-danger">Delete</span>
+                  <span className="text-danger">{t("actions.delete")}</span>
                 </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
@@ -448,18 +462,18 @@ export default function AdminUsersPage() {
     <AdminPage>
       <AdminPageHeader
         icon={<UsersPageIcon className="size-5" />}
-        title="Users"
-        description="Manage accounts, roles, and access status."
+        title={t("title")}
+        description={t("description")}
         actions={
           <Button onPress={openCreate}>
             <UserPlus className="size-4" />
-            New user
+            {t("new")}
           </Button>
         }
       />
       <AdminErrorDialog
         error={error}
-        title="User operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
@@ -471,41 +485,41 @@ export default function AdminUsersPage() {
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <SearchField
-          aria-label="Search users"
+          aria-label={t("searchAria")}
           className="w-full lg:max-w-sm"
           value={query}
           onChange={setQuery}
         >
           <SearchField.Group>
             <SearchField.SearchIcon />
-            <SearchField.Input placeholder="Search username or email" />
+            <SearchField.Input placeholder={t("searchPlaceholder")} />
             <SearchField.ClearButton />
           </SearchField.Group>
         </SearchField>
         <div className="flex flex-wrap gap-2">
           <Segment
-            aria-label="Role filter"
+            aria-label={t("roleFilter")}
             selectedKey={roleFilter}
             onSelectionChange={(key) => setRoleFilter(String(key) as RoleFilter)}
           >
-            <Segment.Item id="all">All roles</Segment.Item>
-            <Segment.Item id="user">Users</Segment.Item>
-            <Segment.Item id="admin">Admins</Segment.Item>
+            <Segment.Item id="all">{t("allRoles")}</Segment.Item>
+            <Segment.Item id="user">{t("users")}</Segment.Item>
+            <Segment.Item id="admin">{t("admins")}</Segment.Item>
           </Segment>
           <Segment
-            aria-label="Status filter"
+            aria-label={t("statusFilter")}
             selectedKey={statusFilter}
             onSelectionChange={(key) => setStatusFilter(String(key) as StatusFilter)}
           >
-            <Segment.Item id="all">All</Segment.Item>
-            <Segment.Item id="enabled">Enabled</Segment.Item>
-            <Segment.Item id="disabled">Disabled</Segment.Item>
+            <Segment.Item id="all">{t("all")}</Segment.Item>
+            <Segment.Item id="enabled">{t("enabled")}</Segment.Item>
+            <Segment.Item id="disabled">{t("disabled")}</Segment.Item>
           </Segment>
         </div>
       </div>
 
       <AdminDataGrid
-        aria-label="Users"
+        aria-label={t("tableAria")}
         columns={columns}
         contentClassName="min-w-[840px]"
         data={filtered}
@@ -520,15 +534,13 @@ export default function AdminUsersPage() {
               </EmptyState.Media>
               <EmptyState.Title>
                 {loading
-                  ? "Loading users"
+                  ? t("empty.loading")
                   : users.length
-                    ? "No users match your filters"
-                    : "No users found"}
+                    ? t("empty.filtered")
+                    : t("empty.none")}
               </EmptyState.Title>
               <EmptyState.Description>
-                {loading
-                  ? "Fetching account records…"
-                  : "Create a user or adjust the current filters."}
+                {loading ? t("empty.loadingDescription") : t("empty.description")}
               </EmptyState.Description>
             </EmptyState.Header>
           </EmptyState>
@@ -541,14 +553,12 @@ export default function AdminUsersPage() {
         onOpenChange={(open) => {
           if (!open) closeDrawer();
         }}
-        title={drawerMode === "create" ? "Create user" : "Edit user"}
-        description={
-          drawerMode === "create" ? "Passwords are stored as bcrypt hashes." : editTarget?.email
-        }
+        title={drawerMode === "create" ? t("drawer.createTitle") : t("drawer.editTitle")}
+        description={drawerMode === "create" ? t("drawer.passwordHash") : editTarget?.email}
         footer={
           <div className="admin-theme-blue flex justify-end gap-2">
             <Button variant="outline" isDisabled={saving} onPress={closeDrawer}>
-              Cancel
+              {t("drawer.cancel")}
             </Button>
             <Button
               isDisabled={saving || !canSubmitDrawer}
@@ -556,30 +566,30 @@ export default function AdminUsersPage() {
               onPress={() => void submitDrawer()}
             >
               {saving ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-              {drawerMode === "create" ? "Create" : "Save"}
+              {drawerMode === "create" ? t("drawer.create") : t("drawer.save")}
             </Button>
           </div>
         }
       >
         <div className="admin-theme-blue admin-drawer-form space-y-4">
           <FieldInput
-            label="Username"
+            label={t("drawer.username")}
             value={form.username}
             onChange={(username) => setForm((p) => ({ ...p, username }))}
           />
           <FieldInput
-            label="Email"
+            label={t("drawer.email")}
             type="email"
             value={form.email}
             onChange={(email) => setForm((p) => ({ ...p, email }))}
           />
 
           <ChoiceDropdown
-            label="Role"
+            label={t("drawer.role")}
             value={form.role}
             options={[
-              { id: "user", label: "user" },
-              { id: "admin", label: "admin" },
+              { id: "user", label: t("drawer.userRole") },
+              { id: "admin", label: t("drawer.adminRole") },
             ]}
             onChange={(role) => setForm((current) => ({ ...current, role: role as Role }))}
           />
@@ -592,15 +602,13 @@ export default function AdminUsersPage() {
                   setForm((current) => ({ ...current, autoPassword: selected }))
                 }
               >
-                Auto-generate initial password
+                {t("drawer.autoPassword")}
               </Checkbox>
               {form.autoPassword ? (
-                <p className="text-xs text-muted">
-                  A strong password is generated on create and shown once so you can copy it.
-                </p>
+                <p className="text-xs text-muted">{t("drawer.autoPasswordDescription")}</p>
               ) : (
                 <FieldInput
-                  label="Password"
+                  label={t("drawer.password")}
                   type="password"
                   value={form.password}
                   onChange={(password) => setForm((p) => ({ ...p, password }))}
@@ -617,30 +625,28 @@ export default function AdminUsersPage() {
         onOpenChange={(open) => {
           if (!open) setResetTarget(null);
         }}
-        title="Reset password"
+        title={t("reset.title")}
         description={resetTarget?.username || resetTarget?.email}
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="outline" isDisabled={resetting} onPress={() => setResetTarget(null)}>
-              Cancel
+              {t("reset.cancel")}
             </Button>
             <Button isPending={resetting} onPress={() => void submitReset()}>
-              Reset
+              {t("reset.action")}
             </Button>
           </div>
         }
       >
         <div className="space-y-3">
           <Checkbox isSelected={resetAuto} onChange={setResetAuto}>
-            Auto-generate new password
+            {t("reset.auto")}
           </Checkbox>
           {resetAuto ? (
-            <p className="text-xs text-muted">
-              A strong password is generated and shown once so you can copy it.
-            </p>
+            <p className="text-xs text-muted">{t("reset.autoDescription")}</p>
           ) : (
             <FieldInput
-              label="New password"
+              label={t("reset.newPassword")}
               type="password"
               value={resetPasswordValue}
               onChange={setResetPasswordValue}
@@ -655,8 +661,8 @@ export default function AdminUsersPage() {
         onOpenChange={(open) => {
           if (!open) setCredential(null);
         }}
-        title="Password ready"
-        description="Copy this password now — it will not be shown again."
+        title={t("credential.title")}
+        description={t("credential.description")}
         footer={
           <div className="flex justify-end gap-2">
             <Button
@@ -666,15 +672,15 @@ export default function AdminUsersPage() {
               }
             >
               <Copy className="size-4" />
-              Copy both
+              {t("credential.copyBoth")}
             </Button>
-            <Button onPress={() => setCredential(null)}>Done</Button>
+            <Button onPress={() => setCredential(null)}>{t("credential.done")}</Button>
           </div>
         }
       >
         <div className="space-y-2">
-          <CredentialRow label="Email" value={credential?.email || ""} />
-          <CredentialRow label="Password" value={credential?.password || ""} mono />
+          <CredentialRow label={t("credential.email")} value={credential?.email || ""} />
+          <CredentialRow label={t("credential.password")} value={credential?.password || ""} mono />
         </div>
       </AdminDrawer>
 
@@ -684,9 +690,11 @@ export default function AdminUsersPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title="Delete user"
-        description={`Delete ${deleteTarget?.username || deleteTarget?.email || "this user"}? The username and email will remain reserved.`}
-        confirmLabel="Delete"
+        title={t("delete.title")}
+        description={t("delete.description", {
+          user: deleteTarget?.username || deleteTarget?.email || t("delete.thisUser"),
+        })}
+        confirmLabel={t("delete.action")}
         busy={deleting}
         destructive
         onConfirm={() => void deleteUser()}
@@ -783,33 +791,35 @@ function avatarInitials(user: AuthUser) {
 }
 
 function RolePill({ role }: { role: Role }) {
+  const t = useTranslations("admin.usersPage.roles");
   const Icon = role === "admin" ? ShieldCheck : Shield;
   return (
     <Chip color={role === "admin" ? "accent" : "default"} size="sm" variant="soft">
       <Icon className="size-3.5" />
-      {role}
+      {t(role)}
     </Chip>
   );
 }
 
 function StatusPill({ enabled }: { enabled: boolean }) {
+  const t = useTranslations("admin.usersPage.status");
   return (
     <Chip color={enabled ? "success" : "default"} size="sm" variant="soft">
-      {enabled ? "Enabled" : "Disabled"}
+      {enabled ? t("enabled") : t("disabled")}
     </Chip>
   );
 }
 
-function formatTime(value?: string) {
+function formatUserTime(value: string | undefined, format: ReturnType<typeof useFormatter>) {
   if (!value) return "-";
   const ts = Date.parse(value);
   if (Number.isNaN(ts)) return value;
-  return new Intl.DateTimeFormat(undefined, {
+  return format.dateTime(new Date(ts), {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(ts));
+  });
 }
 
 // Generate a strong, human-copyable password. Uses the Web Crypto API so the

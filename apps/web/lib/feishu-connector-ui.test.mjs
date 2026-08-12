@@ -30,11 +30,11 @@ test("manual App Secret stays in a password input and is not rendered", () => {
 });
 
 test("global Connectors owns GitHub while each Agent owns its Feishu bot", () => {
-  assert.match(connectorsPage, /not_configured: \{[\s\S]*?label: "Not connected"/);
+  assert.match(connectorsPage, /not_configured: \{[\s\S]*?label: copy\.notConnected/);
   assert.match(connectorsPage, /mt-4 flex items-center gap-2 text-xs/);
   assert.doesNotMatch(connectorsPage, /FeishuConnectorCard/);
-  assert.match(component, /Give this Agent its own Feishu entry point/);
-  assert.match(component, /One Agent can have one Bot/);
+  assert.match(component, /t\("description"\)/);
+  assert.doesNotMatch(component, /Give this Agent its own Feishu entry point/);
   assert.match(component, /`\/api\/agents\/\$\{encodeURIComponent\(agentId\)\}\/channels\/feishu`/);
 });
 
@@ -42,10 +42,10 @@ test("connector cards leave checking after a failed initial request and offer re
   for (const source of [connectorsPage, component]) {
     assert.match(source, /type ConnectionLoadState = "checking" \| "ready" \| "failed"/);
     assert.match(source, /setLoadState\("failed"\)/);
-    assert.match(source, /\bRetry\b/);
+    assert.match(source, /t\("retry"\)/);
     assert.doesNotMatch(source, /setConnection\(null\)/);
   }
-  assert.match(connectorsPage, /Connection check failed/);
+  assert.match(connectorsPage, /connectionCheckFailed: t\("connectionCheckFailed"\)/);
   assert.match(connectorsPage, /!connection && loadState === "failed"/);
   assert.match(connectorsPage, /connection && loadState === "failed"/);
   assert.match(component, /loadState === "failed"/);
@@ -79,7 +79,7 @@ test("the Agent owns the fixed model used by its Feishu bot", () => {
   assert.match(agentPage, /method: "PATCH"/);
   assert.match(agentPage, /model_route_id: selectedModel\.id/);
   assert.match(agentPage, /model_alias: selectedModel\.alias/);
-  assert.match(agentPage, /Conversations using this Agent always use this compatible model/);
+  assert.match(agentPage, /t\("compatibleModels"\)/);
   assert.doesNotMatch(component, /fetch\("\/api\/models"/);
 });
 

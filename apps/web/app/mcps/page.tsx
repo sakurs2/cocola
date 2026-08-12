@@ -4,6 +4,7 @@ import { Card, Chip, Switch } from "@heroui/react";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { LoaderCircle, Plug } from "lucide-react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import {
   WorkspacePageFrame,
@@ -25,6 +26,7 @@ type MCPServer = {
 };
 
 export default function MCPPage() {
+  const t = useTranslations("connectors.mcp");
   const [mcps, setMcps] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState<string | null>(null);
@@ -75,9 +77,9 @@ export default function MCPPage() {
   return (
     <WorkspacePageFrame>
       <WorkspacePageHeader
-        description="External tool servers published to the current user."
+        description={t("description")}
         icon={<Plug className="size-5" />}
-        title="MCP"
+        title={t("title")}
       />
 
       {error ? (
@@ -85,8 +87,8 @@ export default function MCPPage() {
       ) : null}
 
       <WorkspaceSectionHeader
-        description={`${mcps.length} server${mcps.length === 1 ? "" : "s"} available to this account.`}
-        title="Published servers"
+        description={t("count", { count: mcps.length })}
+        title={t("published")}
       />
 
       {loading ? (
@@ -112,14 +114,14 @@ export default function MCPPage() {
                       {mcp.name || mcp.id}
                     </span>
                     <span className="text-muted mt-1 line-clamp-2 text-sm leading-5">
-                      {mcp.description || "No description"}
+                      {mcp.description || t("noDescription")}
                     </span>
                     <span className="mt-3 flex flex-wrap gap-1.5">
                       <Chip size="sm" variant="soft">
                         {mcp.transport}
                       </Chip>
                       <Chip size="sm" variant="soft">
-                        {mcp.default_enabled ? "Default on" : "Default off"}
+                        {mcp.default_enabled ? t("defaultOn") : t("defaultOff")}
                       </Chip>
                     </span>
                     {endpoint ? (
@@ -130,7 +132,9 @@ export default function MCPPage() {
                   </Link>
                   <div className="border-separator mt-3 flex items-center justify-end border-t pt-3">
                     <Switch
-                      aria-label={`${mcp.effective_enabled ? "Disable" : "Enable"} ${mcp.name || mcp.id}`}
+                      aria-label={t(mcp.effective_enabled ? "disable" : "enable", {
+                        name: mcp.name || mcp.id,
+                      })}
                       isDisabled={working}
                       isSelected={mcp.effective_enabled}
                       onChange={() => void toggle(mcp)}
@@ -153,10 +157,8 @@ export default function MCPPage() {
             <EmptyState.Media variant="icon">
               <Plug className="text-orange-500" />
             </EmptyState.Media>
-            <EmptyState.Title>No MCP servers</EmptyState.Title>
-            <EmptyState.Description>
-              No MCP servers are published by administrators.
-            </EmptyState.Description>
+            <EmptyState.Title>{t("empty")}</EmptyState.Title>
+            <EmptyState.Description>{t("emptyDescription")}</EmptyState.Description>
           </EmptyState.Header>
         </EmptyState>
       )}

@@ -20,6 +20,7 @@ import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Eye, Server, Trash2 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 
 type SandboxRuntime = {
   sandbox_id: string;
@@ -47,17 +48,6 @@ type SandboxRuntime = {
 
 type SandboxListResponse = { sandboxes: SandboxRuntime[] };
 
-const STATUS_LABELS: Record<string, string> = {
-  running: "Running",
-  ready: "Ready",
-  starting: "Starting",
-  pending_reclaim: "Pending reclaim",
-  stale_metadata: "Stale metadata",
-  stopped: "Stopped",
-  orphan: "Orphan",
-  unknown: "Unknown",
-};
-
 type BadgeTone = "neutral" | "sky" | "green" | "amber" | "red";
 
 const STATUS_TONES: Record<string, BadgeTone> = {
@@ -72,6 +62,8 @@ const STATUS_TONES: Record<string, BadgeTone> = {
 };
 
 export default function SandboxesPage() {
+  const t = useTranslations("admin.sandboxesPage");
+  const format = useFormatter();
   const [sandboxes, setSandboxes] = useState<SandboxRuntime[]>([]);
   const [loading, setLoading] = useState(true);
   const [unsupported, setUnsupported] = useState(false);
@@ -81,49 +73,69 @@ export default function SandboxesPage() {
   const [pendingDeleteId, setPendingDeleteId] = useState("");
   const [detailSandbox, setDetailSandbox] = useState<SandboxRuntime | null>(null);
 
-  const refresh = useCallback(async (notify = false) => {
-    setError("");
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/sandboxes", { cache: "no-store" });
-      if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
-      if (await isUnsupportedResponse(res)) {
-        setUnsupported(true);
-        setSandboxes([]);
-        return;
+  const refresh = useCallback(
+    async (notify = false) => {
+      setError("");
+      setLoading(true);
+      try {
+        const res = await fetch("/api/admin/sandboxes", { cache: "no-store" });
+        if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
+        if (await isUnsupportedResponse(res)) {
+          setUnsupported(true);
+          setSandboxes([]);
+          return;
+        }
+        if (!res.ok) throw new Error(await responseError(res));
+        const body = (await res.json()) as SandboxListResponse;
+        setUnsupported(false);
+        setSandboxes(Array.isArray(body.sandboxes) ? body.sandboxes : []);
+        if (notify) setNotice(t("refreshed"));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
       }
-      if (!res.ok) throw new Error(await responseError(res));
-      const body = (await res.json()) as SandboxListResponse;
-      setUnsupported(false);
-      setSandboxes(Array.isArray(body.sandboxes) ? body.sandboxes : []);
-      if (notify) setNotice("Sandbox runtime state refreshed");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [t],
+  );
 
-  const handleDelete = useCallback(async (sandboxID: string) => {
-    if (!sandboxID) return;
-    setError("");
-    setDeletingId(sandboxID);
-    try {
-      const res = await fetch(`/api/admin/sandboxes/${encodeURIComponent(sandboxID)}`, {
-        method: "DELETE",
-        cache: "no-store",
-      });
-      if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
-      if (!res.ok && res.status !== 204) throw new Error(await responseError(res));
-      setSandboxes((prev) => prev.filter((s) => s.sandbox_id !== sandboxID));
-      setPendingDeleteId("");
-      setNotice(`Sandbox ${sandboxID} deleted`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDeletingId("");
-    }
-  }, []);
+  const handleDelete = useCallback(
+    async (sandboxID: string) => {
+      if (!sandboxID) return;
+      setError("");
+      setDeletingId(sandboxID);
+      try {
+        const res = await fetch(`/api/admin/sandboxes/${encodeURIComponent(sandboxID)}`, {
+          method: "DELETE",
+          cache: "no-store",
+        });
+        if (isAccountDisabledResponse(res)) return redirectAccountDisabled();
+        if (!res.ok && res.status !== 204) throw new Error(await responseError(res));
+        setSandboxes((prev) => prev.filter((s) => s.sandbox_id !== sandboxID));
+        setPendingDeleteId("");
+        setNotice(t("deleted", { id: sandboxID }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setDeletingId("");
+      }
+    },
+    [t],
+  );
+
+  const formatDate = (value?: string) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) || date.getTime() <= 0
+      ? "—"
+      : format.dateTime(date, {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+  };
 
   useEffect(() => {
     void refresh();
@@ -132,42 +144,44 @@ export default function SandboxesPage() {
   const columns: DataGridColumn<SandboxRuntime>[] = [
     {
       id: "sandbox",
-      header: "Sandbox",
+      header: t("columns.sandbox"),
       isRowHeader: true,
       width: 220,
       cell: (sandbox) => (
         <AdminTruncatedValue
           className="font-mono text-xs font-medium"
-          copyLabel="sandbox ID"
+          copyLabel={t("copy.sandboxId")}
           value={sandbox.sandbox_id}
         />
       ),
     },
     {
       id: "status",
-      header: "Status",
+      header: t("columns.status"),
       width: 135,
       cell: (sandbox) => (
         <AdminStatusBadge tone={STATUS_TONES[sandbox.status] ?? "neutral"} dot>
-          {STATUS_LABELS[sandbox.status] ?? sandbox.status}
+          {t.has(`status.${sandbox.status}` as never)
+            ? t(`status.${sandbox.status}` as never)
+            : sandbox.status || t("status.unknown")}
         </AdminStatusBadge>
       ),
     },
     {
       id: "owner",
-      header: "Owner",
+      header: t("columns.owner"),
       width: 190,
       cell: (sandbox) => (
         <AdminTruncatedValue
           className="text-sm"
-          copyLabel={sandbox.username ? "username" : "user ID"}
+          copyLabel={sandbox.username ? t("copy.username") : t("copy.userId")}
           value={sandbox.username || sandbox.user_id || "—"}
         />
       ),
     },
     {
       id: "created",
-      header: "Created",
+      header: t("columns.created"),
       width: 145,
       cell: (sandbox) => (
         <span className="text-muted text-xs tabular-nums">{formatDate(sandbox.created_at)}</span>
@@ -175,34 +189,35 @@ export default function SandboxesPage() {
     },
     {
       id: "node",
-      header: "Node",
+      header: t("columns.node"),
       width: 190,
       cell: (sandbox) => (
         <AdminTruncatedValue
           className="text-xs"
-          copyLabel="node name"
-          value={sandbox.node_name || "Unassigned"}
+          copyLabel={t("copy.nodeName")}
+          value={sandbox.node_name || t("unassigned")}
         />
       ),
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       width: 72,
       cell: (sandbox) => (
         <AdminRowActions
-          label={`Actions for sandbox ${sandbox.sandbox_id}`}
+          label={t("actions.forSandbox", { id: sandbox.sandbox_id })}
           busy={deletingId === sandbox.sandbox_id}
           actions={[
             {
               id: "details",
-              label: "View details",
+              label: t("actions.details"),
               icon: <Eye className="size-4" />,
             },
             {
               id: "delete",
-              label: sandbox.status === "running" ? "Delete running sandbox" : "Delete sandbox",
+              label:
+                sandbox.status === "running" ? t("actions.deleteRunning") : t("actions.delete"),
               icon: <Trash2 className="size-4" />,
               destructive: true,
             },
@@ -220,8 +235,8 @@ export default function SandboxesPage() {
     <AdminPage className="admin-theme-teal">
       <AdminPageHeader
         icon={<SandboxesPageIcon className="size-5" />}
-        title="Sandboxes"
-        description="Runtime state for session-bound sandboxes"
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton
             variant="outline"
@@ -229,14 +244,14 @@ export default function SandboxesPage() {
             disabled={loading}
             onClick={() => void refresh(true)}
           >
-            Refresh
+            {t("refresh")}
           </AdminRefreshButton>
         }
       />
 
       <AdminErrorDialog
         error={error}
-        title="Sandbox operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void refresh()}
       />
@@ -250,7 +265,7 @@ export default function SandboxesPage() {
         <UnsupportedState />
       ) : (
         <AdminDataGrid
-          aria-label="Sandboxes"
+          aria-label={t("tableAria")}
           columns={columns}
           contentClassName="min-w-[860px]"
           data={sandboxes}
@@ -264,12 +279,10 @@ export default function SandboxesPage() {
                   <SandboxesPageIcon className="text-teal-500" />
                 </EmptyState.Media>
                 <EmptyState.Title>
-                  {loading ? "Loading sandboxes" : "No sandboxes found"}
+                  {loading ? t("empty.loading") : t("empty.title")}
                 </EmptyState.Title>
                 <EmptyState.Description>
-                  {loading
-                    ? "Fetching sandbox runtime state…"
-                    : "Session-bound sandboxes will appear here once they are provisioned."}
+                  {loading ? t("empty.loadingDescription") : t("empty.description")}
                 </EmptyState.Description>
               </EmptyState.Header>
             </EmptyState>
@@ -289,9 +302,11 @@ export default function SandboxesPage() {
         onOpenChange={(open) => {
           if (!open) setPendingDeleteId("");
         }}
-        title="Delete sandbox?"
-        description={`This removes ${pendingDeleteId || "this sandbox"} and its runtime metadata. This action cannot be undone.`}
-        confirmLabel="Delete sandbox"
+        title={t("confirm.title")}
+        description={t("confirm.description", {
+          sandbox: pendingDeleteId || t("confirm.thisSandbox"),
+        })}
+        confirmLabel={t("confirm.action")}
         busy={Boolean(deletingId)}
         destructive
         onConfirm={() => void handleDelete(pendingDeleteId)}
@@ -307,61 +322,85 @@ function SandboxDetailsDialog({
   sandbox: SandboxRuntime | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useTranslations("admin.sandboxesPage");
+  const format = useFormatter();
+  const formatDate = (value?: string) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) || date.getTime() <= 0
+      ? "—"
+      : format.dateTime(date, {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+  };
   return (
     <Modal isOpen={Boolean(sandbox)} onOpenChange={onOpenChange}>
       <Modal.Backdrop>
         <Modal.Container placement="center" scroll="inside" size="md">
           <Modal.Dialog>
-            <Modal.CloseTrigger aria-label="Close sandbox details" />
+            <Modal.CloseTrigger aria-label={t("details.close")} />
             <Modal.Header className="items-start">
               <Modal.Icon className="bg-teal-500/10 text-teal-600">
                 <SandboxesPageIcon className="size-5" />
               </Modal.Icon>
               <div className="min-w-0">
-                <Modal.Heading>Sandbox details</Modal.Heading>
-                <p className="mt-1 text-sm text-muted">Runtime diagnostics for this sandbox.</p>
+                <Modal.Heading>{t("details.title")}</Modal.Heading>
+                <p className="mt-1 text-sm text-muted">{t("details.description")}</p>
               </div>
             </Modal.Header>
             <Modal.Body>
               {sandbox ? (
                 <dl className="divide-y divide-border/70 rounded-2xl border border-border/70 px-4">
                   <SandboxDetailValue
-                    label="Sandbox ID"
+                    label={t("details.sandboxId")}
                     value={sandbox.sandbox_id}
-                    copyLabel="sandbox ID"
+                    copyLabel={t("copy.sandboxId")}
                   />
                   <SandboxDetailValue
-                    label="Session ID"
+                    label={t("details.sessionId")}
                     value={sandbox.session_id || "—"}
-                    copyLabel="session ID"
+                    copyLabel={t("copy.sessionId")}
                   />
                   <SandboxDetailValue
-                    label="User ID"
+                    label={t("details.userId")}
                     value={sandbox.user_id || "—"}
-                    copyLabel="user ID"
+                    copyLabel={t("copy.userId")}
                   />
                   <SandboxDetailValue
-                    label="Lifecycle"
-                    value={sandbox.lifecycle_state || "unknown"}
+                    label={t("details.lifecycle")}
+                    value={sandbox.lifecycle_state || t("status.unknown")}
                   />
                   <SandboxDetailValue
-                    label="Runtime image"
+                    label={t("details.image")}
                     value={sandbox.image || "—"}
-                    copyLabel="runtime image"
+                    copyLabel={t("copy.image")}
                   />
                   <SandboxDetailValue
-                    label="Node"
-                    value={sandbox.node_name || "Unassigned"}
-                    copyLabel="node name"
+                    label={t("columns.node")}
+                    value={sandbox.node_name || t("unassigned")}
+                    copyLabel={t("copy.nodeName")}
                   />
                   <SandboxDetailValue
-                    label="Pod"
+                    label={t("details.pod")}
                     value={sandbox.pod_name || "—"}
-                    copyLabel="pod name"
+                    copyLabel={t("copy.podName")}
                   />
-                  <SandboxDetailValue label="Pod phase" value={sandbox.pod_phase || "—"} />
-                  <SandboxDetailValue label="Created" value={formatDate(sandbox.created_at)} />
-                  <SandboxDetailValue label="Paused" value={formatDate(sandbox.paused_at)} />
+                  <SandboxDetailValue
+                    label={t("details.podPhase")}
+                    value={sandbox.pod_phase || "—"}
+                  />
+                  <SandboxDetailValue
+                    label={t("columns.created")}
+                    value={formatDate(sandbox.created_at)}
+                  />
+                  <SandboxDetailValue
+                    label={t("details.paused")}
+                    value={formatDate(sandbox.paused_at)}
+                  />
                 </dl>
               ) : null}
             </Modal.Body>
@@ -396,25 +435,16 @@ function SandboxDetailValue({
 }
 
 function UnsupportedState() {
+  const t = useTranslations("admin.sandboxesPage");
   return (
     <Card className="p-8">
       <AdminEmptyState
         icon={<Server className="text-teal-500" />}
-        title="Sandbox runtime monitoring is not configured"
-        description="Start admin-api with shared Redis access to read sandbox-manager binding metadata."
+        title={t("unsupported.title")}
+        description={t("unsupported.description")}
       />
     </Card>
   );
-}
-
-function formatDate(value?: string) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getTime() <= 0) return "—";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`;
 }
 
 async function responseError(res: Response) {

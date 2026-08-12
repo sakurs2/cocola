@@ -23,6 +23,7 @@ import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import {
   AdminAlert,
   AdminConfirmDialog,
@@ -174,6 +175,7 @@ const EMPTY_EMBEDDING: EmbeddingForm = {
 
 const inputClass =
   "h-10 w-full min-w-0 rounded-xl border border-separator bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-surface-secondary/50 disabled:text-muted";
+const iconPickerControlClass = cn(inputClass, "h-11 min-h-11 rounded-2xl");
 
 function useObjectURL(file: File | null) {
   const [url, setURL] = useState("");
@@ -190,6 +192,7 @@ function useObjectURL(file: File | null) {
 }
 
 export default function AdminModelsPage() {
+  const t = useTranslations("admin.modelsPage");
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [models, setModels] = useState<LLMModel[]>([]);
   const [view, setView] = useState<View>("models");
@@ -360,10 +363,10 @@ export default function AdminModelsPage() {
     try {
       let iconURL = providerForm.icon_type === "image" ? providerForm.icon_url : "";
       if (providerForm.icon_type === "image" && providerIconFile) {
-        iconURL = await uploadModelIcon(providerIconFile);
+        iconURL = await uploadModelIcon(providerIconFile, t("icon.uploadFailed"));
       }
       if (providerForm.icon_type === "image" && !iconURL) {
-        throw new Error("Choose an image for this provider icon.");
+        throw new Error(t("icon.providerRequired"));
       }
       const body: Record<string, unknown> = {
         id: providerForm.id.trim() || providerIDFromName(providerForm.name),
@@ -420,10 +423,10 @@ export default function AdminModelsPage() {
       }
       let iconURL = modelForm.icon_type === "image" ? modelForm.icon_url : "";
       if (modelForm.icon_type === "image" && modelIconFile) {
-        iconURL = await uploadModelIcon(modelIconFile);
+        iconURL = await uploadModelIcon(modelIconFile, t("icon.uploadFailed"));
       }
       if (modelForm.icon_type === "image" && !iconURL) {
-        throw new Error("Choose an image for this model icon.");
+        throw new Error(t("icon.modelRequired"));
       }
       const body = {
         alias:
@@ -534,8 +537,8 @@ export default function AdminModelsPage() {
     <AdminPage>
       <AdminPageHeader
         icon={<ModelsPageIcon className="size-5" />}
-        title="Models"
-        description="Connect model providers and decide which routes are available to each Agent Runtime."
+        title={t("title")}
+        description={t("description")}
         actions={
           <AdminRefreshButton
             refreshing={loading}
@@ -545,21 +548,21 @@ export default function AdminModelsPage() {
               void load();
             }}
           >
-            Refresh
+            {t("refresh")}
           </AdminRefreshButton>
         }
       />
 
       <AdminErrorDialog
         error={error}
-        title="Model configuration operation failed"
+        title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <Segment
-          aria-label="Model configuration"
+          aria-label={t("configuration")}
           selectedKey={view}
           onSelectionChange={(key) => {
             setView(String(key) as View);
@@ -568,30 +571,28 @@ export default function AdminModelsPage() {
         >
           <Segment.Item id="models">
             <Route className="size-4" />
-            Model routes · {models.length}
+            {t("routeCount", { count: models.length })}
           </Segment.Item>
           <Segment.Item id="providers">
             <Boxes className="size-4" />
-            Providers · {visibleProviders.length}
+            {t("providerCount", { count: visibleProviders.length })}
           </Segment.Item>
         </Segment>
         <Button onClick={view === "models" ? createModel : createProvider}>
           <Plus className="size-4" />
-          {view === "models" ? "Add model" : "Add provider"}
+          {view === "models" ? t("addModel") : t("addProvider")}
         </Button>
       </div>
 
       <SearchField
-        aria-label={view === "models" ? "Find a model route" : "Find a provider"}
+        aria-label={view === "models" ? t("findModel") : t("findProvider")}
         className="w-full max-w-sm"
         value={query}
         onChange={setQuery}
       >
         <SearchField.Group>
           <SearchField.SearchIcon />
-          <SearchField.Input
-            placeholder={view === "models" ? "Find a model route" : "Find a provider"}
-          />
+          <SearchField.Input placeholder={view === "models" ? t("findModel") : t("findProvider")} />
           <SearchField.ClearButton />
         </SearchField.Group>
       </SearchField>
@@ -627,13 +628,13 @@ export default function AdminModelsPage() {
       <AdminDrawer
         open={providerDrawerOpen}
         onOpenChange={(open) => !saving && setProviderDrawerOpen(open)}
-        title={editingProvider ? "Edit provider" : "Add provider"}
-        description="Connect an Anthropic Messages-compatible provider."
+        title={editingProvider ? t("provider.editTitle") : t("provider.addTitle")}
+        description={t("provider.description")}
         size="lg"
         footer={
           <DrawerFooter
             saving={saving}
-            saveLabel={editingProvider ? "Save changes" : "Add provider"}
+            saveLabel={editingProvider ? t("saveChanges") : t("addProvider")}
             onCancel={() => setProviderDrawerOpen(false)}
             onSave={() => void saveProvider()}
           />
@@ -642,19 +643,19 @@ export default function AdminModelsPage() {
         <div className="grid gap-5">
           {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name">
+            <Field label={t("provider.name")}>
               <Input
                 className={inputClass}
                 value={providerForm.name}
                 onChange={(event) => setProviderForm({ ...providerForm, name: event.target.value })}
-                placeholder="Production provider"
+                placeholder={t("provider.namePlaceholder")}
               />
             </Field>
-            <Field label="Status">
+            <Field label={t("provider.status")}>
               <Toggle
                 checked={providerForm.enabled}
                 onChange={(enabled) => setProviderForm({ ...providerForm, enabled })}
-                label="Provider enabled"
+                label={t("provider.enabled")}
               />
             </Field>
           </div>
@@ -680,7 +681,7 @@ export default function AdminModelsPage() {
             onInvalid={setFormError}
           />
 
-          <Field label="Base URL">
+          <Field label={t("baseUrl")}>
             <Input
               className={inputClass}
               value={providerForm.base_url}
@@ -693,20 +694,15 @@ export default function AdminModelsPage() {
 
           <div className="rounded-2xl border border-[#7828c8]/20 bg-[#7828c8]/[0.06] p-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#7828c8]/80">
-              Request path
+              {t("provider.requestPath")}
             </div>
             <code className="mt-1 block break-all text-xs text-foreground">
               {providerEndpoint(providerForm.base_url, providerForm.type)}
             </code>
-            <p className="mt-2 text-xs leading-5 text-muted">
-              This route uses the native Anthropic Messages API.
-            </p>
+            <p className="mt-2 text-xs leading-5 text-muted">{t("provider.requestDescription")}</p>
           </div>
 
-          <Field
-            label="API key"
-            hint={editingProvider ? "Leave blank to keep the current key." : undefined}
-          >
+          <Field label={t("apiKey")} hint={editingProvider ? t("keepKeyHint") : undefined}>
             <div className="relative">
               <KeyRound
                 aria-hidden="true"
@@ -718,7 +714,7 @@ export default function AdminModelsPage() {
                 onChange={(event) =>
                   setProviderForm({ ...providerForm, api_key: event.target.value })
                 }
-                placeholder={editingProvider ? "Keep current key" : "Enter API key"}
+                placeholder={editingProvider ? t("keepCurrentKey") : t("enterApiKey")}
                 type="password"
                 autoComplete="new-password"
               />
@@ -726,12 +722,9 @@ export default function AdminModelsPage() {
           </Field>
 
           <details className="group rounded-2xl border border-border/70 p-3">
-            <DisclosureSummary>Advanced</DisclosureSummary>
+            <DisclosureSummary>{t("advanced")}</DisclosureSummary>
             <div className="mt-4 border-t border-border/70 pt-4">
-              <Field
-                label="Provider ID"
-                hint="Generated from the provider name when left blank; it cannot be changed later."
-              >
+              <Field label={t("provider.id")} hint={t("provider.idHint")}>
                 <Input
                   className={cn(inputClass, "font-mono text-xs")}
                   value={providerForm.id}
@@ -751,20 +744,18 @@ export default function AdminModelsPage() {
         title={
           editingModel
             ? modelKind === "embedding"
-              ? "Edit embedding model"
-              : "Edit model route"
-            : "Add model"
+              ? t("model.editEmbedding")
+              : t("model.editRoute")
+            : t("addModel")
         }
         description={
-          modelKind === "embedding"
-            ? "Add an OpenAI-compatible embedding model for Memory and future knowledge sources."
-            : "Connect a user-visible model to one provider and upstream model ID."
+          modelKind === "embedding" ? t("model.embeddingDescription") : t("model.chatDescription")
         }
         size="lg"
         footer={
           <DrawerFooter
             saving={saving}
-            saveLabel={editingModel ? "Save changes" : "Add model"}
+            saveLabel={editingModel ? t("saveChanges") : t("addModel")}
             onCancel={() => setModelDrawerOpen(false)}
             onSave={() => void saveModel()}
           />
@@ -773,7 +764,7 @@ export default function AdminModelsPage() {
         <div className="grid gap-5">
           {formError ? <AdminAlert tone="error">{formError}</AdminAlert> : null}
           {!editingModel ? (
-            <FormGroup label="Model type">
+            <FormGroup label={t("model.type")}>
               <div className="grid gap-2 sm:grid-cols-[repeat(2,minmax(0,1fr))]">
                 <Button
                   variant="ghost"
@@ -786,11 +777,11 @@ export default function AdminModelsPage() {
                   )}
                 >
                   <span className="flex w-full min-w-0 items-center justify-between gap-3 text-sm font-semibold">
-                    <span className="truncate">Chat model</span>
+                    <span className="truncate">{t("model.chat")}</span>
                     {modelKind === "chat" ? <Check className="size-4 text-accent" /> : null}
                   </span>
                   <span className="block w-full text-xs leading-5 text-muted">
-                    For Agent conversations.
+                    {t("model.chatPurpose")}
                   </span>
                 </Button>
                 <Button
@@ -804,11 +795,11 @@ export default function AdminModelsPage() {
                   )}
                 >
                   <span className="flex w-full min-w-0 items-center justify-between gap-3 text-sm font-semibold">
-                    <span className="truncate">Embedding model</span>
+                    <span className="truncate">{t("model.embedding")}</span>
                     {modelKind === "embedding" ? <Check className="size-4 text-accent" /> : null}
                   </span>
                   <span className="block w-full text-xs leading-5 text-muted">
-                    For Memory and knowledge.
+                    {t("model.embeddingPurpose")}
                   </span>
                 </Button>
               </div>
@@ -817,7 +808,7 @@ export default function AdminModelsPage() {
 
           {modelKind === "embedding" ? (
             <div className="grid gap-5">
-              <Field label="Model name">
+              <Field label={t("model.name")}>
                 <Input
                   className={inputClass}
                   value={embeddingForm.model}
@@ -829,7 +820,7 @@ export default function AdminModelsPage() {
                 />
               </Field>
 
-              <Field label="Base URL">
+              <Field label={t("baseUrl")}>
                 <Input
                   className={inputClass}
                   value={embeddingForm.base_url}
@@ -842,10 +833,7 @@ export default function AdminModelsPage() {
                 />
               </Field>
 
-              <Field
-                label="API key"
-                hint={editingModel ? "Leave blank to keep the current key." : undefined}
-              >
+              <Field label={t("apiKey")} hint={editingModel ? t("keepKeyHint") : undefined}>
                 <div className="relative">
                   <KeyRound
                     aria-hidden="true"
@@ -860,8 +848,8 @@ export default function AdminModelsPage() {
                     }}
                     placeholder={
                       editingModel && embeddingProvider?.api_key_hint
-                        ? `Keep current key (${embeddingProvider.api_key_hint})`
-                        : "Enter API key"
+                        ? t("keepCurrentKeyWithHint", { hint: embeddingProvider.api_key_hint })
+                        : t("enterApiKey")
                     }
                     type="password"
                     autoComplete="new-password"
@@ -887,7 +875,7 @@ export default function AdminModelsPage() {
                   ) : (
                     <PlugZap className="mr-2 size-4" />
                   )}
-                  Test connection
+                  {t("model.testConnection")}
                 </Button>
               </div>
 
@@ -896,21 +884,24 @@ export default function AdminModelsPage() {
                   <span className="flex items-center gap-2">
                     {embeddingTest.ok ? <CircleCheck className="size-4" /> : null}
                     {embeddingTest.ok
-                      ? `Connected · ${embeddingTest.dimension} dimensions · ${embeddingTest.latency_ms} ms`
-                      : embeddingTest.error || "Embedding connection failed"}
+                      ? t("model.connected", {
+                          dimension: embeddingTest.dimension || 0,
+                          latency: embeddingTest.latency_ms,
+                        })
+                      : embeddingTest.error || t("model.connectionFailed")}
                   </span>
                 </AdminAlert>
               ) : null}
             </div>
           ) : (
             <>
-              <Field label="Provider">
+              <Field label={t("provider.label")}>
                 <SelectControl
                   className={inputClass}
                   value={modelForm.provider_id}
                   onValueChange={(value) => setModelForm({ ...modelForm, provider_id: value })}
                   options={[
-                    { value: "", label: "Select provider" },
+                    { value: "", label: t("provider.select") },
                     ...providers
                       .filter((provider) => {
                         if (provider.type === "openai_embeddings") return false;
@@ -933,12 +924,17 @@ export default function AdminModelsPage() {
                 <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-surface-secondary/25 p-3">
                   <ProviderProtocolBadge type={selectedProvider.type} />
                   <span className="text-xs text-muted">
-                    Compatible with {runtimeCompatibilityForType(selectedProvider.type)}
+                    {t("model.compatibleWith", {
+                      runtime:
+                        selectedProvider.type === "openai_embeddings"
+                          ? t("model.platformServices")
+                          : "Claude Code",
+                    })}
                   </span>
                 </div>
               ) : null}
 
-              <Field label="Model name">
+              <Field label={t("model.name")}>
                 <Input
                   className={inputClass}
                   value={modelForm.label}
@@ -947,7 +943,7 @@ export default function AdminModelsPage() {
                 />
               </Field>
 
-              <Field label="Upstream model ID">
+              <Field label={t("model.upstreamId")}>
                 <Input
                   className={inputClass}
                   value={modelForm.real_model}
@@ -985,24 +981,24 @@ export default function AdminModelsPage() {
                 <Toggle
                   checked={modelForm.enabled}
                   onChange={(enabled) => setModelForm({ ...modelForm, enabled })}
-                  label="Enabled"
+                  label={t("model.enabled")}
                 />
                 <Toggle
                   checked={modelForm.visible}
                   onChange={(visible) => setModelForm({ ...modelForm, visible })}
-                  label="Visible to users"
+                  label={t("model.visible")}
                 />
                 <Toggle
                   checked={modelForm.is_default}
                   onChange={(is_default) => setModelForm({ ...modelForm, is_default })}
-                  label="Protocol default"
+                  label={t("model.protocolDefault")}
                 />
               </div>
 
               <details className="group rounded-2xl border border-border/70 p-3">
-                <DisclosureSummary>Advanced</DisclosureSummary>
+                <DisclosureSummary>{t("advanced")}</DisclosureSummary>
                 <div className="mt-4 border-t border-border/70 pt-4">
-                  <Field label="Display priority" hint="Lower numbers appear first.">
+                  <Field label={t("model.priority")} hint={t("model.priorityHint")}>
                     <Input
                       className={inputClass}
                       value={modelForm.sort_order}
@@ -1022,13 +1018,15 @@ export default function AdminModelsPage() {
       <AdminConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={`Delete ${deleteTarget?.kind ?? "resource"}?`}
+        title={
+          deleteTarget?.kind === "provider" ? t("delete.providerTitle") : t("delete.modelTitle")
+        }
         description={
           deleteTarget?.kind === "provider"
-            ? `Delete ${deleteTarget.name}? Providers with model routes cannot be deleted.`
-            : `Delete ${deleteTarget?.name ?? "this model route"}? Historical run records will remain available.`
+            ? t("delete.providerDescription", { name: deleteTarget.name })
+            : t("delete.modelDescription", { name: deleteTarget?.name ?? t("delete.thisRoute") })
         }
-        confirmLabel="Delete"
+        confirmLabel={t("delete.action")}
         destructive
         busy={saving}
         onConfirm={() => void deleteResource()}
@@ -1167,49 +1165,45 @@ function IconPicker({
   onFileChange: (file: File | null) => void;
   onInvalid: (message: string) => void;
 }) {
+  const t = useTranslations("admin.modelsPage.icon");
   const fileInput = useRef<HTMLInputElement>(null);
   const chooseFile = () => fileInput.current?.click();
 
   return (
-    <FormGroup label="Icon">
-      <div className="grid grid-cols-[42px_minmax(0,1fr)] items-start gap-3 rounded-2xl border border-border/70 bg-surface-secondary/15 p-3">
-        <BrandIcon
-          slug={iconSlug}
-          imageSrc={iconType === "image" ? imageSrc : undefined}
-          fallbackText={fallbackText || "AI"}
-        />
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-          <div className="grid min-w-0 gap-1.5">
-            <span className="text-xs font-medium text-muted">Source</span>
+    <FormGroup label={t("title")}>
+      <div className="grid grid-cols-[44px_minmax(0,1fr)] items-start gap-3 rounded-2xl border border-border/70 bg-surface-secondary/15 p-3">
+        <div className="flex size-11 items-center justify-center">
+          <BrandIcon
+            slug={iconSlug}
+            imageSrc={iconType === "image" ? imageSrc : undefined}
+            fallbackText={fallbackText || "AI"}
+          />
+        </div>
+        <div className="grid min-w-0 items-start gap-3 sm:grid-cols-2">
+          <SelectControl
+            className={iconPickerControlClass}
+            value={iconType}
+            onValueChange={(value) => onTypeChange(value as ModelIconType)}
+            options={[
+              { value: "simple-icons", label: t("brandIcon") },
+              { value: "image", label: t("uploadImage") },
+            ]}
+            contentClassName="cocola-admin-ui"
+          />
+          {iconType === "simple-icons" ? (
             <SelectControl
-              className={inputClass}
-              value={iconType}
-              onValueChange={(value) => onTypeChange(value as ModelIconType)}
-              options={[
-                { value: "simple-icons", label: "Brand icon" },
-                { value: "image", label: "Upload image" },
-              ]}
+              className={iconPickerControlClass}
+              value={iconSlug}
+              onValueChange={onSlugChange}
+              options={SIMPLE_ICON_SLUGS.map((slug) => ({
+                value: slug,
+                label: SIMPLE_ICON_LABELS[slug] ?? slug,
+                icon: <BrandGlyph slug={slug} />,
+              }))}
               contentClassName="cocola-admin-ui"
             />
-          </div>
-          {iconType === "simple-icons" ? (
-            <div className="grid min-w-0 gap-1.5">
-              <span className="text-xs font-medium text-muted">Brand</span>
-              <SelectControl
-                className={inputClass}
-                value={iconSlug}
-                onValueChange={onSlugChange}
-                options={SIMPLE_ICON_SLUGS.map((slug) => ({
-                  value: slug,
-                  label: SIMPLE_ICON_LABELS[slug] ?? slug,
-                  icon: <BrandGlyph slug={slug} />,
-                }))}
-                contentClassName="cocola-admin-ui"
-              />
-            </div>
           ) : (
-            <div className="grid min-w-0 gap-1.5">
-              <span className="text-xs font-medium text-muted">Image</span>
+            <div className="flex min-w-0 flex-col items-start gap-1.5">
               <input
                 ref={fileInput}
                 className="sr-only"
@@ -1224,11 +1218,11 @@ function IconPicker({
                     ["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
                     /\.(png|jpe?g|webp)$/i.test(file.name);
                   if (!supported) {
-                    onInvalid("Choose a PNG, JPEG, or WebP image.");
+                    onInvalid(t("formatError"));
                     return;
                   }
                   if (file.size > 1024 * 1024) {
-                    onInvalid("Model icons must be 1 MB or smaller.");
+                    onInvalid(t("sizeError"));
                     return;
                   }
                   onInvalid("");
@@ -1236,18 +1230,21 @@ function IconPicker({
                 }}
               />
               <Button
-                className="h-10 min-w-0 justify-start overflow-hidden"
+                className={cn(iconPickerControlClass, "justify-start overflow-hidden")}
                 variant="outline"
                 isDisabled={disabled}
                 onPress={chooseFile}
               >
                 <Upload className="size-4 shrink-0" />
                 <span className="truncate" title={fileName}>
-                  {fileName || imageSrc ? "Replace image" : "Choose image"}
+                  {fileName || imageSrc ? t("replace") : t("choose")}
                 </span>
               </Button>
-              <span className="truncate text-xs font-normal text-muted" title={fileName}>
-                {fileName || "PNG, JPEG or WebP · up to 1 MB"}
+              <span
+                className="block w-full truncate text-xs font-normal text-muted"
+                title={fileName}
+              >
+                {fileName || t("requirements")}
               </span>
             </div>
           )}
@@ -1280,10 +1277,11 @@ function ModelsList({
   onDefault: (model: LLMModel) => void;
   onDelete: (model: LLMModel) => void;
 }) {
+  const t = useTranslations("admin.modelsPage.list");
   const columns: DataGridColumn<LLMModel>[] = [
     {
       id: "model",
-      header: "Model",
+      header: t("columns.model"),
       isRowHeader: true,
       minWidth: 300,
       cell: (model) => (
@@ -1291,7 +1289,7 @@ function ModelsList({
           <ModelIcon model={model} />
           <AdminTruncatedValue
             className="font-semibold"
-            copyLabel="model name"
+            copyLabel={t("copy.model")}
             onPress={() => onEdit(model)}
             value={model.label || model.alias}
           />
@@ -1303,7 +1301,7 @@ function ModelsList({
     },
     {
       id: "api",
-      header: "Upstream API",
+      header: t("columns.upstreamApi"),
       minWidth: 160,
       cell: (model) => {
         const provider = providerByID.get(model.provider_id);
@@ -1316,34 +1314,34 @@ function ModelsList({
     },
     {
       id: "provider",
-      header: "Provider",
+      header: t("columns.provider"),
       minWidth: 180,
       cell: (model) => (
         <AdminTruncatedValue
           className="text-sm"
-          copyLabel="provider name"
+          copyLabel={t("copy.provider")}
           value={providerByID.get(model.provider_id)?.name || model.provider_id}
         />
       ),
     },
     {
       id: "availability",
-      header: "Availability",
+      header: t("columns.availability"),
       minWidth: 190,
       cell: (model) => (
         <span className="flex gap-2">
           <Chip color={model.enabled ? "success" : "default"} size="sm" variant="soft">
-            {model.enabled ? "Enabled" : "Disabled"}
+            {model.enabled ? t("enabled") : t("disabled")}
           </Chip>
           <Chip color={model.visible ? "accent" : "default"} size="sm" variant="soft">
-            {model.visible ? "Visible" : "Hidden"}
+            {model.visible ? t("visible") : t("hidden")}
           </Chip>
         </span>
       ),
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       width: 80,
       cell: (model) => (
@@ -1362,7 +1360,7 @@ function ModelsList({
   ];
   return (
     <AdminDataGrid
-      aria-label="Model routes"
+      aria-label={t("routesAria")}
       columns={columns}
       contentClassName="min-w-[880px]"
       data={models}
@@ -1375,12 +1373,8 @@ function ModelsList({
             <EmptyState.Media variant="icon">
               <Route className="text-violet-500" />
             </EmptyState.Media>
-            <EmptyState.Title>
-              {loading ? "Loading model routes" : "No model routes"}
-            </EmptyState.Title>
-            <EmptyState.Description>
-              Add a route after connecting at least one provider.
-            </EmptyState.Description>
+            <EmptyState.Title>{loading ? t("loadingRoutes") : t("emptyRoutes")}</EmptyState.Title>
+            <EmptyState.Description>{t("emptyRoutesDescription")}</EmptyState.Description>
           </EmptyState.Header>
         </EmptyState>
       )}
@@ -1414,10 +1408,11 @@ function ProvidersList({
   onEdit: (provider: LLMProvider) => void;
   onDelete: (provider: LLMProvider) => void;
 }) {
+  const t = useTranslations("admin.modelsPage.list");
   const columns: DataGridColumn<LLMProvider>[] = [
     {
       id: "provider",
-      header: "Provider",
+      header: t("columns.provider"),
       isRowHeader: true,
       minWidth: 280,
       cell: (provider) => (
@@ -1426,13 +1421,13 @@ function ProvidersList({
           <span className="block min-w-0 flex-1 text-left">
             <AdminTruncatedValue
               className="font-semibold"
-              copyLabel="provider name"
+              copyLabel={t("copy.provider")}
               onPress={() => onEdit(provider)}
               value={provider.name || provider.id}
             />
             <AdminTruncatedValue
               className="text-muted font-mono text-xs"
-              copyLabel="provider ID"
+              copyLabel={t("copy.providerId")}
               value={provider.id}
             />
           </span>
@@ -1441,7 +1436,7 @@ function ProvidersList({
     },
     {
       id: "api",
-      header: "Upstream API",
+      header: t("columns.upstreamApi"),
       minWidth: 160,
       cell: (provider) => (
         <Chip size="sm" variant="soft">
@@ -1451,19 +1446,19 @@ function ProvidersList({
     },
     {
       id: "endpoint",
-      header: "Endpoint",
+      header: t("columns.endpoint"),
       minWidth: 260,
       cell: (provider) => (
         <AdminTruncatedValue
           className="text-muted max-w-64 font-mono text-xs"
-          copyLabel="provider endpoint"
+          copyLabel={t("copy.endpoint")}
           value={provider.base_url || "—"}
         />
       ),
     },
     {
       id: "credential",
-      header: "Credential",
+      header: t("columns.credential"),
       minWidth: 150,
       cell: (provider) => (
         <span className="text-muted font-mono text-xs">{provider.api_key_hint || "—"}</span>
@@ -1471,7 +1466,7 @@ function ProvidersList({
     },
     {
       id: "models",
-      header: "Models",
+      header: t("columns.models"),
       width: 100,
       cell: (provider) => (
         <Chip size="sm" variant="soft">
@@ -1481,7 +1476,7 @@ function ProvidersList({
     },
     {
       id: "actions",
-      header: "Actions",
+      header: t("columns.actions"),
       align: "center",
       width: 80,
       cell: (provider) => (
@@ -1491,7 +1486,7 @@ function ProvidersList({
   ];
   return (
     <AdminDataGrid
-      aria-label="Model providers"
+      aria-label={t("providersAria")}
       columns={columns}
       contentClassName="min-w-[980px]"
       data={providers}
@@ -1505,11 +1500,9 @@ function ProvidersList({
               <Boxes className="text-blue-500" />
             </EmptyState.Media>
             <EmptyState.Title>
-              {loading ? "Loading providers" : "No providers connected"}
+              {loading ? t("loadingProviders") : t("emptyProviders")}
             </EmptyState.Title>
-            <EmptyState.Description>
-              Connect the API endpoint that will serve your first model.
-            </EmptyState.Description>
+            <EmptyState.Description>{t("emptyProvidersDescription")}</EmptyState.Description>
           </EmptyState.Header>
         </EmptyState>
       )}
@@ -1528,10 +1521,11 @@ function ResourceMenu({
   onDelete: () => void;
   disabled?: boolean;
 }) {
+  const t = useTranslations("admin.modelsPage.menu");
   return (
     <Dropdown>
       <Dropdown.Trigger
-        aria-label="Open actions"
+        aria-label={t("open")}
         className="text-muted hover:bg-surface-secondary mx-auto grid size-9 place-items-center rounded-xl"
         isDisabled={disabled}
       >
@@ -1539,25 +1533,25 @@ function ResourceMenu({
       </Dropdown.Trigger>
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu
-          aria-label="Resource actions"
+          aria-label={t("resource")}
           onAction={(key) => {
             if (key === "edit") onEdit();
             if (key === "default") onDefault?.();
             if (key === "delete") onDelete();
           }}
         >
-          <Dropdown.Item id="edit" textValue="Edit">
-            Edit
+          <Dropdown.Item id="edit" textValue={t("edit")}>
+            {t("edit")}
           </Dropdown.Item>
           {onDefault ? (
-            <Dropdown.Item id="default" textValue="Set as protocol default">
+            <Dropdown.Item id="default" textValue={t("setDefault")}>
               <Star className="size-4" />
-              Set as protocol default
+              {t("setDefault")}
             </Dropdown.Item>
           ) : null}
-          <Dropdown.Item id="delete" textValue="Delete">
+          <Dropdown.Item id="delete" textValue={t("delete")}>
             <Trash2 className="text-danger size-4" />
-            <span className="text-danger">Delete</span>
+            <span className="text-danger">{t("delete")}</span>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
@@ -1631,13 +1625,14 @@ function DrawerFooter({
   onCancel: () => void;
   onSave: () => void;
 }) {
+  const t = useTranslations("admin.modelsPage");
   return (
     <div className="flex items-center justify-end gap-2">
       <Button variant="outline" isDisabled={saving} onPress={onCancel}>
-        Cancel
+        {t("cancel")}
       </Button>
       <Button isDisabled={saving} onPress={onSave}>
-        {saving ? "Saving…" : saveLabel}
+        {saving ? t("saving") : saveLabel}
       </Button>
     </div>
   );
@@ -1668,7 +1663,6 @@ function providerTypeMeta(type: ProviderType) {
       value: type,
       label: "OpenAI Embeddings API",
       shortLabel: "Embeddings",
-      description: "OpenAI-compatible vector embeddings.",
       defaultBaseURL: "https://api.openai.com/v1",
       defaultIconSlug: "openai",
     };
@@ -1677,7 +1671,6 @@ function providerTypeMeta(type: ProviderType) {
     value: type,
     label: "Anthropic Messages API",
     shortLabel: "Anthropic Messages",
-    description: "Native Anthropic messages and tool events for Claude Code.",
     defaultBaseURL: "https://api.anthropic.com",
     defaultIconSlug: "anthropic",
   };
@@ -1686,16 +1679,6 @@ function providerTypeMeta(type: ProviderType) {
 function protocolForType(type: ProviderType): ModelProtocol {
   if (type === "openai_embeddings") return "openai-embeddings";
   return "anthropic-messages";
-}
-
-function runtimeForProtocol(protocol: ModelProtocol) {
-  if (protocol === "openai-embeddings") return "Platform services";
-  return "Claude Code";
-}
-
-function runtimeCompatibilityForType(type: ProviderType) {
-  if (type === "openai_embeddings") return "Platform services";
-  return "Claude Code";
 }
 
 function providerEndpoint(baseURL: string, type: ProviderType) {
@@ -1754,12 +1737,12 @@ async function errorText(response: Response) {
   return body;
 }
 
-async function uploadModelIcon(file: File) {
+async function uploadModelIcon(file: File, missingImageError: string) {
   const form = new FormData();
   form.set("file", file);
   const response = await fetch("/api/admin/model-icons", { method: "POST", body: form });
   if (!response.ok) throw new Error(await errorText(response));
   const asset = (await response.json()) as { src?: string };
-  if (!asset.src) throw new Error("The uploaded image did not return a usable icon.");
+  if (!asset.src) throw new Error(missingImageError);
   return asset.src;
 }

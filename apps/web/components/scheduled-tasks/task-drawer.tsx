@@ -3,14 +3,14 @@
 import { Button, Card, Chip, Dropdown, Input, Label, TextArea, TextField } from "@heroui/react";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import { CalendarClock, ChevronDown, ChevronRight, Paperclip, UserCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 import { ModelIcon } from "@/components/ui/model-icon";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
 import { inferModelIconSlug } from "@/lib/model-icons";
 import {
   emptyTaskForm,
   filesToAttachments,
-  formatDateTime,
   taskToForm,
   toLocalInput,
   validateTaskForm,
@@ -46,6 +46,8 @@ export function TaskDrawer({
   saving: boolean;
   onSave: (form: TaskFormState, ownerUserID?: string) => Promise<void>;
 }) {
+  const t = useTranslations("tasks.drawer");
+  const format = useFormatter();
   const [form, setForm] = useState<TaskFormState>(() => emptyTaskForm());
   const [ownerUserID, setOwnerUserID] = useState("");
   const [error, setError] = useState("");
@@ -63,11 +65,11 @@ export function TaskDrawer({
   async function submit() {
     const validation = validateTaskForm(form);
     if (validation) {
-      setError(validation);
+      setError(t(`validation.${validation}`));
       return;
     }
     if (admin && task && !task.owner_user_id && !ownerUserID) {
-      setError("Assign an owner before saving this legacy task.");
+      setError(t("ownerRequired"));
       return;
     }
     setError("");
@@ -81,23 +83,36 @@ export function TaskDrawer({
   const scheduleAgain = task?.status === "completed" || task?.status === "expired";
   const model = models.find((candidate) => candidate.id === form.modelRouteID);
   const selectedModelIcon = taskModelIcon(model, form.modelAlias);
+  const scheduleOptions = useMemo<Choice[]>(
+    () =>
+      (["once", "hourly", "daily", "weekly", "monthly"] as const).map((id) => ({
+        id,
+        label: t(`repeatOptions.${id}`),
+      })),
+    [t],
+  );
+  const weekdays = useMemo<Choice[]>(
+    () =>
+      (["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const).map(
+        (day, index) => ({ id: String(index + 1), label: t(`weekdays.${day}`) }),
+      ),
+    [t],
+  );
 
   return (
     <Sheet isOpen={open} placement="right" onOpenChange={(next) => !saving && onOpenChange(next)}>
       <Sheet.Backdrop>
         <Sheet.Content className="w-full md:w-[520px]">
           <Sheet.Dialog>
-            <Sheet.CloseTrigger aria-label="Close task editor" />
+            <Sheet.CloseTrigger aria-label={t("close")} />
             <Sheet.Header>
               <span className="flex items-center gap-3">
                 <span className="bg-accent-soft text-accent flex size-10 shrink-0 items-center justify-center rounded-2xl">
                   <CalendarClock className="size-5" />
                 </span>
                 <span>
-                  <Sheet.Heading>{task ? "Edit task" : "New task"}</Sheet.Heading>
-                  <span className="text-muted mt-1 block text-sm">
-                    Schedule Cocola to work automatically.
-                  </span>
+                  <Sheet.Heading>{task ? t("editTitle") : t("newTitle")}</Sheet.Heading>
+                  <span className="text-muted mt-1 block text-sm">{t("description")}</span>
                 </span>
               </span>
             </Sheet.Header>
@@ -107,7 +122,7 @@ export function TaskDrawer({
                   <Card.Content className="p-0">
                     <p className="text-muted flex items-center gap-2 text-xs font-medium">
                       <UserCircle className="size-4" />
-                      Owner
+                      {t("owner")}
                     </p>
                     {task.owner_user_id ? (
                       <p className="mt-2 text-sm font-medium">
@@ -118,11 +133,11 @@ export function TaskDrawer({
                       </p>
                     ) : (
                       <ChoiceDropdown
-                        label="Owner"
+                        label={t("owner")}
                         value={
                           ownerOptions.find((owner) => owner.id === ownerUserID)?.name ||
                           ownerOptions.find((owner) => owner.id === ownerUserID)?.email ||
-                          "Choose an owner"
+                          t("chooseOwner")
                         }
                         options={ownerOptions.map((owner) => ({
                           id: owner.id,
@@ -137,7 +152,7 @@ export function TaskDrawer({
 
               {admin && task?.last_error ? (
                 <div className="bg-danger/10 text-danger rounded-2xl px-4 py-3 text-sm">
-                  Last error: {task.last_error}
+                  {t("lastError", { error: task.last_error })}
                 </div>
               ) : null}
 
@@ -146,19 +161,19 @@ export function TaskDrawer({
                 variant="secondary"
                 onChange={(name) => setForm({ ...form, name })}
               >
-                <Label>Task name</Label>
-                <Input autoFocus placeholder="Daily project summary" />
+                <Label>{t("name")}</Label>
+                <Input autoFocus placeholder={t("namePlaceholder")} />
               </TextField>
               <TextField
                 value={form.prompt}
                 variant="secondary"
                 onChange={(prompt) => setForm({ ...form, prompt })}
               >
-                <Label>What should Cocola do?</Label>
-                <TextArea rows={5} placeholder="Describe the result you want..." />
+                <Label>{t("prompt")}</Label>
+                <TextArea rows={5} placeholder={t("promptPlaceholder")} />
               </TextField>
               <ChoiceDropdown
-                label="Repeat"
+                label={t("repeat")}
                 value={
                   scheduleOptions.find((option) => option.id === form.scheduleKind)?.label ||
                   form.scheduleKind
@@ -168,36 +183,39 @@ export function TaskDrawer({
                   setForm({ ...form, scheduleKind: scheduleKind as TaskFormState["scheduleKind"] })
                 }
               />
-              <ScheduleFields form={form} setForm={setForm} />
+              <ScheduleFields form={form} setForm={setForm} weekdays={weekdays} />
 
               <div className="bg-surface-secondary text-muted rounded-2xl px-4 py-3 text-xs">
-                Times use <span className="text-foreground font-medium">{form.timezone}</span>.
+                {t.rich("timezone", {
+                  strong: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
+                  timezone: form.timezone,
+                })}
               </div>
 
               <details className="group border-separator bg-default rounded-2xl border p-4">
                 <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
                   <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
-                  Advanced
+                  {t("advanced")}
                 </summary>
                 <div className="border-separator mt-4 grid gap-5 border-t pt-4">
                   <div>
-                    <Label>Model</Label>
+                    <Label>{t("model")}</Label>
                     <Dropdown>
                       <Dropdown.Trigger
-                        aria-label="Select task model"
+                        aria-label={t("selectModel")}
                         className="border-separator bg-surface-secondary hover:bg-default-hover mt-2 flex h-11 w-full items-center justify-between rounded-2xl border px-3 text-sm"
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <ModelIcon bare className="size-5 shrink-0" icon={selectedModelIcon} />
                           <span className="truncate font-medium">
-                            {model?.alias || form.modelAlias || "Model unavailable"}
+                            {model?.alias || form.modelAlias || t("modelUnavailable")}
                           </span>
                         </span>
                         <ChevronDown className="text-muted size-4" />
                       </Dropdown.Trigger>
                       <Dropdown.Popover placement="bottom start">
                         <Dropdown.Menu
-                          aria-label="Task models"
+                          aria-label={t("models")}
                           onAction={(key) => {
                             const selected = models.find(
                               (candidate) => candidate.id === String(key),
@@ -223,15 +241,15 @@ export function TaskDrawer({
                     </Dropdown>
                   </div>
                   <div>
-                    <Label>Attachments</Label>
+                    <Label>{t("attachments")}</Label>
                     <label className="border-separator bg-surface-secondary hover:bg-default-hover text-muted mt-2 flex min-h-12 cursor-pointer items-center gap-2 rounded-2xl border border-dashed px-3 text-sm transition-colors">
                       <Paperclip className="size-4" />
                       <span className="truncate">
                         {form.files.length
                           ? form.files.map((file) => file.filename).join(", ")
                           : task?.attachments?.length
-                            ? `${task.attachments.length} saved file(s) · choose to replace`
-                            : "Choose files"}
+                            ? t("savedFiles", { count: task.attachments.length })
+                            : t("chooseFiles")}
                       </span>
                       <input
                         type="file"
@@ -249,7 +267,7 @@ export function TaskDrawer({
               {admin && recentRuns.length ? (
                 <Card className="p-4">
                   <Card.Header className="p-0">
-                    <Card.Title>Recent runs</Card.Title>
+                    <Card.Title>{t("recentRuns")}</Card.Title>
                   </Card.Header>
                   <Card.Content className="mt-3 grid gap-2 p-0">
                     {recentRuns.slice(0, 8).map((run) => (
@@ -264,7 +282,10 @@ export function TaskDrawer({
                           ) : null}
                         </span>
                         <span className="text-muted shrink-0">
-                          {formatDateTime(run.finished_at || run.started_at || run.created_at)}
+                          {format.dateTime(
+                            new Date(run.finished_at || run.started_at || run.created_at),
+                            { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" },
+                          )}
                         </span>
                       </div>
                     ))}
@@ -280,10 +301,10 @@ export function TaskDrawer({
             </Sheet.Body>
             <Sheet.Footer className="gap-2">
               <Button variant="outline" onPress={() => onOpenChange(false)}>
-                Cancel
+                {t("cancel")}
               </Button>
               <Button isPending={saving} onPress={() => void submit()}>
-                {scheduleAgain ? "Schedule again" : task ? "Save changes" : "Create task"}
+                {scheduleAgain ? t("scheduleAgain") : task ? t("save") : t("create")}
               </Button>
             </Sheet.Footer>
           </Sheet.Dialog>
@@ -296,10 +317,13 @@ export function TaskDrawer({
 function ScheduleFields({
   form,
   setForm,
+  weekdays,
 }: {
   form: TaskFormState;
   setForm: (form: TaskFormState) => void;
+  weekdays: Choice[];
 }) {
+  const t = useTranslations("tasks.drawer");
   const minDateTime = toLocalInput(new Date().toISOString(), form.timezone);
   if (form.scheduleKind === "once") {
     return (
@@ -308,7 +332,7 @@ function ScheduleFields({
         variant="secondary"
         onChange={(runAt) => setForm({ ...form, runAt: boundedDateTime(runAt, form.runAt) })}
       >
-        <Label>Run at</Label>
+        <Label>{t("runAt")}</Label>
         <Input type="datetime-local" min={minDateTime} max={maxDateTime} step={60} />
       </TextField>
     );
@@ -317,8 +341,8 @@ function ScheduleFields({
     <div className="grid gap-4 sm:grid-cols-2">
       {form.scheduleKind === "weekly" ? (
         <ChoiceDropdown
-          label="Day"
-          value={weekdays.find((option) => option.id === form.weekday)?.label || "Monday"}
+          label={t("day")}
+          value={weekdays.find((option) => option.id === form.weekday)?.label || t("monday")}
           options={weekdays}
           onChange={(weekday) => setForm({ ...form, weekday })}
         />
@@ -329,9 +353,9 @@ function ScheduleFields({
           variant="secondary"
           onChange={(day) => setForm({ ...form, day })}
         >
-          <Label>Day of month</Label>
+          <Label>{t("dayOfMonth")}</Label>
           <Input type="number" min={1} max={31} />
-          <span className="text-muted text-xs">Short months use their last day.</span>
+          <span className="text-muted text-xs">{t("shortMonth")}</span>
         </TextField>
       ) : null}
       {form.scheduleKind === "hourly" ? (
@@ -340,7 +364,7 @@ function ScheduleFields({
           variant="secondary"
           onChange={(minute) => setForm({ ...form, minute })}
         >
-          <Label>Minute of the hour</Label>
+          <Label>{t("minute")}</Label>
           <Input type="number" min={0} max={59} />
         </TextField>
       ) : (
@@ -352,16 +376,16 @@ function ScheduleFields({
             setForm({ ...form, hour: hour || "0", minute: minute || "0" });
           }}
         >
-          <Label>Time</Label>
+          <Label>{t("time")}</Label>
           <Input type="time" />
         </TextField>
       )}
       <ChoiceDropdown
-        label="Ends"
-        value={form.ends === "never" ? "Never" : "On a date"}
+        label={t("ends")}
+        value={form.ends === "never" ? t("never") : t("onDate")}
         options={[
-          { id: "never", label: "Never" },
-          { id: "on", label: "On a date" },
+          { id: "never", label: t("never") },
+          { id: "on", label: t("onDate") },
         ]}
         onChange={(ends) => setForm({ ...form, ends: ends as "never" | "on" })}
       />
@@ -373,7 +397,7 @@ function ScheduleFields({
             setForm({ ...form, expiresAt: boundedDateTime(expiresAt, form.expiresAt) })
           }
         >
-          <Label>End time</Label>
+          <Label>{t("endTime")}</Label>
           <Input type="datetime-local" min={minDateTime} max={maxDateTime} step={60} />
         </TextField>
       ) : null}
@@ -427,16 +451,6 @@ function ChoiceDropdown({
   );
 }
 
-const scheduleOptions: Choice[] = [
-  { id: "once", label: "Does not repeat" },
-  { id: "hourly", label: "Every hour" },
-  { id: "daily", label: "Every day" },
-  { id: "weekly", label: "Every week" },
-  { id: "monthly", label: "Every month" },
-];
-const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(
-  (label, index) => ({ id: String(index + 1), label }),
-);
 const maxDateTime = "9999-12-31T23:59";
 
 function boundedDateTime(next: string, current: string): string {

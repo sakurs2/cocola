@@ -38,6 +38,6 @@ test("the session panel cannot reserve welcome-screen width without an active co
 
 test("the shell leaves a stalled WebSocket handshake with an actionable error", () => {
   assert.match(shellPageSource, /const TERMINAL_CONNECT_TIMEOUT_MS = 15 \* 1000/);
-  assert.match(shellPageSource, /setError\("The terminal connection timed out"\)/);
+  assert.match(shellPageSource, /setError\(t\("connectionTimeout"\)\)/);
   assert.match(shellPageSource, /clearConnectTimeout\(\);\n\s+setStatus\("ready"\)/);
 });

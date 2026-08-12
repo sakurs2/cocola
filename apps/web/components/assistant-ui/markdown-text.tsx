@@ -6,8 +6,16 @@ import {
   type SyntaxHighlighterProps,
 } from "@assistant-ui/react-markdown";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { Children, type FC, isValidElement, type ReactNode, useState } from "react";
+import {
+  Children,
+  type ComponentProps,
+  type FC,
+  isValidElement,
+  type ReactNode,
+  useState,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { useTranslations } from "next-intl";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
@@ -23,11 +31,19 @@ const answerMarkdownComponents = {
       />
     );
   },
-  table: ({ node: _node, ...props }) => (
+  table: AnswerMarkdownTable,
+} satisfies Components;
+
+function AnswerMarkdownTable({
+  node: _node,
+  ...props
+}: ComponentProps<"table"> & { node?: unknown }) {
+  const t = useTranslations("chat.markdown");
+  return (
     <div
       className="my-5 max-w-full overflow-x-auto rounded-xl border border-border/70 bg-surface shadow-[0_1px_2px_oklch(from var(--foreground) l c h / 0.03)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       role="region"
-      aria-label="Scrollable table"
+      aria-label={t("scrollableTable")}
       tabIndex={0}
     >
       <table
@@ -35,8 +51,8 @@ const answerMarkdownComponents = {
         className="w-full min-w-[32rem] border-separate border-spacing-0 text-left text-[13px] leading-5"
       />
     </div>
-  ),
-} satisfies Components;
+  );
+}
 
 // Live assistant answers use the streaming primitive, while persisted answers
 // use AnswerMarkdownContent below. Both share the same GFM and presentation
@@ -369,6 +385,7 @@ const safeHref = (href: string) =>
   /^(https?:|mailto:|\/|#)/i.test(href.trim()) ? href.trim() : "";
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
+  const t = useTranslations("chat.markdown");
   const [copied, setCopied] = useState(false);
   const label = language && language !== "unknown" ? language : "text";
   const shell = normalizeLanguage(language) === "shell";
@@ -401,8 +418,8 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         type="button"
         onClick={onCopy}
         className="aui-code-action ml-auto inline-flex size-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus"
-        aria-label={copied ? "Copied code" : "Copy code"}
-        title={copied ? "Copied" : "Copy code"}
+        aria-label={copied ? t("copiedCode") : t("copyCode")}
+        title={copied ? t("copied") : t("copyCode")}
       >
         {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
       </button>

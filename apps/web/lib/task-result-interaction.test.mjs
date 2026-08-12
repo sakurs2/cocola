@@ -11,7 +11,7 @@ test("isolates copy feedback state from the semantic result badge", () => {
   );
 
   assert.doesNotMatch(resultCell, /useState/);
-  assert.match(resultCell, /<TaskResultCopyButton detail=\{result\.detail\} \/>/);
+  assert.match(resultCell, /<TaskResultCopyButton detail=\{detail\} \/>/);
   assert.match(resultCell, /<Badge variant=\{taskResultBadgeVariant\[result\.tone\]\}>/);
   assert.doesNotMatch(resultCell, /<Chip/);
 });

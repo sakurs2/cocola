@@ -38,6 +38,7 @@ import {
   Xmark,
 } from "@gravity-ui/icons";
 import { motion } from "framer-motion";
+import { useTranslations } from "next-intl";
 import {
   ArrowDownIcon,
   Check,
@@ -109,12 +110,7 @@ import {
   wikiComposerMentionText,
   wikiReferencesFromAttachments,
 } from "@/lib/wiki-composer-reference";
-import {
-  COMPOSER_SLASH_COPY,
-  PLAN_MODE_COMMAND,
-  PLAN_MODE_COPY,
-  isPlanModeCommandAvailable,
-} from "@/lib/plan-mode.mjs";
+import { PLAN_MODE_COMMAND, isPlanModeCommandAvailable } from "@/lib/plan-mode.mjs";
 import {
   fileMatchesPromptStarterSlot,
   firstMissingPromptStarterSlot,
@@ -202,17 +198,20 @@ const ActiveExecutionDock: FC = () => {
   );
 };
 
-const ScrollToBottom: FC = () => (
-  <ThreadPrimitive.ScrollToBottom asChild>
-    <TooltipIconButton
-      tooltip="Scroll to bottom"
-      variant="outline"
-      className="absolute -top-10 rounded-full disabled:invisible"
-    >
-      <ArrowDownIcon className="h-4 w-4" />
-    </TooltipIconButton>
-  </ThreadPrimitive.ScrollToBottom>
-);
+const ScrollToBottom: FC = () => {
+  const t = useTranslations("chat");
+  return (
+    <ThreadPrimitive.ScrollToBottom asChild>
+      <TooltipIconButton
+        tooltip={t("scrollBottom")}
+        variant="outline"
+        className="absolute -top-10 rounded-full disabled:invisible"
+      >
+        <ArrowDownIcon className="h-4 w-4" />
+      </TooltipIconButton>
+    </ThreadPrimitive.ScrollToBottom>
+  );
+};
 
 type PromptStarter = {
   icon: typeof ChartColumn;
@@ -221,43 +220,6 @@ type PromptStarter = {
   prompt: string;
   fileSlots?: readonly PromptStarterFileSlot[];
 };
-
-const SPREADSHEET_FILE_SLOT: PromptStarterFileSlot = {
-  key: "spreadsheet",
-  label: "Choose spreadsheet",
-  accept: [".xlsx", ".csv"],
-  required: true,
-};
-
-const PROMPT_STARTERS: PromptStarter[] = [
-  {
-    icon: ChartColumn,
-    label: "Excel analysis",
-    iconClassName: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
-    prompt: `Analyze ${promptStarterSlotMarker(
-      SPREADSHEET_FILE_SLOT,
-    )} and summarize key trends, anomalies, and actionable insights.`,
-    fileSlots: [SPREADSHEET_FILE_SLOT],
-  },
-  {
-    icon: Pencil,
-    label: "Write a draft",
-    iconClassName: "bg-blue-500/10 text-blue-600 dark:text-blue-300",
-    prompt: "Draft a project plan for a new product.",
-  },
-  {
-    icon: Code,
-    label: "Write code",
-    iconClassName: "bg-violet-500/10 text-violet-600 dark:text-violet-300",
-    prompt: "Write a Python script to automate this task.",
-  },
-  {
-    icon: Bulb,
-    label: "Brainstorm",
-    iconClassName: "bg-pink-500/10 text-pink-600 dark:text-pink-300",
-    prompt: "Brainstorm creative ideas for a campaign.",
-  },
-];
 
 const EMPTY_PROMPT_SLOT_BINDINGS: PromptStarterSlotBindings = {};
 const EMPTY_PROMPT_FILE_SLOTS: readonly PromptStarterFileSlot[] = [];
@@ -268,6 +230,46 @@ type ComposerWikiInputHandle = {
 };
 
 const ThreadWelcome: FC = () => {
+  const t = useTranslations("chat");
+  const spreadsheetFileSlot: PromptStarterFileSlot = useMemo(
+    () => ({
+      key: "spreadsheet",
+      label: t("starters.spreadsheetSlot"),
+      accept: [".xlsx", ".csv"],
+      required: true,
+    }),
+    [t],
+  );
+  const promptStarters: PromptStarter[] = useMemo(
+    () => [
+      {
+        icon: ChartColumn,
+        label: t("starters.excel"),
+        iconClassName: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+        prompt: t("starters.excelPrompt", { slot: promptStarterSlotMarker(spreadsheetFileSlot) }),
+        fileSlots: [spreadsheetFileSlot],
+      },
+      {
+        icon: Pencil,
+        label: t("starters.draft"),
+        iconClassName: "bg-blue-500/10 text-blue-600 dark:text-blue-300",
+        prompt: t("starters.draftPrompt"),
+      },
+      {
+        icon: Code,
+        label: t("starters.code"),
+        iconClassName: "bg-violet-500/10 text-violet-600 dark:text-violet-300",
+        prompt: t("starters.codePrompt"),
+      },
+      {
+        icon: Bulb,
+        label: t("starters.brainstorm"),
+        iconClassName: "bg-pink-500/10 text-pink-600 dark:text-pink-300",
+        prompt: t("starters.brainstormPrompt"),
+      },
+    ],
+    [spreadsheetFileSlot, t],
+  );
   const composer = useComposerRuntime();
   const composerIsEmpty = useComposer((state) => state.isEmpty);
   const [activePromptStarter, setActivePromptStarter] = useState<PromptStarter | null>(null);
@@ -313,7 +315,7 @@ const ThreadWelcome: FC = () => {
     <ThreadPrimitive.Empty>
       <div className="mx-auto flex h-[calc(100svh-3.5rem)] min-h-0 w-full max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-          <h1 className="sr-only">cocola — Your trusty and powerful agent platform</h1>
+          <h1 className="sr-only">{t("platformTitle")}</h1>
           <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:justify-center sm:gap-3">
             <CocolaLogo className="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
             <div className="flex flex-col items-center text-center sm:-ml-6">
@@ -333,7 +335,7 @@ const ThreadWelcome: FC = () => {
           <div className="mt-4 min-h-9 w-full">
             <PromptSuggestion variant="pill">
               <PromptSuggestion.Items className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2">
-                {PROMPT_STARTERS.map((starter) => {
+                {promptStarters.map((starter) => {
                   const { icon: Icon, label, iconClassName } = starter;
                   return (
                     <PromptSuggestion.Item
@@ -384,6 +386,7 @@ const ConversationComposerInner: FC<{
   onPromptSlotBindingRemove,
   onPromptStarterDetach,
 }) => {
+  const t = useTranslations("chat");
   const {
     selectedModel,
     selectedRuntime,
@@ -426,10 +429,8 @@ const ConversationComposerInner: FC<{
           <GitMerge className="size-4" />
         </span>
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-foreground">This task has been merged</p>
-          <p className="text-[11.5px] leading-4 text-muted">
-            It is now read-only. Create a new task to continue from the latest main branch.
-          </p>
+          <p className="text-[13px] font-semibold text-foreground">{t("mergedTitle")}</p>
+          <p className="text-[11.5px] leading-4 text-muted">{t("mergedDescription")}</p>
         </div>
       </div>
     );
@@ -473,13 +474,13 @@ const ConversationComposerInner: FC<{
                           ? runtimeConfigError
                           : noModel
                             ? selectedRuntime
-                              ? "No compatible model configured"
-                              : "No Agent Runtime available"
+                              ? t("noCompatibleModel")
+                              : t("noRuntime")
                             : pendingQuestion
-                              ? "Reply to Cocola…"
+                              ? t("reply")
                               : interactionMode === "plan"
-                                ? PLAN_MODE_COPY.initialPlaceholder
-                                : placeholder || COMPOSER_SLASH_COPY.defaultPlaceholder
+                                ? t("composer.initialPlanPlaceholder")
+                                : placeholder || t("composer.defaultPlaceholder")
                     }
                     promptStarter={promptStarter}
                     promptSlotBindings={promptSlotBindings}
@@ -492,8 +493,8 @@ const ConversationComposerInner: FC<{
               <PromptInput.Toolbar>
                 <PromptInput.ToolbarStart className="min-w-0 flex-1 overflow-x-auto">
                   <ComposerPrimitive.AddAttachment
-                    aria-label="Attach file"
-                    title={noModel ? "No model configured" : "Attach file"}
+                    aria-label={t("attach")}
+                    title={noModel ? t("noModelConfigured") : t("attach")}
                     disabled={noModel || questionInputLocked}
                     className="cocola-web-composer-action inline-flex size-9 shrink-0 items-center justify-center rounded-xl text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   >
@@ -647,6 +648,7 @@ const WikiMentionLoadOnOpen: FC = () => {
 };
 
 const ComposerWikiMentionMenu: FC = () => {
+  const t = useTranslations("chat.composer");
   const { questionInputLocked } = useCocola();
   const { loading, nodes } = useWikiMentionCatalog();
   const composer = useComposerRuntime();
@@ -675,7 +677,7 @@ const ComposerWikiMentionMenu: FC = () => {
       char="@"
       adapter={mention.adapter}
       isLoading={loading}
-      aria-label="Reference a Wiki file"
+      aria-label={t("referenceWiki")}
       className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-xl"
     >
       <WikiMentionLoadOnOpen />
@@ -699,13 +701,11 @@ const ComposerWikiMentionMenu: FC = () => {
           <div className="p-1.5">
             <div className="flex items-center gap-2 border-b border-border px-2.5 pb-2 pt-1 text-xs font-medium text-muted">
               <GravityBookOpen className="size-3.5 text-blue-600" />
-              Wiki files
+              {t("wikiFiles")}
             </div>
             <div className="max-h-72 overflow-y-auto pt-1">
               {results.length === 0 ? (
-                <div className="px-3 py-8 text-center text-xs text-muted">
-                  No Wiki files found. Create or upload one from the Wiki tab.
-                </div>
+                <div className="px-3 py-8 text-center text-xs text-muted">{t("noWikiFiles")}</div>
               ) : (
                 results.map((item, index) => (
                   <ComposerPrimitive.Unstable_TriggerPopoverItem
@@ -768,6 +768,7 @@ const ComposerWikiInput = forwardRef<
     },
     forwardedRef,
   ) => {
+    const t = useTranslations("chat.composer");
     const composer = useComposerRuntime();
     const text = useComposer((state) => state.text);
     const attachments = useComposer((state) => state.attachments);
@@ -911,7 +912,7 @@ const ComposerWikiInput = forwardRef<
         );
         if (!file || !slot) return;
         if (!fileMatchesPromptStarterSlot(file, slot)) {
-          setSlotError(`Choose a ${slot.accept.join(" or ")} file.`);
+          setSlotError(t("chooseFile", { types: slot.accept.join(" or ") }));
           return;
         }
 
@@ -922,7 +923,7 @@ const ComposerWikiInput = forwardRef<
         try {
           await composer.addAttachment(file);
         } catch (error) {
-          setSlotError(error instanceof Error ? error.message : "The file could not be attached.");
+          setSlotError(error instanceof Error ? error.message : t("attachFailed"));
           return;
         }
 
@@ -930,7 +931,7 @@ const ComposerWikiInput = forwardRef<
           .reverse()
           .find((attachment) => !previousAttachmentIDs.has(attachment.id));
         if (!addedAttachment) {
-          setSlotError("The file could not be attached.");
+          setSlotError(t("attachFailed"));
           return;
         }
 
@@ -968,6 +969,7 @@ const ComposerWikiInput = forwardRef<
         promptFileSlots,
         promptSlotBindings,
         removeAttachmentByID,
+        t,
       ],
     );
 
@@ -1038,56 +1040,60 @@ const ComposerWikiMentionOverlay = forwardRef<
     textIndent?: string;
     onPromptSlotClick: (slot: PromptStarterFileSlot) => void;
   }
->(({ segments, textIndent, onPromptSlotClick }, ref) => (
-  <div
-    ref={ref}
-    style={textIndent ? { textIndent } : undefined}
-    className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-[5.75rem] overflow-hidden whitespace-pre-wrap break-words px-4 pb-2 pt-4 text-left text-[15px] leading-6 text-foreground"
-  >
-    {segments.map((segment, index) => {
-      if (segment.promptSlot) {
-        return (
-          <button
-            key={`prompt-slot-${segment.promptSlot.key}-${index}`}
-            type="button"
-            tabIndex={-1}
-            aria-label={
-              segment.promptSlotBinding
-                ? `Replace ${segment.promptSlotBinding.filename}`
-                : segment.promptSlot.label
-            }
-            className={cn(
-              "pointer-events-auto cursor-pointer rounded-[4px] shadow-[0_0_0_1px_rgba(37,99,235,0.2)] [box-decoration-break:clone]",
-              segment.promptSlotBinding
-                ? "bg-emerald-100 text-emerald-700"
-                : "bg-blue-100 text-blue-700",
-            )}
-            onClick={() => onPromptSlotClick(segment.promptSlot!)}
+>(({ segments, textIndent, onPromptSlotClick }, ref) => {
+  const t = useTranslations("chat");
+  return (
+    <div
+      ref={ref}
+      style={textIndent ? { textIndent } : undefined}
+      className="pointer-events-none absolute inset-0 z-[2] max-h-40 min-h-[5.75rem] overflow-hidden whitespace-pre-wrap break-words px-4 pb-2 pt-4 text-left text-[15px] leading-6 text-foreground"
+    >
+      {segments.map((segment, index) => {
+        if (segment.promptSlot) {
+          return (
+            <button
+              key={`prompt-slot-${segment.promptSlot.key}-${index}`}
+              type="button"
+              tabIndex={-1}
+              aria-label={
+                segment.promptSlotBinding
+                  ? t("replaceFile", { name: segment.promptSlotBinding.filename })
+                  : segment.promptSlot.label
+              }
+              className={cn(
+                "pointer-events-auto cursor-pointer rounded-[4px] shadow-[0_0_0_1px_rgba(37,99,235,0.2)] [box-decoration-break:clone]",
+                segment.promptSlotBinding
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-blue-100 text-blue-700",
+              )}
+              onClick={() => onPromptSlotClick(segment.promptSlot!)}
+            >
+              {segment.text}
+            </button>
+          );
+        }
+        return segment.reference ? (
+          <span
+            key={`${segment.reference.nodeId}-${index}`}
+            aria-hidden="true"
+            className="rounded-[4px] bg-blue-100 text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18)] [box-decoration-break:clone]"
           >
             {segment.text}
-          </button>
+          </span>
+        ) : (
+          <span key={index} aria-hidden="true">
+            {segment.text}
+          </span>
         );
-      }
-      return segment.reference ? (
-        <span
-          key={`${segment.reference.nodeId}-${index}`}
-          aria-hidden="true"
-          className="rounded-[4px] bg-blue-100 text-blue-700 shadow-[0_0_0_1px_rgba(37,99,235,0.18)] [box-decoration-break:clone]"
-        >
-          {segment.text}
-        </span>
-      ) : (
-        <span key={index} aria-hidden="true">
-          {segment.text}
-        </span>
-      );
-    })}
-  </div>
-));
+      })}
+    </div>
+  );
+});
 
 ComposerWikiMentionOverlay.displayName = "ComposerWikiMentionOverlay";
 
 const ComposerSlashMenu: FC = () => {
+  const t = useTranslations("chat.composer");
   const {
     skills,
     skillsLoaded,
@@ -1113,11 +1119,13 @@ const ComposerSlashMenu: FC = () => {
         ? [
             {
               ...PLAN_MODE_COMMAND,
+              label: t("planCommand"),
+              description: t("planDescription"),
               execute: () => setInteractionMode("plan"),
             },
           ]
         : [],
-    [canSelectPlanMode, setInteractionMode],
+    [canSelectPlanMode, setInteractionMode, t],
   );
   const skillCommands = useMemo(
     () =>
@@ -1148,7 +1156,7 @@ const ComposerSlashMenu: FC = () => {
     <ComposerPrimitive.Unstable_TriggerPopover
       char="/"
       adapter={slash.adapter}
-      aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
+      aria-label={t("menu")}
       className="absolute bottom-[calc(100%+0.625rem)] left-0 z-50 w-full max-w-2xl overflow-hidden rounded-2xl border border-border bg-overlay text-overlay-foreground shadow-xl"
     >
       <ComposerPrimitive.Unstable_TriggerPopover.Action {...slash.action} />
@@ -1161,11 +1169,11 @@ const ComposerSlashMenu: FC = () => {
               ? [{ label: "", items }]
               : [
                   {
-                    label: "Personal",
+                    label: t("personal"),
                     items: items.filter((item) => skillByID.get(item.id)?.scope === "user"),
                   },
                   {
-                    label: "Shared",
+                    label: t("shared"),
                     items: items.filter((item) => skillByID.get(item.id)?.scope !== "user"),
                   },
                 ].filter((group) => group.items.length > 0);
@@ -1181,13 +1189,13 @@ const ComposerSlashMenu: FC = () => {
             <>
               <div
                 role="tablist"
-                aria-label={COMPOSER_SLASH_COPY.menuAriaLabel}
+                aria-label={t("menu")}
                 className="flex items-center gap-1 border-b border-border/70 px-2 pt-2"
               >
                 {(
                   [
-                    { id: "commands", label: COMPOSER_SLASH_COPY.commandsTab },
-                    { id: "skills", label: COMPOSER_SLASH_COPY.skillsTab },
+                    { id: "commands", label: t("commands") },
+                    { id: "skills", label: t("skills") },
                   ] as const
                 ).map((tab) => (
                   <button
@@ -1217,10 +1225,10 @@ const ComposerSlashMenu: FC = () => {
                 {visibleItemCount === 0 ? (
                   <div className="px-3 py-8 text-center text-xs text-muted">
                     {activeTab === "commands"
-                      ? COMPOSER_SLASH_COPY.noCommands
+                      ? t("noCommands")
                       : skillsLoaded
-                        ? COMPOSER_SLASH_COPY.noSkills
-                        : COMPOSER_SLASH_COPY.loadingSkills}
+                        ? t("noSkills")
+                        : t("loadingSkills")}
                   </div>
                 ) : (
                   rows.map(({ groupLabel, item }, index) => {
@@ -1276,6 +1284,7 @@ const ComposerSlashMenu: FC = () => {
 };
 
 const SelectedSkillChip: FC = () => {
+  const t = useTranslations("chat");
   const { selectedSkill, setSelectedSkillId, questionInputLocked } = useCocola();
 
   if (!selectedSkill) return null;
@@ -1285,7 +1294,7 @@ const SelectedSkillChip: FC = () => {
       <span className="truncate">{selectedSkill.name}</span>
       <Button
         isIconOnly
-        aria-label={`Remove ${selectedSkill.name} skill`}
+        aria-label={t("removeSkill", { name: selectedSkill.name })}
         className="size-5 min-h-5 min-w-5 rounded-full"
         isDisabled={questionInputLocked}
         size="sm"
@@ -1299,12 +1308,14 @@ const SelectedSkillChip: FC = () => {
 };
 
 const PlanModeIndicator: FC = () => {
+  const t = useTranslations("chat.composer");
+  const chatT = useTranslations("chat");
   const { setInteractionMode, questionInputLocked } = useCocola();
   const isRunning = useThread((thread) => thread.isRunning);
 
   return (
     <Button
-      aria-label="Exit Plan mode"
+      aria-label={chatT("exitPlan")}
       className="cocola-web-plan-indicator inline-flex h-9 shrink-0 items-center gap-2 rounded-xl px-2.5 text-xs font-medium"
       isDisabled={isRunning || questionInputLocked}
       size="sm"
@@ -1312,13 +1323,14 @@ const PlanModeIndicator: FC = () => {
       onPress={() => setInteractionMode("execute")}
     >
       <GravityBookOpen className="size-3.5" />
-      {PLAN_MODE_COPY.activeLabel}
+      {t("planActive")}
       <Xmark className="size-3" />
     </Button>
   );
 };
 
 const ModelPicker: FC = () => {
+  const t = useTranslations("chat.model");
   const {
     models,
     selectedModel,
@@ -1335,10 +1347,10 @@ const ModelPicker: FC = () => {
   const noModel = !modelsLoaded || !selectedModel;
   const pickerDisabled = noModel || questionInputLocked;
   const reasoningCopy = {
-    auto: { label: "Auto", description: "Use the model default" },
-    fast: { label: "Fast", description: "Quick response" },
-    deep: { label: "Deep", description: "Balanced speed and quality" },
-    max: { label: "Max", description: "For complex problems" },
+    auto: { label: t("auto"), description: t("autoDescription") },
+    fast: { label: t("fast"), description: t("fastDescription") },
+    deep: { label: t("deep"), description: t("deepDescription") },
+    max: { label: t("max"), description: t("maxDescription") },
   } as const;
 
   return (
@@ -1346,24 +1358,24 @@ const ModelPicker: FC = () => {
       <Dropdown.Trigger
         aria-label={
           selectedAgent
-            ? "Agent model and reasoning"
+            ? t("agentModelReasoning")
             : noModel
-              ? "No model configured"
-              : "Select model and reasoning"
+              ? t("noneConfigured")
+              : t("selectModelReasoning")
         }
         className="cocola-web-composer-selector cocola-web-select-trigger inline-flex h-9 max-w-[14rem] min-w-0 items-center gap-2 rounded-xl border border-transparent px-2.5 text-xs font-medium"
         isDisabled={pickerDisabled}
       >
         <ModelIcon icon={selectedModel?.icon} className="size-4" bare />
         <span className="truncate">
-          {selectedModel?.label ?? "No model"}
+          {selectedModel?.label ?? t("none")}
           {selectedModel ? ` · ${reasoningCopy[reasoningPreset].label}` : ""}
         </span>
         {pickerDisabled ? null : <GravityChevronDown className="text-muted size-3 shrink-0" />}
       </Dropdown.Trigger>
       <Dropdown.Popover className="min-w-60" placement="top start">
         <Dropdown.Menu
-          aria-label="Select model"
+          aria-label={t("select")}
           selectedKeys={selectedModelID ? [selectedModelID] : []}
           selectionMode="single"
           disabledKeys={selectedAgent ? models.map((model) => model.id) : []}
@@ -1373,13 +1385,13 @@ const ModelPicker: FC = () => {
           }}
         >
           <Dropdown.SubmenuTrigger>
-            <Dropdown.Item id="reasoning" textValue="Reasoning">
+            <Dropdown.Item id="reasoning" textValue={t("reasoning")}>
               <Label className="flex min-w-0 items-center gap-2">
                 <span className="bg-accent/10 text-accent grid size-6 shrink-0 place-items-center rounded-lg">
                   <Hourglass className="size-3.5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">Reasoning</span>
+                  <span className="block truncate">{t("reasoning")}</span>
                   <span className="block truncate text-[11px] font-normal text-muted">
                     {reasoningCopy[reasoningPreset].label}
                   </span>
@@ -1389,7 +1401,7 @@ const ModelPicker: FC = () => {
             </Dropdown.Item>
             <Dropdown.Popover className="min-w-64" placement="end bottom">
               <Dropdown.Menu
-                aria-label="Select reasoning effort"
+                aria-label={t("selectReasoning")}
                 selectedKeys={[reasoningPreset]}
                 selectionMode="single"
                 onAction={(key) =>
@@ -1437,12 +1449,13 @@ const ModelPicker: FC = () => {
 };
 
 const AgentPicker: FC = () => {
+  const t = useTranslations("chat.agent");
   const { agents, agentsLoaded, selectedAgent, selectedAgentID, agentLocked, setSelectedAgentID } =
     useCocola();
   return (
     <Dropdown>
       <Dropdown.Trigger
-        aria-label="Select agent"
+        aria-label={t("select")}
         className="cocola-web-composer-selector cocola-web-select-trigger inline-flex h-9 max-w-[12rem] min-w-0 shrink-0 items-center gap-2 rounded-xl border border-transparent px-2.5 text-xs font-medium"
         isDisabled={!agentsLoaded || agentLocked}
       >
@@ -1456,24 +1469,24 @@ const AgentPicker: FC = () => {
         ) : (
           <FaceRobot className="size-3.5 text-cyan-600" />
         )}
-        <span className="truncate">{selectedAgent?.name ?? "None"}</span>
+        <span className="truncate">{selectedAgent?.name ?? t("none")}</span>
         {!agentsLoaded || agentLocked ? null : (
           <GravityChevronDown className="text-muted size-3 shrink-0" />
         )}
       </Dropdown.Trigger>
       <Dropdown.Popover placement="top start">
         <Dropdown.Menu
-          aria-label="Select agent"
+          aria-label={t("select")}
           selectedKeys={selectedAgentID ? [selectedAgentID] : ["none"]}
           selectionMode="single"
           onAction={(key) => setSelectedAgentID(String(key) === "none" ? null : String(key))}
         >
-          <Dropdown.Item id="none" textValue="None">
+          <Dropdown.Item id="none" textValue={t("none")}>
             <Label className="flex min-w-0 items-center gap-2">
               <span className="bg-surface-secondary text-muted grid size-5 shrink-0 place-items-center rounded-md">
                 <FaceRobot className="size-3" />
               </span>
-              <span>None</span>
+              <span>{t("none")}</span>
             </Label>
           </Dropdown.Item>
           {agents.map((agent) => (
@@ -1516,6 +1529,7 @@ const AttachmentFileTypeIcon: FC = () => {
 };
 
 const ComposerAttachmentChip: FC = () => {
+  const t = useTranslations("chat");
   const isWiki = useThreadComposerAttachment((attachment) => isWikiComposerAttachment(attachment));
   const name = useThreadComposerAttachment((attachment) => attachment.name);
   const isPreparing = useThreadComposerAttachment(
@@ -1533,13 +1547,13 @@ const ComposerAttachmentChip: FC = () => {
       {isPreparing ? (
         <span className="flex items-center gap-1 text-[11px] text-muted" aria-live="polite">
           <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-          Preparing
+          {t("preparing")}
         </span>
       ) : null}
       <AttachmentPrimitive.Remove asChild>
         <button
           type="button"
-          aria-label={`Remove attachment ${name}`}
+          aria-label={t("removeAttachment", { name })}
           className="ml-1 rounded-full p-0.5 text-muted transition-colors hover:bg-background hover:text-foreground"
         >
           <XIcon className="size-3.5" />
@@ -1554,6 +1568,7 @@ const ComposerAction: FC<{
   missingPromptFileSlot?: PromptStarterFileSlot;
   onResolveMissingPromptFileSlot?: () => void;
 }> = ({ disabled = false, missingPromptFileSlot, onResolveMissingPromptFileSlot }) => {
+  const t = useTranslations("chat");
   const { selectedModel, modelsLoaded } = useCocola();
   const hasPreparingAttachment = useComposer((state) =>
     state.attachments.some((attachment) => attachment.status.type !== "complete"),
@@ -1567,7 +1582,7 @@ const ComposerAction: FC<{
         {missingPromptFileSlot ? (
           <Button
             isIconOnly
-            aria-label={`${missingPromptFileSlot.label} before sending`}
+            aria-label={t("resolveBeforeSending", { label: missingPromptFileSlot.label })}
             className="cocola-web-composer-send"
             isDisabled={sendDisabled}
             onPress={onResolveMissingPromptFileSlot}
@@ -1577,7 +1592,7 @@ const ComposerAction: FC<{
         ) : (
           <ComposerPrimitive.Send asChild>
             <PromptInput.Send
-              aria-label="Send"
+              aria-label={t("send")}
               className="cocola-web-composer-send"
               isDisabled={sendDisabled}
               status="ready"
@@ -1593,6 +1608,7 @@ const ComposerAction: FC<{
 };
 
 const ComposerStopButton: FC = () => {
+  const t = useTranslations("chat");
   const [stopping, setStopping] = useState(false);
   useEffect(() => {
     if (!stopping) return;
@@ -1603,7 +1619,7 @@ const ComposerStopButton: FC = () => {
     <ComposerPrimitive.Cancel asChild>
       <Button
         isIconOnly
-        aria-label={stopping ? "Stopping current run" : "Stop current run"}
+        aria-label={stopping ? t("stopping") : t("stop")}
         className="cocola-web-composer-send"
         isDisabled={stopping}
         size="sm"
@@ -1781,9 +1797,10 @@ const AssistantMessageParts: FC = () => {
 };
 
 const AssistantMessageHeader: FC = () => {
+  const t = useTranslations("chat");
   const { selectedModel } = useCocola();
   const metadata = useMessage((m) => m.metadata.custom) as UiMessageMetadata | undefined;
-  const label = metadata?.model_label || selectedModel?.label || "Model";
+  const label = metadata?.model_label || selectedModel?.label || t("modelFallback");
   const icon = metadata?.model_icon || selectedModel?.icon;
   const isPlanMode = metadata?.interaction_mode === "plan";
 
@@ -1797,7 +1814,7 @@ const AssistantMessageHeader: FC = () => {
         {isPlanMode ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold leading-none text-white">
             <PlanModeIcon className="size-3.5 shrink-0" aria-hidden="true" />
-            {PLAN_MODE_COPY.responseLabel}
+            {t("composer.planResponse")}
           </span>
         ) : null}
       </div>
@@ -1936,6 +1953,7 @@ const SCMApprovalPart: FC<
     label?: string;
   }>
 > = ({ data }) => {
+  const t = useTranslations("chat.composer");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [resolvedStatus, setResolvedStatus] = useState(data.status);
@@ -1955,11 +1973,11 @@ const SCMApprovalPart: FC<
         },
       );
       if (!response.ok) {
-        throw new Error("The approval could not be saved. It may have expired.");
+        throw new Error(t("approvalSaveFailed"));
       }
       setResolvedStatus(decision);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Approval failed.");
+      setError(requestError instanceof Error ? requestError.message : t("approvalFailed"));
     } finally {
       setBusy(false);
     }
@@ -1998,6 +2016,7 @@ const ASSISTANT_PART_COMPONENTS = {
 };
 
 const AssistantActionBar: FC = () => {
+  const t = useTranslations("chat");
   // Copy control stays resident: autohide="never" so every completed assistant
   // turn keeps its copy button, not just on hover.
   //
@@ -2022,7 +2041,7 @@ const AssistantActionBar: FC = () => {
 
   return (
     <ActionBarPrimitive.Root autohide="never" className="ml-8.5 flex gap-1 text-muted">
-      <TooltipIconButton tooltip={copied ? "Copied" : "Copy"} disabled={!text} onClick={copy}>
+      <TooltipIconButton tooltip={copied ? t("copied") : t("copy")} disabled={!text} onClick={copy}>
         {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <CopyIcon className="h-4 w-4" />}
       </TooltipIconButton>
     </ActionBarPrimitive.Root>

@@ -24,28 +24,31 @@ const threadSource = readFileSync(
 );
 
 test("Agent Skills use fixed cards, paginate the catalog, and preserve unavailable selections", () => {
-  assert.match(capabilitiesSource, /<Card\.Title>Skills<\/Card\.Title>/);
-  assert.match(capabilitiesSource, /Using default Skills/);
-  assert.match(capabilitiesSource, /Using a custom Skill set/);
+  assert.match(capabilitiesSource, /<Card\.Title>\{t\("skills"\)\}<\/Card\.Title>/);
+  assert.match(capabilitiesSource, /t\("usingDefault"\)/);
+  assert.match(capabilitiesSource, /t\("usingCustom"\)/);
   assert.match(capabilitiesSource, /skill\.unavailable_reason === "disabled_by_administrator"/);
-  assert.match(capabilitiesSource, /\? "Admin disabled"\s*: "Unavailable"/);
+  assert.match(capabilitiesSource, /\? t\("adminDisabled"\)\s*: t\("unavailable"\)/);
   assert.match(capabilitiesSource, /<SkillIcon name=/);
-  assert.match(capabilitiesSource, /skill\.source === "personal" \? "personal" : "shared"/);
+  assert.match(
+    capabilitiesSource,
+    /skill\.source === "personal" \? t\("personal"\) : t\("shared"\)/,
+  );
   assert.match(capabilitiesSource, /const SKILLS_PER_PAGE = 6/);
   assert.match(capabilitiesSource, /filteredSkills\.slice\(/);
   assert.match(capabilitiesSource, /columns=\{2\} layout="grid"/);
   assert.match(capabilitiesSource, /min-h-\[9\.5rem\] w-full overflow-hidden/);
-  assert.match(capabilitiesSource, /Previous Skills page/);
-  assert.match(capabilitiesSource, /Next Skills page/);
+  assert.match(capabilitiesSource, /t\("previousPage"\)/);
+  assert.match(capabilitiesSource, /t\("nextPage"\)/);
   assert.doesNotMatch(capabilitiesSource, /line-clamp-2 block/);
-  assert.match(agentListSource, /Default Skills/);
+  assert.match(agentListSource, /t\("defaultSkills"\)/);
   assert.match(agentListSource, /selectedSkills\.slice\(0, 2\)/);
   assert.match(agentListSource, /\+\{selectedSkills\.length - 2\}/);
 });
 
 test("Skill lists search by name only with consistent input copy", () => {
-  assert.match(capabilitiesSource, /placeholder="Search Skills by name"/);
-  assert.match(skillsPageSource, /placeholder="Search skills by name"/);
+  assert.match(capabilitiesSource, /placeholder=\{t\("searchSkills"\)\}/);
+  assert.match(skillsPageSource, /placeholder=\{t\("search"\)\}/);
   assert.match(
     capabilitiesSource,
     /displayedSkills\.filter\(\(skill\) => skill\.name\.toLowerCase\(\)\.includes\(query\)\)/,
@@ -58,12 +61,12 @@ test("Skill lists search by name only with consistent input copy", () => {
 });
 
 test("Agent Knowledge can select Cocola Wiki files without requiring a Skill", () => {
-  assert.match(capabilitiesSource, /Add from Cocola Wiki/);
+  assert.match(capabilitiesSource, /t\("addFromWiki"\)/);
   assert.match(capabilitiesSource, /fetch\(\"\/api\/wiki\/tree\"/);
   assert.match(capabilitiesSource, /type: \"cocola_wiki\"/);
   assert.match(capabilitiesSource, /node_id: node\.id/);
   assert.match(capabilitiesSource, /cocola_wiki: \[\]/);
-  assert.match(capabilitiesSource, /Saved changes apply from the next[\s\S]*message/);
+  assert.match(capabilitiesSource, /t\("knowledgeDescription"\)/);
 });
 
 test("Agent Knowledge accepts Lark Office links and keeps feedback inside its section", () => {
@@ -79,7 +82,7 @@ test("Agent Knowledge accepts Lark Office links and keeps feedback inside its se
 });
 
 test("Agent selection keeps global starters available while starters only fill the composer", () => {
-  assert.match(threadSource, /\{PROMPT_STARTERS\.map\(\(starter\) => \{/);
+  assert.match(threadSource, /\{promptStarters\.map\(\(starter\) => \{/);
   assert.doesNotMatch(threadSource, /selectedAgent \? \[\] : PROMPT_STARTERS/);
   assert.doesNotMatch(threadSource, /suggested_prompts/);
   assert.match(threadSource, /composer\.setText\(starter\.prompt\)/);
@@ -88,9 +91,9 @@ test("Agent selection keeps global starters available while starters only fill t
 
 test("Agent editor omits the removed test action and identifies an already-saved default icon", () => {
   assert.doesNotMatch(agentPageSource, /Test Agent|testAgent|window\.open/);
-  assert.match(agentPageSource, /dirty \? "Save" : "Saved"/);
+  assert.match(agentPageSource, /dirty \? t\("save"\) : t\("saved"\)/);
   assert.match(chatPageSource, /get\("agent"\)/);
-  assert.match(chatPageSource, /This Agent is unavailable\. Standard chat is ready instead\./);
+  assert.match(chatPageSource, /t\("agentUnavailable"\)/);
 });
 
 test("Agent creation saves the selected icon and color, including the defaults", () => {

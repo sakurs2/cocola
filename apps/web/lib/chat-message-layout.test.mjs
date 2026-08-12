@@ -38,6 +38,24 @@ const markdownSource = await readFile(
   "utf8",
 );
 const globalStylesSource = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const englishChatMessages = JSON.parse(
+  await readFile(new URL("../messages/en/chat.json", import.meta.url), "utf8"),
+);
+const chineseChatMessages = JSON.parse(
+  await readFile(new URL("../messages/zh-CN/chat.json", import.meta.url), "utf8"),
+);
+
+test("the localized composer preserves the original default guidance", () => {
+  assert.equal(
+    englishChatMessages.composer.defaultPlaceholder,
+    "Ask Cocola anything · use / for Skills or Plan mode, @ for Wiki",
+  );
+  assert.equal(
+    chineseChatMessages.composer.defaultPlaceholder,
+    "向 Cocola 提问 · 输入 / 使用技能或规划模式，输入 @ 引用 Wiki",
+  );
+});
+
 test("conversation messages use the Cocola compatibility skeleton without replacing Cocola parts", () => {
   assert.match(threadSource, /from "@cocola\/ui-compat\/chat-message"/);
   assert.match(threadSource, /<ChatMessage\.User/);
@@ -122,7 +140,7 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.doesNotMatch(threadSource, /Auto · choose for me/);
   assert.match(threadSource, /mt-7 w-full max-w-3xl/);
   assert.match(threadSource, /mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2/);
-  assert.match(threadSource, /\{PROMPT_STARTERS\.map\(\(starter\) => \{/);
+  assert.match(threadSource, /\{promptStarters\.map\(\(starter\) => \{/);
   assert.match(threadSource, /"cocola-web-composer w-full"/);
   assert.match(threadSource, /hasComposerHeader && "cocola-web-composer--with-header"/);
   assert.match(
@@ -144,8 +162,8 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
     /iconClassName: "bg-emerald-500\/10 text-emerald-600 dark:text-emerald-300"/,
   );
   assert.match(threadSource, /!border-border/);
-  assert.match(threadSource, /selectedAgent\?\.name \?\? "None"/);
-  assert.match(threadSource, /<Dropdown\.Item id="none" textValue="None">/);
+  assert.match(threadSource, /selectedAgent\?\.name \?\? t\("none"\)/);
+  assert.match(threadSource, /<Dropdown\.Item id="none" textValue=\{t\("none"\)\}>/);
   assert.match(threadSource, /avatarKey=\{agent\.avatar_key\}/);
   assert.doesNotMatch(threadSource, /PlanModeContextStrip/);
   assert.match(threadSource, /<PlanModeIndicator \/>/);
@@ -163,7 +181,7 @@ test("the empty thread preserves the HeroUI demo welcome composition", () => {
     demoStylesSource,
     /\.cocola-user-ui \.cocola-web-plan-indicator:hover,[\s\S]*?transform: none;/,
   );
-  assert.match(threadSource, /PLAN_MODE_COPY\.initialPlaceholder/);
+  assert.match(threadSource, /t\("composer\.initialPlanPlaceholder"\)/);
   assert.match(demoStylesSource, /\.prompt-input__shell \{[\s\S]*?var\(--border\) 88%/);
   assert.match(
     demoStylesSource,
@@ -195,17 +213,17 @@ test("the real workspace uses the approved HeroUI demo shell treatment", () => {
   assert.doesNotMatch(sidebarSource, /aria-label="Conversation title"\s+className="[^"]*py-1/);
   assert.match(
     sidebarSource,
-    /<Dropdown\.Item id="rename"[\s\S]*?<Pencil[\s\S]*?<Dropdown\.SubmenuTrigger>[\s\S]*?Move to folder/,
+    /<Dropdown\.Item id="rename"[\s\S]*?<Pencil[\s\S]*?<Dropdown\.SubmenuTrigger>[\s\S]*?t\("moveFolder"\)/,
   );
   assert.match(
     sidebarSource,
-    /<Dropdown\.Popover placement="right top">[\s\S]*?id="move-root" textValue="No folder"[\s\S]*?folders\.map/,
+    /<Dropdown\.Popover placement="right top">[\s\S]*?id="move-root" textValue=\{t\("noFolder"\)\}[\s\S]*?folders\.map/,
   );
   assert.match(sidebarSource, /!conversation\.folder_id[\s\S]*?<Check/);
   assert.match(sidebarSource, /conversation\.folder_id === folder\.id[\s\S]*?<Check/);
   assert.match(
     sidebarSource,
-    /<Dropdown\.Item id="delete" textValue="Delete" variant="danger">[\s\S]*?<TrashBin/,
+    /<Dropdown\.Item id="delete" textValue=\{t\("delete"\)\} variant="danger">[\s\S]*?<TrashBin/,
   );
   assert.doesNotMatch(sidebarSource, />Move to \{folder\.name\}</);
   assert.match(
@@ -216,7 +234,7 @@ test("the real workspace uses the approved HeroUI demo shell treatment", () => {
   assert.doesNotMatch(sidebarSource, /linear-gradient\(135deg,#2563eb,#7c3aed\)/);
   assert.doesNotMatch(layoutSource, /className=\{`dark /);
   assert.match(themeToggleSource, /cocola:color-mode/);
-  assert.match(themeToggleSource, /Switch to \$\{nextMode\} mode/);
+  assert.match(themeToggleSource, /t\("switchTheme", \{ mode: t\(`themes\.\$\{nextMode\}`\) \}\)/);
 });
 
 test("formal Cocola has no production HeroUI Pro dependency or worktree proxy", () => {

@@ -22,11 +22,11 @@ const workspaceRoutesSource = await readFile(
 
 test("workspace headers expose one safe Cocola GitHub link beside the theme toggle", () => {
   assert.match(actionsSource, /https:\/\/github\.com\/sakurs2\/cocola/);
-  assert.match(actionsSource, /const GITHUB_LINK_LABEL = "Go to GitHub page"/);
-  assert.match(actionsSource, /aria-label=\{GITHUB_LINK_LABEL\}/);
+  assert.match(actionsSource, /const githubLabel = t\("githubPage"\)/);
+  assert.match(actionsSource, /aria-label=\{githubLabel\}/);
   assert.match(
     actionsSource,
-    /<Tooltip\.Content placement="bottom end">\{GITHUB_LINK_LABEL\}<\/Tooltip\.Content>/,
+    /<Tooltip\.Content placement="bottom end">\{githubLabel\}<\/Tooltip\.Content>/,
   );
   assert.match(actionsSource, /window\.open\(COCOLA_GITHUB_URL, "_blank", "noopener,noreferrer"\)/);
   assert.match(actionsSource, /<Button[\s\S]*?<GitHubIcon[\s\S]*?<\/Button>/);

@@ -3,6 +3,7 @@
 import { MarkdownContent } from "@/components/assistant-ui/markdown-text";
 import { FileQuestion, LoaderCircle, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
 import type { BeforeMount } from "@monaco-editor/react";
@@ -75,13 +76,14 @@ export function ReadonlyFilePreview({
   file,
   renderHtml = false,
   fetchBinary = false,
-  unsupportedMessage = "This file type cannot be previewed here.",
+  unsupportedMessage,
 }: {
   file: PreviewFile;
   renderHtml?: boolean;
   fetchBinary?: boolean;
   unsupportedMessage?: string;
 }) {
+  const t = useTranslations("chat.filePreview");
   const [text, setText] = useState("");
   const [binaryUrl, setBinaryUrl] = useState("");
   const [error, setError] = useState("");
@@ -115,7 +117,7 @@ export function ReadonlyFilePreview({
           const body = (await response.json().catch(() => null)) as {
             error?: { message?: string };
           } | null;
-          throw new Error(body?.error?.message || `Preview failed (${response.status})`);
+          throw new Error(body?.error?.message || t("requestFailed", { status: response.status }));
         }
         if (canText) {
           const body = await response.text();
@@ -139,12 +141,12 @@ export function ReadonlyFilePreview({
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [canText, fetchPreview, file.url, retry]);
+  }, [canText, fetchPreview, file.url, retry, t]);
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted">
-        <LoaderCircle className="size-4 animate-spin" /> Loading preview
+        <LoaderCircle className="size-4 animate-spin" /> {t("loading")}
       </div>
     );
   }
@@ -157,7 +159,7 @@ export function ReadonlyFilePreview({
           onClick={() => setRetry((value) => value + 1)}
           className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-secondary"
         >
-          <RefreshCw className="size-3.5" /> Retry
+          <RefreshCw className="size-3.5" /> {t("retry")}
         </button>
       </div>
     );
@@ -167,10 +169,8 @@ export function ReadonlyFilePreview({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
         <FileQuestion className="size-8" />
-        <p className="text-sm font-medium text-foreground">HTML preview is too large</p>
-        <p className="max-w-80 text-xs">
-          Switch to source mode or download the file. Rendered HTML previews are limited to 2 MiB.
-        </p>
+        <p className="text-sm font-medium text-foreground">{t("htmlTooLarge")}</p>
+        <p className="max-w-80 text-xs">{t("htmlTooLargeDescription")}</p>
       </div>
     );
   }
@@ -213,8 +213,8 @@ export function ReadonlyFilePreview({
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted">
       <FileQuestion className="size-8" />
-      <p className="text-sm font-medium text-foreground">Preview not supported</p>
-      <p className="text-xs">{unsupportedMessage}</p>
+      <p className="text-sm font-medium text-foreground">{t("unsupported")}</p>
+      <p className="text-xs">{unsupportedMessage || t("unsupportedMessage")}</p>
     </div>
   );
 }
@@ -368,9 +368,9 @@ function getKnownTextExtension(filename: string): string {
   return known.has(ext) ? ext : "";
 }
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number, unknownSize = "Unknown size"): string {
   if (bytes === 0) return "0 B";
-  if (!Number.isFinite(bytes) || bytes < 0) return "Unknown size";
+  if (!Number.isFinite(bytes) || bytes < 0) return unknownSize;
   const units = ["B", "KB", "MB", "GB"];
   let value = bytes;
   let unit = 0;

@@ -15,8 +15,8 @@ test("Project creation keeps Agent Runtime selection internal", () => {
     /runtimePickerEnabled|defaultAgentRuntimeID|runtimeConfigError|runtime_id/,
   );
   assert.doesNotMatch(newProjectSource, /Default Agent Runtime|Choose the runtime used/);
-  assert.match(newProjectSource, /Name and description can be changed later\./);
-  assert.match(newProjectSource, /Create project/);
+  assert.match(newProjectSource, /t\("details\.editable"\)/);
+  assert.match(newProjectSource, /t\("actions\.create"\)/);
 });
 
 test("Project details do not expose runtime configuration", () => {
@@ -25,5 +25,5 @@ test("Project details do not expose runtime configuration", () => {
   assert.match(projectSource, /newProjectTask\(project\.id, selectedBaseRef\)/);
   assert.doesNotMatch(projectSource, /project\.runtime_id/);
   assert.match(projectSource, /!modelsLoaded \|\|[\s\S]*?!selectedRuntime/);
-  assert.match(projectSource, /Update this Project’s name and description\./);
+  assert.match(projectSource, /t\("settings\.description"\)/);
 });

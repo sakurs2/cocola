@@ -17,6 +17,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { useCocola, type ProjectSummary } from "@/app/runtime-provider";
 import { ActionConfirmDialog } from "@/components/ui/action-dialog";
@@ -43,27 +44,19 @@ type ProjectTask = {
   change_request?: { status: string };
 };
 
-const STATUS_LABEL: Record<ProjectSummary["status"], string> = {
-  ready: "Ready",
-  provisioning: "Provisioning",
-  failed: "Failed",
-  archiving: "Archiving",
-  archive_failed: "Archive failed",
-  archived: "Archived",
-};
-
-const CHANGE_REQUEST_LABEL: Record<string, string> = {
-  open: "In review",
-  checks_pending: "Checks pending",
-  conflict: "Conflict",
-  merged: "Merged",
-  closed: "Closed",
-  failed: "Failed",
-};
+const CHANGE_REQUEST_KEYS = {
+  open: "changeRequest.open",
+  checks_pending: "changeRequest.checks_pending",
+  conflict: "changeRequest.conflict",
+  merged: "changeRequest.merged",
+  closed: "changeRequest.closed",
+  failed: "changeRequest.failed",
+} as const;
 
 export default function ProjectPage() {
   const { id: projectID } = useParams<{ id: string }>();
   const router = useRouter();
+  const t = useTranslations("projects.detail");
   const {
     projects,
     projectsLoaded,
@@ -117,14 +110,14 @@ export default function ProjectPage() {
         cache: "no-store",
         signal: controller.signal,
       }).then(async (response) => {
-        if (!response.ok) throw new Error("Project not found");
+        if (!response.ok) throw new Error(t("errors.notFound"));
         return (await response.json()) as ProjectSummary;
       }),
       fetch(`/api/projects/${encodeURIComponent(projectID)}/tasks`, {
         cache: "no-store",
         signal: controller.signal,
       }).then(async (response) => {
-        if (!response.ok) throw new Error("Could not load project tasks");
+        if (!response.ok) throw new Error(t("errors.tasks"));
         return (await response.json()) as ProjectTask[];
       }),
     ])
@@ -136,10 +129,10 @@ export default function ProjectPage() {
       })
       .catch((cause) => {
         if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : "Could not load project");
+          setError(cause instanceof Error ? cause.message : t("errors.load"));
       });
     return () => controller.abort();
-  }, [projectID]);
+  }, [projectID, t]);
 
   useEffect(() => {
     if (
@@ -216,11 +209,11 @@ export default function ProjectPage() {
         headers: { "content-type": "application/json" },
         body: "{}",
       });
-      if (!response.ok) throw new Error("Could not reconcile the GitHub repository");
+      if (!response.ok) throw new Error(t("errors.reconcile"));
       setProject((await response.json()) as ProjectSummary);
       refreshProjects();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Retry failed");
+      setError(cause instanceof Error ? cause.message : t("errors.retry"));
     } finally {
       setBusy(false);
     }
@@ -247,12 +240,12 @@ export default function ProjectPage() {
           description: draftDescription.trim(),
         }),
       });
-      if (!response.ok) throw new Error("Could not save Project settings");
+      if (!response.ok) throw new Error(t("errors.save"));
       setProject((await response.json()) as ProjectSummary);
       setEditing(false);
       refreshProjects();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save Project");
+      setError(cause instanceof Error ? cause.message : t("errors.save"));
     } finally {
       setBusy(false);
     }
@@ -269,7 +262,7 @@ export default function ProjectPage() {
         body: JSON.stringify({ expected_version: project.version }),
       });
       const result = (await response.json().catch(() => null)) as ProjectSummary | null;
-      if (!response.ok || !result) throw new Error("Could not archive Project");
+      if (!response.ok || !result) throw new Error(t("errors.archive"));
       setProject(result);
       refreshProjects();
       if (result.status === "archived") {
@@ -278,11 +271,11 @@ export default function ProjectPage() {
       }
       throw new Error(
         result.archive_error_code
-          ? `Could not archive Project (${result.archive_error_code})`
-          : "Could not archive Project",
+          ? t("errors.archiveCode", { code: result.archive_error_code })
+          : t("errors.archive"),
       );
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not archive Project");
+      setError(cause instanceof Error ? cause.message : t("errors.archive"));
       setBusy(false);
     }
   };
@@ -298,12 +291,10 @@ export default function ProjectPage() {
       <div className="cocola-web-page mx-auto grid min-h-72 max-w-5xl place-items-center p-8 text-center">
         <div>
           <FolderGit2 className="text-muted mx-auto size-9" />
-          <h1 className="mt-3 text-lg font-semibold">Project not found</h1>
-          <p className="text-muted mt-1 text-sm">
-            {error || "It may have been archived or belongs to another account."}
-          </p>
+          <h1 className="mt-3 text-lg font-semibold">{t("notFound.title")}</h1>
+          <p className="text-muted mt-1 text-sm">{error || t("notFound.description")}</p>
           <Button className="mt-4" onPress={() => router.push("/projects")}>
-            Back to Projects
+            {t("back")}
           </Button>
         </div>
       </div>
@@ -320,14 +311,14 @@ export default function ProjectPage() {
           : "warning";
   const repositoryLabel = isGithub
     ? `${project.repository_owner}/${project.repository_name}`
-    : "Cocola repository";
+    : t("repository.cocola");
 
   return (
     <div className="cocola-web-page mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
       <header className="flex flex-wrap items-center gap-3">
         <Button
           isIconOnly
-          aria-label="Back to Projects"
+          aria-label={t("back")}
           variant="ghost"
           onPress={() => router.push("/projects")}
         >
@@ -340,7 +331,7 @@ export default function ProjectPage() {
         </span>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-2xl font-semibold tracking-[-0.03em]">{project.name}</h1>
-          <p className="text-muted mt-1 text-sm">{project.description || "No description"}</p>
+          <p className="text-muted mt-1 text-sm">{project.description || t("noDescription")}</p>
         </div>
         {project.status === "ready" ||
         project.status === "failed" ||
@@ -348,7 +339,7 @@ export default function ProjectPage() {
           <div className="flex shrink-0 gap-2">
             <Button
               isIconOnly
-              aria-label="Project settings"
+              aria-label={t("settings.open")}
               size="sm"
               variant="outline"
               onPress={startEditing}
@@ -365,7 +356,7 @@ export default function ProjectPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Chip color={statusColor} size="sm" variant="soft">
-          {STATUS_LABEL[project.status]}
+          {t(`status.${project.status}`)}
         </Chip>
         <Chip size="sm" variant="soft">
           {project.repository_provider === "github" ? "GitHub" : "Cocola SCM"}
@@ -377,7 +368,7 @@ export default function ProjectPage() {
         ) : null}
         <Chip size="sm" variant="soft">
           <GitBranch className="size-3" />
-          {project.default_branch || "Preparing"}
+          {project.default_branch || t("preparing")}
         </Chip>
         {project.repository_html_url ? (
           <Button
@@ -398,34 +389,32 @@ export default function ProjectPage() {
         <div className="bg-warning/10 text-warning flex items-start gap-2 rounded-2xl px-4 py-3 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           {project.repository_has_lfs && project.repository_has_submodules
-            ? "Git LFS objects and submodules are not downloaded in phase one."
+            ? t("limitations.both")
             : project.repository_has_lfs
-              ? "Git LFS objects are kept as pointer files in phase one."
-              : "Git submodules are not initialized in phase one."}
+              ? t("limitations.lfs")
+              : t("limitations.submodules")}
         </div>
       ) : null}
 
       {project.status === "archived" ? (
         <Card className="p-5">
           <Card.Header className="p-0">
-            <Card.Title>Project archived</Card.Title>
-            <Card.Description>
-              New tasks are disabled. Existing tasks and saved Git snapshots remain available.
-            </Card.Description>
+            <Card.Title>{t("archived.title")}</Card.Title>
+            <Card.Description>{t("archived.description")}</Card.Description>
           </Card.Header>
         </Card>
       ) : project.status === "failed" ? (
         <Card className="border-warning/30 bg-warning/10 p-5">
           <Card.Content className="flex-row items-center justify-between gap-4 p-0">
             <span>
-              <span className="font-medium">Project {project.status}</span>
+              <span className="font-medium">{t("failed.title")}</span>
               <span className="text-muted mt-1 block text-sm">
-                {project.provision_error_code || "Repository provisioning has not completed."}
+                {project.provision_error_code || t("failed.description")}
               </span>
             </span>
             <Button isPending={busy} size="sm" variant="outline" onPress={() => void retry()}>
               <RefreshCw className="size-4" />
-              Retry reconciliation
+              {t("failed.retry")}
             </Button>
           </Card.Content>
         </Card>
@@ -439,12 +428,10 @@ export default function ProjectPage() {
         >
           <Card.Content className="flex-row items-center justify-between gap-4 p-0">
             <span>
-              <span className="font-medium">{STATUS_LABEL[project.status]}</span>
+              <span className="font-medium">{t(`status.${project.status}`)}</span>
               <span className="text-muted mt-1 block text-sm">
                 {project.archive_error_code ||
-                  (project.status === "archiving"
-                    ? "Repository access is being revoked."
-                    : "The repository could not be archived safely.")}
+                  (project.status === "archiving" ? t("archive.archiving") : t("archive.failed"))}
               </span>
             </span>
             {project.status === "archive_failed" ? (
@@ -455,7 +442,7 @@ export default function ProjectPage() {
                 onPress={() => setArchiveOpen(true)}
               >
                 <RefreshCw className="size-4" />
-                Retry archive
+                {t("archive.retry")}
               </Button>
             ) : null}
           </Card.Content>
@@ -465,26 +452,32 @@ export default function ProjectPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-5">
           <Card.Header className="p-0">
-            <Card.Title>Repository</Card.Title>
+            <Card.Title>{t("repository.title")}</Card.Title>
             <Card.Description>{repositoryLabel}</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 grid gap-3 p-0">
             <Info
-              label="Provider"
+              label={t("repository.provider")}
               value={project.repository_provider === "github" ? "GitHub" : "Cocola SCM"}
             />
-            <Info label="Default branch" value={project.default_branch || "Preparing"} />
-            <Info label="Visibility" value={isGithub ? project.visibility : "Private"} />
+            <Info
+              label={t("repository.defaultBranch")}
+              value={project.default_branch || t("preparing")}
+            />
+            <Info
+              label={t("repository.visibility")}
+              value={isGithub ? project.visibility : t("repository.private")}
+            />
           </Card.Content>
         </Card>
         <Card className="p-5">
           <Card.Header className="p-0">
-            <Card.Title>Project activity</Card.Title>
-            <Card.Description>Current Project state and task history.</Card.Description>
+            <Card.Title>{t("activity.title")}</Card.Title>
+            <Card.Description>{t("activity.description")}</Card.Description>
           </Card.Header>
           <Card.Content className="mt-5 grid gap-3 p-0">
-            <Info label="Status" value={STATUS_LABEL[project.status]} />
-            <Info label="Tasks" value={String(tasks.length)} />
+            <Info label={t("activity.status")} value={t(`status.${project.status}`)} />
+            <Info label={t("activity.tasks")} value={String(tasks.length)} />
           </Card.Content>
         </Card>
       </div>
@@ -493,27 +486,22 @@ export default function ProjectPage() {
         !tasksLoaded || !composerReady ? (
           <Card className="p-5">
             <Card.Header className="p-0">
-              <Card.Title>Preparing Project workspace</Card.Title>
-              <Card.Description>
-                Loading tasks and preparing a conversation workspace…
-              </Card.Description>
+              <Card.Title>{t("start.preparingTitle")}</Card.Title>
+              <Card.Description>{t("start.preparingDescription")}</Card.Description>
             </Card.Header>
           </Card>
         ) : (
           <Card className="p-5">
             <Card.Header className="p-0">
-              <Card.Title>Start project work</Card.Title>
-              <Card.Description>
-                Choose the starting point and name this task branch. Both are locked when you send
-                the first message.
-              </Card.Description>
+              <Card.Title>{t("start.title")}</Card.Title>
+              <Card.Description>{t("start.description")}</Card.Description>
             </Card.Header>
             <Card.Content className="mt-4 gap-4 p-0">
               <ProjectTaskBranchField value={taskBranchName} onChange={selectTaskBranch} />
               <ConversationComposer
                 disabled={Boolean(projectTaskBranchError(taskBranchName))}
-                disabledReason="Choose a valid task branch before sending."
-                placeholder={`Ask Cocola to work on ${project.name}…`}
+                disabledReason={t("start.invalidBranch")}
+                placeholder={t("start.placeholder", { project: project.name })}
                 branchControl={
                   project.repository_provider === "github" ? (
                     <ProjectBaseBranchPicker
@@ -533,10 +521,8 @@ export default function ProjectPage() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-semibold">Project tasks</h2>
-          <p className="text-muted mt-1 text-sm">
-            Project tasks also appear in Chats for quick access.
-          </p>
+          <h2 className="font-semibold">{t("tasks.title")}</h2>
+          <p className="text-muted mt-1 text-sm">{t("tasks.description")}</p>
         </div>
         <Chip size="sm" variant="soft">
           {tasks.length}
@@ -574,23 +560,29 @@ export default function ProjectPage() {
                         size="sm"
                         variant="soft"
                       >
-                        {CHANGE_REQUEST_LABEL[task.change_request.status] || "Working"}
+                        {task.change_request.status in CHANGE_REQUEST_KEYS
+                          ? t(
+                              CHANGE_REQUEST_KEYS[
+                                task.change_request.status as keyof typeof CHANGE_REQUEST_KEYS
+                              ],
+                            )
+                          : t("changeRequest.working")}
                       </Chip>
                     ) : task.workspace.git_snapshot?.dirty ? (
                       <Chip color="warning" size="sm" variant="soft">
-                        Modified
+                        {t("tasks.modified")}
                       </Chip>
                     ) : null}
                   </span>
                   <span className="mt-4 block max-w-full truncate font-semibold">
-                    {task.title || "Untitled task"}
+                    {task.title || t("tasks.untitled")}
                   </span>
                   <span className="text-muted mt-2 flex items-center gap-1.5 text-sm">
                     <GitBranch className="size-3.5" />
                     {task.workspace.branch_name}
                   </span>
                   <span className="text-accent mt-auto flex w-full items-center justify-end gap-1 pt-5 text-sm font-medium">
-                    Open
+                    {t("tasks.open")}
                     <ArrowRight className="cocola-web-catalog-card-arrow size-4" />
                   </span>
                 </Card.Content>
@@ -601,7 +593,7 @@ export default function ProjectPage() {
       ) : (
         <Card className="border-separator min-h-32 border border-dashed p-6">
           <Card.Content className="text-muted flex items-center justify-center p-0 text-sm">
-            No Project tasks yet.
+            {t("tasks.empty")}
           </Card.Content>
         </Card>
       )}
@@ -616,14 +608,14 @@ export default function ProjectPage() {
         <Sheet.Backdrop>
           <Sheet.Content className="w-full md:w-[460px]">
             <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label="Close Project settings" />
+              <Sheet.CloseTrigger aria-label={t("settings.close")} />
               <Sheet.Header>
-                <Sheet.Heading>Project settings</Sheet.Heading>
-                <p className="text-muted text-sm">Update this Project’s name and description.</p>
+                <Sheet.Heading>{t("settings.title")}</Sheet.Heading>
+                <p className="text-muted text-sm">{t("settings.description")}</p>
               </Sheet.Header>
               <Sheet.Body className="grid content-start gap-4">
                 <TextField value={draftName} variant="secondary" onChange={setDraftName}>
-                  <Label>Name</Label>
+                  <Label>{t("settings.name")}</Label>
                   <Input />
                 </TextField>
                 <TextField
@@ -631,7 +623,7 @@ export default function ProjectPage() {
                   variant="secondary"
                   onChange={setDraftDescription}
                 >
-                  <Label>Description</Label>
+                  <Label>{t("settings.projectDescription")}</Label>
                   <TextArea rows={5} />
                 </TextField>
                 {error ? (
@@ -647,7 +639,7 @@ export default function ProjectPage() {
                   isPending={busy}
                   onPress={() => void saveSettings()}
                 >
-                  Save changes
+                  {t("settings.save")}
                 </Button>
                 <Button
                   className="w-full"
@@ -655,7 +647,7 @@ export default function ProjectPage() {
                   onPress={() => setArchiveOpen(true)}
                 >
                   <Archive className="size-4" />
-                  Archive Project
+                  {t("archive.action")}
                 </Button>
               </Sheet.Footer>
             </Sheet.Dialog>
@@ -665,16 +657,16 @@ export default function ProjectPage() {
 
       <ActionConfirmDialog
         busy={busy}
-        confirmLabel="Archive Project"
+        confirmLabel={t("archive.action")}
         description={
           project.repository_provider === "github"
-            ? "The GitHub repository will not be deleted."
-            : "The Cocola repository becomes read-only. Existing task history remains available."
+            ? t("archive.githubDescription")
+            : t("archive.cocolaDescription")
         }
         error={error || null}
         icon={Archive}
         open={archiveOpen}
-        title="Archive this Project?"
+        title={t("archive.confirmTitle")}
         tone="danger"
         onConfirm={() => void archive()}
         onOpenChange={setArchiveOpen}
