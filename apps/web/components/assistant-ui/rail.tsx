@@ -566,11 +566,12 @@ const CommandExecutionCard: FC<{
   return (
     <Card
       className={cn(
-        "w-full overflow-hidden border border-border/70 bg-surface/80 p-0 shadow-none",
+        "max-w-full gap-0 overflow-hidden rounded-xl border border-border/70 bg-surface/80 p-0 shadow-none",
+        expanded ? "w-full" : "w-fit",
         isError && "border-danger/30",
       )}
     >
-      <Card.Header className="grid min-h-9 grid-cols-[0.2rem_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-1">
+      <Card.Header className="flex min-h-9 min-w-0 flex-row items-center gap-2 px-2.5 py-1">
         <span
           className={cn(
             "h-7 w-0.5 rounded-full",
@@ -583,7 +584,14 @@ const CommandExecutionCard: FC<{
         <span className="grid size-6 place-items-center rounded-md bg-surface-secondary text-muted">
           <TerminalWindow className="size-3.5" />
         </span>
-        <code className="block min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/85">
+        <code
+          className={cn(
+            "block min-w-0 truncate font-mono text-[11.5px] font-medium text-foreground/85",
+            expanded
+              ? "flex-1"
+              : "max-w-[10rem] sm:max-w-[20rem] md:max-w-[28rem] xl:max-w-[40rem]",
+          )}
+        >
           {command}
         </code>
         <span
@@ -609,7 +617,7 @@ const CommandExecutionCard: FC<{
           <Button
             isIconOnly
             aria-label={expanded ? t("command.hide") : t("command.show")}
-            className="size-7 min-h-7 min-w-7 rounded-full"
+            className="size-7 min-h-7 min-w-7 rounded-lg"
             size="sm"
             variant="ghost"
             onPress={() => setExpanded((value) => !value)}

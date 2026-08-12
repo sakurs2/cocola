@@ -22,6 +22,14 @@ test("running composer exposes an enabled HeroUI stop control", () => {
 test("command execution uses a compact HeroUI activity card", () => {
   assert.match(railSource, /const CommandExecutionCard/);
   assert.match(railSource, /<Card\.Header/);
+  assert.match(railSource, /expanded \? "w-full" : "w-fit"/);
+  assert.match(railSource, /max-w-full gap-0 overflow-hidden rounded-xl/);
+  assert.match(railSource, /min-w-0 flex-row items-center/);
+  assert.match(railSource, /max-w-\[10rem\][\s\S]*?xl:max-w-\[40rem\]/);
+  assert.doesNotMatch(
+    railSource,
+    /"w-full overflow-hidden border border-border\/70 bg-surface\/80 p-0 shadow-none"/,
+  );
   assert.match(railSource, /max-h-72 overflow-auto/);
   assert.match(railSource, /formatAgentDuration\(elapsedSeconds \* 1000\)/);
   assert.match(railSource, /latestOutput/);
