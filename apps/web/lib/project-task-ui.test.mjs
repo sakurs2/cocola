@@ -25,6 +25,11 @@ const [
 ]);
 
 test("new Project tasks expose an editable safe branch before the first message", () => {
+  const newProjectTaskSource = runtimeSource.slice(
+    runtimeSource.indexOf("const newProjectTask = useCallback"),
+    runtimeSource.indexOf("const updatePendingProjectTaskBaseRef"),
+  );
+
   assert.match(projectSource, /<ProjectTaskBranchField/);
   assert.match(projectSource, /updatePendingProjectTaskBranch/);
   assert.match(projectSource, /disabled=\{Boolean\(projectTaskBranchError\(taskBranchName\)\)\}/);
@@ -32,8 +37,12 @@ test("new Project tasks expose an editable safe branch before the first message"
   assert.match(branchSource, /Editable until the first message/);
   assert.match(runtimeSource, /project_task_branch: projectTaskBranch/);
   assert.match(runtimeSource, /taskBranch: branchName/);
-  assert.match(runtimeSource, /pickerEnabled: false/);
-  assert.match(runtimeSource, /setSelectedRuntimeIdState\(selected\?\.id \?\? ""\)/);
+  assert.doesNotMatch(runtimeSource, /pickerEnabled/);
+  assert.match(
+    newProjectTaskSource,
+    /selectAgentRuntime\(\{[\s\S]*?runtimes,[\s\S]*?defaultRuntimeId: defaultAgentRuntimeID/,
+  );
+  assert.match(newProjectTaskSource, /setSelectedRuntimeIdState\(selected\?\.id \?\? ""\)/);
 });
 
 test("Project branch context is borderless and reveals the full truncated name on hover", () => {

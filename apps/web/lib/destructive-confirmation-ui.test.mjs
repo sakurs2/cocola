@@ -112,8 +112,12 @@ test("folder chat actions remain identifiable and stable while editing or deleti
   assert.match(foldersSource, /!open && !deleteInFlightRef\.current/);
   assert.match(actionDialogSource, /window\.setTimeout\(\(\) => setShowBusy\(true\), 180\)/);
   assert.doesNotMatch(actionDialogSource, /isPending=\{showBusy\}/);
-  assert.match(actionDialogSource, /className=\{showBusy \? "invisible" : undefined\}/);
-  assert.match(actionDialogSource, /<LoaderCircle/);
+  assert.match(actionDialogSource, /className="inline-grid place-items-center"/);
+  assert.match(actionDialogSource, /showBusy \? "invisible" : ""/);
+  assert.match(
+    actionDialogSource,
+    /<LoaderCircle[\s\S]*?className="col-start-1 row-start-1 size-4 animate-spin"/,
+  );
 });
 
 test("model kind cards can shrink without overlapping", () => {
