@@ -18,13 +18,18 @@ func TestRunChecksHealthyServicesVolumesImagesAndPostgres(t *testing.T) {
 		t.Fatalf("doctor report = %+v", report)
 	}
 	for _, expected := range []string{
-		"service sandbox-manager", "service forgejo", "service minio-init",
+		"service openviking", "service sandbox-manager", "service forgejo", "service minio-init",
 		"internal SCM endpoint", "postgres credentials", "required images", "GHCR endpoint",
+		"docker engine", "docker compose",
 	} {
 		check, ok := findCheck(report, expected)
 		if !ok || check.Status != StatusPass {
 			t.Fatalf("check %q = %+v, present=%v", expected, check, ok)
 		}
+	}
+	composeCheck, _ := findCheck(report, "docker compose")
+	if !strings.Contains(composeCheck.Message, "/usr/libexec/docker/cli-plugins/docker-compose") {
+		t.Fatalf("docker compose check does not report the active plugin: %+v", composeCheck)
 	}
 }
 
@@ -58,8 +63,10 @@ func setupDoctor(t *testing.T, postgresMismatch bool) config.Paths {
 	directory := t.TempDir()
 	dockerPath := filepath.Join(directory, "docker")
 	script := `#!/bin/sh
-if [ "$1" = info ] && [ "$2" = --format ]; then printf '%s\n' "$DOCKER_ROOT"; exit 0; fi
+if [ "$1 $2 $3" = 'info --format {{.DockerRootDir}}' ]; then printf '%s\n' "$DOCKER_ROOT"; exit 0; fi
+if [ "$1" = info ] && [ "$2" = --format ]; then printf '%s\n' "$COMPOSE_PLUGIN_PATH"; exit 0; fi
 if [ "$1" = info ]; then exit 0; fi
+if [ "$1" = version ]; then printf '20.10.0\n'; exit 0; fi
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1 $2" = "volume inspect" ]; then exit 0; fi
 if [ "$1 $2" = "image inspect" ]; then exit 0; fi
@@ -85,6 +92,7 @@ exit 1
 	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
 	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 	t.Setenv("DOCKER_ROOT", directory)
+	t.Setenv("COMPOSE_PLUGIN_PATH", "/usr/libexec/docker/cli-plugins/docker-compose")
 	if postgresMismatch {
 		t.Setenv("POSTGRES_MISMATCH", "1")
 	}
@@ -96,6 +104,7 @@ exit 1
   {"Service":"forgejo-init","State":"exited","ExitCode":0,"Status":"Exited (0)"},
   {"Service":"minio","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"minio-init","State":"exited","ExitCode":0,"Status":"Exited (0)"},
+  {"Service":"openviking","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"opensandbox-server","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"sandbox-manager","State":"running","Health":"healthy","Status":"Up"},
   {"Service":"host-agent","State":"running","Health":"healthy","Status":"Up"},

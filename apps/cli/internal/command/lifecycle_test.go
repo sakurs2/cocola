@@ -31,6 +31,7 @@ func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
 	script := strings.Join([]string{
 		"#!/bin/sh",
 		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1\" = \"version\" ]; then printf '20.10.0\n'; exit 0; fi",
 		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.22.0\n'; exit 0; fi",
 		"exit 1",
 		"",
@@ -49,6 +50,115 @@ func TestStartPrintsActionableComposeUpgradeError(t *testing.T) {
 		!strings.Contains(errors.String(), "Upgrade Docker Compose") {
 		t.Fatalf("start error = %v, stderr = %q", err, errors.String())
 	}
+}
+
+func TestStartPrintsActionableConfigSchemaMigrationCommands(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola user's home")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	downgradeInstalledConfigSchema(t, home)
+	setHealthyDockerStub(t)
+
+	output.Reset()
+	stderr.Reset()
+	err := Execute(context.Background(), []string{"start", "--home", home}, IO{
+		In: &bytes.Buffer{}, Out: &output, Err: &stderr,
+	})
+	installCommand := "cocola install --home " + quoteShellArgument(home)
+	startCommand := "cocola start --home " + quoteShellArgument(home)
+	for _, expected := range []string{
+		fmt.Sprintf("schema %d is older than required schema %d", config.CurrentSchemaVersion-1, config.CurrentSchemaVersion),
+		"Run:", installCommand, "Then start Cocola again:", startCommand,
+	} {
+		if err == nil || !strings.Contains(stderr.String(), expected) {
+			t.Fatalf("start error = %v, stderr = %q; missing %q", err, stderr.String(), expected)
+		}
+	}
+}
+
+func TestStartReturnsStructuredConfigSchemaMigrationErrorJSON(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "cocola")
+	var output, stderr bytes.Buffer
+	if err := Execute(context.Background(), []string{
+		"install", "--home", home, "--yes", "--admin-password", "test-password",
+	}, IO{In: &bytes.Buffer{}, Out: &output, Err: &stderr}); err != nil {
+		t.Fatal(err)
+	}
+	downgradeInstalledConfigSchema(t, home)
+	setHealthyDockerStub(t)
+
+	output.Reset()
+	stderr.Reset()
+	err := Execute(context.Background(), []string{"start", "--home", home, "--json"}, IO{
+		In: &bytes.Buffer{}, Out: &output, Err: &stderr,
+	})
+	if err == nil {
+		t.Fatal("start with an outdated config schema unexpectedly succeeded")
+	}
+	var payload struct {
+		Error           string `json:"error"`
+		ErrorCode       string `json:"error_code"`
+		DetectedSchema  int    `json:"detected_schema"`
+		RequiredSchema  int    `json:"required_schema"`
+		NextCommand     string `json:"next_command"`
+		FollowUpCommand string `json:"follow_up_command"`
+	}
+	if decodeErr := json.Unmarshal(stderr.Bytes(), &payload); decodeErr != nil {
+		t.Fatalf("decode JSON error: %v; stderr=%q", decodeErr, stderr.String())
+	}
+	if payload.ErrorCode != "deployment_config_schema_outdated" ||
+		payload.DetectedSchema != config.CurrentSchemaVersion-1 ||
+		payload.RequiredSchema != config.CurrentSchemaVersion ||
+		payload.NextCommand != "cocola install --home "+quoteShellArgument(home) ||
+		payload.FollowUpCommand != "cocola start --home "+quoteShellArgument(home) {
+		t.Fatalf("structured error = %+v", payload)
+	}
+	if strings.Contains(payload.Error, "\n") {
+		t.Fatalf("JSON error message should stay concise: %q", payload.Error)
+	}
+}
+
+func downgradeInstalledConfigSchema(t *testing.T, home string) {
+	t.Helper()
+	statePath := filepath.Join(home, "state.json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state map[string]any
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	state["config_schema_version"] = config.CurrentSchemaVersion - 1
+	data, err = json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setHealthyDockerStub(t *testing.T) {
+	t.Helper()
+	dockerPath := filepath.Join(t.TempDir(), "docker")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1\" = \"version\" ]; then printf '20.10.0\\n'; exit 0; fi",
+		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\\n'; exit 0; fi",
+		"exit 1",
+		"",
+	}, "\n")
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COCOLA_DOCKER_BIN", dockerPath)
+	t.Setenv("COCOLA_DOCKER_SOCKET_SOURCE", "/var/run/docker.sock")
 }
 
 func TestStartSummaryUsesCommittedVersionAndRegistrySemantics(t *testing.T) {
@@ -111,6 +221,7 @@ func TestStartUsesCachedImagesWhenRegistryIsUnavailableAndSkipsPullOnResume(t *t
 		"printf '%s\n' \"$*\" >> \"$DOCKER_ARGS_LOG\"",
 		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\n'; exit 0; fi",
 		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1\" = \"version\" ]; then printf '20.10.0\n'; exit 0; fi",
 		"if [ \"$1\" = \"image\" ]; then exit 0; fi",
 		"if [ \"$1\" = \"ps\" ]; then printf 'container-id\n'; exit 0; fi",
 		"case \"$*\" in",
@@ -199,6 +310,7 @@ func TestStartGHCREndpointSuccessPersistsAndReturnsJSON(t *testing.T) {
 	script := `#!/bin/sh
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "version" ]; then printf '20.10.0\n'; exit 0; fi
 if [ "$1" = "ps" ]; then printf 'container-id\n'; exit 0; fi
 if [ "$1 $2" = "image inspect" ]; then exit 0; fi
 case "$*" in
@@ -264,6 +376,7 @@ func TestStartWithoutEndpointDiscardsInterruptedEndpointCandidate(t *testing.T) 
 printf '%s\n' "$*" >> "$DOCKER_ARGS_LOG"
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "version" ]; then printf '20.10.0\n'; exit 0; fi
 case "$*" in
   *' config --quiet') exit 0 ;;
   *' config --images') printf '%s\n' 'ghcr.io/sakurs2/cocola-redis:7.4.10-alpine3.21' 'ghcr.io/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
@@ -329,6 +442,7 @@ func TestStartGHCREndpointPullFailureRollsBackAndPrintsRetry(t *testing.T) {
 	script := `#!/bin/sh
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "version" ]; then printf '20.10.0\n'; exit 0; fi
 if [ "$1 $2" = "image inspect" ]; then exit 1; fi
 case "$*" in
   *' config --quiet') exit 0 ;;
@@ -394,6 +508,7 @@ func TestStartGHCREndpointPreflightFailureRollsBack(t *testing.T) {
 	script := `#!/bin/sh
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "version" ]; then printf '20.10.0\n'; exit 0; fi
 case "$*" in
   *' config --quiet') printf 'invalid candidate compose\n' >&2; exit 1 ;;
   *' ps --format json') printf '[]\n'; exit 0 ;;
@@ -446,6 +561,7 @@ func TestPullFailureUsesStandardDiagnosticsWithoutRemovedSourceHint(t *testing.T
 printf '%s\n' "$*" >> "$DOCKER_ARGS_LOG"
 if [ "$1 $2 $3" = "compose version --short" ]; then printf '2.23.1\n'; exit 0; fi
 if [ "$1" = "info" ]; then exit 0; fi
+if [ "$1" = "version" ]; then printf '20.10.0\n'; exit 0; fi
 if [ "$1" = "image" ]; then exit 1; fi
 case "$*" in
   *'config --images'*) printf '%s\n' 'docker.io/library/redis:7.4.10-alpine3.21' 'ghcr.io/sakurs2/cocola-web:v0.1.0'; exit 0 ;;
@@ -521,6 +637,7 @@ func TestFailedUpgradeRestoresPreviousDeploymentWithoutRestartingIt(t *testing.T
 		"printf '%s\n' \"$*\" >> \"$DOCKER_ARGS_LOG\"",
 		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\n'; exit 0; fi",
 		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1\" = \"version\" ]; then printf '20.10.0\n'; exit 0; fi",
 		"if [ \"$1\" = \"ps\" ]; then printf 'container-id\n'; exit 0; fi",
 		"if [ \"$1\" = \"volume\" ]; then printf 'Error: No such volume\n' >&2; exit 1; fi",
 		"case \"$*\" in",
@@ -669,6 +786,7 @@ func TestFirstStartRejectsPostgresVolumeFromDifferentConfiguration(t *testing.T)
 		"#!/bin/sh",
 		"if [ \"$1 $2 $3\" = \"compose version --short\" ]; then printf '2.23.1\\n'; exit 0; fi",
 		"if [ \"$1\" = \"info\" ]; then exit 0; fi",
+		"if [ \"$1\" = \"version\" ]; then printf '20.10.0\\n'; exit 0; fi",
 		"if [ \"$1\" = \"ps\" ]; then exit 0; fi",
 		"if [ \"$1 $2 $3\" = \"volume inspect cocola_pgdata\" ]; then exit 0; fi",
 		"if [ \"$1 $2\" = \"image pull\" ]; then exit 0; fi",

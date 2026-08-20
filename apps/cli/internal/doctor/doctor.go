@@ -59,10 +59,21 @@ func Run(ctx context.Context, paths config.Paths) Report {
 	} else {
 		add("docker daemon", StatusPass, "available")
 	}
+	if daemonAvailable {
+		if version, versionErr := compose.DockerVersion(ctx, docker); versionErr != nil {
+			add("docker engine", StatusFail, versionErr.Error())
+		} else {
+			add("docker engine", StatusPass, "version "+version+" (minimum "+compose.MinimumDockerVersion+")")
+		}
+	}
 	if version, err := compose.ComposeVersion(ctx, docker); err != nil {
 		add("docker compose", StatusFail, err.Error())
 	} else {
-		add("docker compose", StatusPass, "version "+version+" (minimum "+compose.MinimumComposeVersion+")")
+		message := "version " + version + " (minimum " + compose.MinimumComposeVersion + ")"
+		if path, pathErr := compose.ComposePluginPath(ctx, docker); pathErr == nil {
+			message += "; plugin " + path
+		}
+		add("docker compose", StatusPass, message)
 	}
 	if source, err := compose.DockerSocketSource(ctx, docker); err != nil {
 		add("docker endpoint", StatusFail, err.Error())
@@ -227,7 +238,7 @@ func inspectServices(
 	}
 	expected := []string{
 		"redis", "postgres", "forgejo-db-init", "forgejo", "forgejo-init",
-		"minio", "minio-init", "sandbox-manager", "host-agent",
+		"minio", "minio-init", "openviking", "sandbox-manager", "host-agent",
 		"llm-gateway", "admin-api", "agent-runtime", "gateway", "web",
 	}
 	if state.ManagedOpenSandbox {

@@ -134,8 +134,15 @@ services:
   openviking:
     image: "${COCOLA_OPENVIKING_IMAGE}"
     restart: unless-stopped
+    # OpenViking readiness depends on an administrator-configured embedding
+    # route. Keep deployment liveness separate so a fresh Cocola installation
+    # can start before a model is configured, without relying on Compose's
+    # version-specific handling of a disabled image healthcheck.
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     entrypoint: ["python", "-c"]
     command:
       - |

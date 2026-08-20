@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/cocola-project/cocola/apps/cli/internal/compose"
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
@@ -24,9 +25,58 @@ type startPortBinding struct {
 	port          int
 }
 
+type outdatedConfigSchemaError struct {
+	home     string
+	detected int
+	required int
+}
+
+func (e *outdatedConfigSchemaError) Error() string {
+	return fmt.Sprintf(
+		"deployment configuration schema %d is older than required schema %d",
+		e.detected,
+		e.required,
+	)
+}
+
+func (e *outdatedConfigSchemaError) UserMessage() string {
+	return fmt.Sprintf(
+		"%s.\n\nRun:\n  %s\n\nThen start Cocola again:\n  %s",
+		e.Error(),
+		e.installCommand(),
+		e.startCommand(),
+	)
+}
+
+func (e *outdatedConfigSchemaError) JSONDetails() map[string]any {
+	return map[string]any{
+		"error_code":        "deployment_config_schema_outdated",
+		"detected_schema":   e.detected,
+		"required_schema":   e.required,
+		"next_command":      e.installCommand(),
+		"follow_up_command": e.startCommand(),
+	}
+}
+
+func (e *outdatedConfigSchemaError) installCommand() string {
+	return "cocola install --home " + quoteShellArgument(e.home)
+}
+
+func (e *outdatedConfigSchemaError) startCommand() string {
+	return "cocola start --home " + quoteShellArgument(e.home)
+}
+
+func quoteShellArgument(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
 func runStartPreflight(ctx context.Context, runner *compose.Runner) ([]string, error) {
 	if runner.State.ConfigSchemaVersion != config.CurrentSchemaVersion {
-		return nil, errors.New("deployment configuration is outdated; run cocola install to migrate it before starting Cocola")
+		return nil, &outdatedConfigSchemaError{
+			home:     runner.Paths.Home,
+			detected: runner.State.ConfigSchemaVersion,
+			required: config.CurrentSchemaVersion,
+		}
 	}
 	if len(runner.State.ManagedRuntimeImages) == 0 {
 		return nil, errors.New("deployment image configuration is incomplete; run cocola install to repair it before starting Cocola")

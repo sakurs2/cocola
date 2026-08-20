@@ -62,6 +62,19 @@ test("English and Simplified Chinese dictionaries have identical, non-empty cont
   }
 });
 
+test("chat directs users without a model to the Admin page", () => {
+  const english = readMessages("en").chat;
+  const chinese = readMessages("zh-CN").chat;
+  const keys = ["noCompatibleModel", "noModelConfigured"];
+
+  for (const key of keys) {
+    assert.equal(english[key], "Please configure a model on the Admin page");
+    assert.equal(chinese[key], "请在管理员页面配置模型");
+  }
+  assert.equal(english.model.noneConfigured, "Please configure a model on the Admin page");
+  assert.equal(chinese.model.noneConfigured, "请在管理员页面配置模型");
+});
+
 test("locale preference endpoint owns a strict, one-year HttpOnly cookie", () => {
   const source = readFileSync(join(WEB_ROOT, "app/api/preferences/locale/route.ts"), "utf8");
   assert.match(source, /if \(!isLocale\(locale\)\)/);

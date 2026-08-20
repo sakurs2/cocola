@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,12 @@ type application struct {
 	accessible bool
 }
 
+type userFacingError interface {
+	error
+	UserMessage() string
+	JSONDetails() map[string]any
+}
+
 func Execute(ctx context.Context, args []string, streams IO) error {
 	app := &application{io: streams, home: config.DefaultHome()}
 	root := app.rootCommand()
@@ -35,10 +42,23 @@ func Execute(ctx context.Context, args []string, streams IO) error {
 	root.SetOut(streams.Out)
 	root.SetErr(streams.Err)
 	if err := root.ExecuteContext(ctx); err != nil {
+		message := err.Error()
+		var detailed userFacingError
+		if errors.As(err, &detailed) {
+			message = detailed.UserMessage()
+		}
 		if app.json {
-			_ = json.NewEncoder(streams.Err).Encode(map[string]string{"error": err.Error()})
+			payload := map[string]any{"error": err.Error()}
+			if detailed != nil {
+				for key, value := range detailed.JSONDetails() {
+					if key != "error" {
+						payload[key] = value
+					}
+				}
+			}
+			_ = json.NewEncoder(streams.Err).Encode(payload)
 		} else {
-			app.printer().Error(err.Error())
+			app.printer().Error(message)
 		}
 		return err
 	}

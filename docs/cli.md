@@ -6,8 +6,8 @@
 
 ## 安装
 
-前置条件：Linux 或 macOS、Docker daemon、Docker Compose 2.23.1 或更高版本。支持
-amd64 和 arm64。
+前置条件：Linux 或 macOS、Docker Engine 20.10.0 或更高版本、Docker Compose 2.23.1 或
+更高版本。Docker Desktop 需要提供同等或更新的 Engine 与 Compose。支持 amd64 和 arm64。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
@@ -95,7 +95,30 @@ Sandbox Runtime、execd 和 egress 镜像。Registry 不可用但所有目标镜
 会显示其命令、PID 和开始时间并立即退出；`status`、`logs` 和只读的 `doctor` 仍可用于观察。
 `doctor` 会检查容器状态、数据卷、当前 PostgreSQL 凭据、本地镜像缓存、GHCR endpoint 格式与
 镜像配置一致性、安装目录磁盘、可见的 Docker Root Dir，以及 Internal SCM 配置端口是否确实
-由 Forgejo 容器持有，不会启动容器、拉取镜像或删除资源。
+由 Forgejo 容器持有，不会启动容器、拉取镜像或删除资源。Docker 检查会同时显示 Engine
+版本、实际生效的 Compose 版本及插件路径，便于发现 `~/.docker/cli-plugins/docker-compose`
+等用户级插件覆盖系统插件的问题。
+
+## Docker 支持策略
+
+| 基准         | Docker Engine | Docker Compose | 自动验证 |
+| ------------ | ------------- | -------------- | -------- |
+| 最低受支持   | 20.10.0       | 2.23.1         | CI 必跑  |
+| 当前回归基准 | 29.7.2        | 5.5.0          | CI 必跑  |
+
+用户主机只需要满足 `Docker Engine >= 20.10.0` 且实际生效的
+`Docker Compose >= 2.23.1`；`cocola start` 会在创建容器前检查这两个最低版本，版本不符时
+直接给出升级提示。高于最低版本的组合不要求用户匹配表中的精确版本。
+
+Docker Engine 20.10.0 是 `host.docker.internal:host-gateway` 的技术能力下界；19.03.15 会在
+创建容器时拒绝该值。除 CI 最低版本探针外，Docker Engine 20.10.24 与 Compose 2.23.1 已完成
+Cocola managed 全栈健康启动，以及动态 Sandbox 创建、命令执行和销毁验证。
+
+CI 在最低边界和当前基准上运行真实 Compose 探针，而不只比较版本字符串。探针覆盖 Cocola
+依赖的内联 `configs.content`、`host.docker.internal:host-gateway`、健康检查，以及
+`docker compose up --wait` 的成功语义。最低版本只在确实需要新能力时提升；当前基准随维护者
+使用的稳定版本更新。可在本地 Docker 环境运行 `scripts/verify-docker-compatibility.sh` 复现
+同一探针。
 
 ## 升级
 

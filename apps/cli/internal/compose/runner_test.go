@@ -110,6 +110,7 @@ func TestParseComposeVersion(t *testing.T) {
 		{"2.23.1\n", "2.23.1"},
 		{"v2.24.7-desktop.1\n", "2.24.7"},
 		{"Docker Compose version v2.30.0", "2.30.0"},
+		{"Docker Compose version v5.5.0", "5.5.0"},
 	}
 	for _, test := range tests {
 		version, _, err := parseComposeVersion(test.raw)
@@ -122,6 +123,53 @@ func TestParseComposeVersion(t *testing.T) {
 	}
 	if _, _, err := parseComposeVersion("Docker Compose"); err == nil {
 		t.Fatal("expected an unparseable version to fail")
+	}
+}
+
+func TestDockerVersionRequiresMinimumVersion(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version string
+		want    string
+		wantErr bool
+	}{
+		{"minimum", "20.10.0", "20.10.0", false},
+		{"current", "29.7.2", "29.7.2", false},
+		{"older", "19.03.15", "19.3.15", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			dockerPath := filepath.Join(directory, "docker")
+			script := "#!/bin/sh\nif [ \"$1\" = version ]; then printf '%s\\n' \"$DOCKER_VERSION\"; exit 0; fi\nexit 1\n"
+			if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("DOCKER_VERSION", test.version)
+			got, err := DockerVersion(context.Background(), dockerPath)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("DockerVersion() = %q, %v", got, err)
+			}
+			if got != test.want {
+				t.Fatalf("DockerVersion() version = %q, want %q", got, test.want)
+			}
+			if test.wantErr && (!strings.Contains(err.Error(), "too old") ||
+				!strings.Contains(err.Error(), "Upgrade Docker Engine")) {
+				t.Fatalf("DockerVersion() error is not actionable: %v", err)
+			}
+		})
+	}
+}
+
+func TestComposePluginPathReportsActivePlugin(t *testing.T) {
+	directory := t.TempDir()
+	dockerPath := filepath.Join(directory, "docker")
+	script := "#!/bin/sh\nif [ \"$1\" = info ]; then printf '%s\\n' '/home/test/.docker/cli-plugins/docker-compose'; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path, err := ComposePluginPath(context.Background(), dockerPath)
+	if err != nil || path != "/home/test/.docker/cli-plugins/docker-compose" {
+		t.Fatalf("ComposePluginPath() = %q, %v", path, err)
 	}
 }
 

@@ -21,6 +21,7 @@
 
   <p>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/deployment-self--hosted-5b5bd6?style=flat-square" alt="Self-hosted" /></a>
+    <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Engine-20.10%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Engine 20.10 or newer" /></a>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/Docker%20Compose-2.23.1%2B-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker Compose 2.23.1 or newer" /></a>
     <a href="https://github.com/opensandbox-group/OpenSandbox"><img src="https://img.shields.io/badge/sandbox-OpenSandbox-0ea5e9?style=flat-square" alt="OpenSandbox" /></a>
     <a href="./docs/cli.md"><img src="https://img.shields.io/badge/platform-amd64%20%7C%20arm64-64748b?style=flat-square" alt="amd64 and arm64" /></a>
@@ -56,8 +57,12 @@ Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可�
 正式部署使用 Cocola CLI。开始前需要：
 
 - Linux 或 macOS，`amd64` 或 `arm64`；
-- Docker Engine 或 Docker Desktop；
+- Docker Engine 20.10.0 或更高版本，或提供等效 Engine 的 Docker Desktop；
 - Docker Compose 2.23.1 或更高版本。
+
+Docker Engine 20.10.0 是 `host-gateway` 所需的技术最低版本；Docker Compose 2.23.1 是
+内联 `configs.content` 所需的最低版本。Cocola 已在 Docker Engine 20.10.24 与 Compose
+2.23.1 的组合上完成服务健康启动及动态 Sandbox 创建、执行和销毁的全链路验证。
 
 **1. 安装**
 

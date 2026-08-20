@@ -30,8 +30,11 @@ func TestComposeDeploysInternalOpenVikingWithoutHostPort(t *testing.T) {
 	if bytes.Contains(block, []byte("ports:")) {
 		t.Fatal("production OpenViking must not publish a host port")
 	}
-	if !bytes.Contains(block, []byte("healthcheck:\n      disable: true")) {
-		t.Fatal("disabled Memory must disable the image healthcheck so it does not block compose --wait")
+	if bytes.Contains(block, []byte("disable: true")) {
+		t.Fatal("OpenViking must not rely on version-specific Compose handling of disabled healthchecks")
+	}
+	if !bytes.Contains(block, []byte(`test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]`)) {
+		t.Fatal("OpenViking must expose model-independent process liveness for compose --wait")
 	}
 	if !bytes.Contains(block, []byte("openviking-entrypoint")) {
 		t.Fatal("OpenViking must start only after the configured embedding route is usable")

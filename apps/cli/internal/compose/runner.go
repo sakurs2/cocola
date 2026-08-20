@@ -20,13 +20,18 @@ import (
 	"github.com/cocola-project/cocola/apps/cli/internal/config"
 )
 
-// Compose 2.23.1 introduced configs.content, which keeps the generated
-// OpenSandbox configuration inside the Compose file.
-const MinimumComposeVersion = "2.23.1"
+const (
+	// Docker Engine 20.10 introduced the host-gateway value used by the managed
+	// OpenSandbox service to reach sandbox endpoints on the local daemon.
+	MinimumDockerVersion = "20.10.0"
+	// Compose 2.23.1 introduced configs.content, which keeps the generated
+	// OpenSandbox configuration inside the Compose file.
+	MinimumComposeVersion = "2.23.1"
+)
 
 var ErrPostgresCredentialsMismatch = errors.New("the existing PostgreSQL volume does not match the current Cocola configuration")
 
-var composeVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
+var semanticVersionPattern = regexp.MustCompile(`(?i)(?:^|\s)v?(\d+)\.(\d+)\.(\d+)(?:\D|$)`)
 
 type Runner struct {
 	Paths              config.Paths
@@ -59,6 +64,9 @@ func CheckDocker(ctx context.Context) error {
 			detail = err.Error()
 		}
 		return fmt.Errorf("docker daemon is unavailable: %s", detail)
+	}
+	if _, err := DockerVersion(ctx, docker); err != nil {
+		return err
 	}
 	if _, err := ComposeVersion(ctx, docker); err != nil {
 		return err
@@ -135,6 +143,34 @@ func DockerRootDir(ctx context.Context, docker string) (string, error) {
 	return root, nil
 }
 
+func DockerVersion(ctx context.Context, docker string) (string, error) {
+	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(
+		checkContext, docker, "version", "--format", "{{.Server.Version}}",
+	).CombinedOutput()
+	if err != nil {
+		detail := firstDiagnostic(output)
+		if detail == "" {
+			detail = err.Error()
+		}
+		return "", fmt.Errorf("inspect Docker Engine version: %s", detail)
+	}
+	version, parts, err := parseSemanticVersion(string(output), "Docker Engine")
+	if err != nil {
+		return "", err
+	}
+	minimum, minimumParts, _ := parseSemanticVersion(MinimumDockerVersion, "Docker Engine")
+	if compareVersion(parts, minimumParts) < 0 {
+		return version, fmt.Errorf(
+			"Docker Engine %s is too old; Cocola requires version %s or newer. Upgrade Docker Engine and rerun the command",
+			version,
+			minimum,
+		)
+	}
+	return version, nil
+}
+
 func ComposeVersion(ctx context.Context, docker string) (string, error) {
 	checkContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -166,19 +202,36 @@ func ComposeVersion(ctx context.Context, docker string) (string, error) {
 }
 
 func parseComposeVersion(raw string) (string, [3]int, error) {
-	match := composeVersionPattern.FindStringSubmatch(raw)
+	return parseSemanticVersion(raw, "Docker Compose")
+}
+
+func parseSemanticVersion(raw, component string) (string, [3]int, error) {
+	match := semanticVersionPattern.FindStringSubmatch(raw)
 	if len(match) != 4 {
-		return "", [3]int{}, fmt.Errorf("cannot parse Docker Compose version from %q", raw)
+		return "", [3]int{}, fmt.Errorf("cannot parse %s version from %q", component, raw)
 	}
 	var parts [3]int
 	for index := range parts {
 		value, err := strconv.Atoi(match[index+1])
 		if err != nil {
-			return "", [3]int{}, fmt.Errorf("parse Docker Compose version: %w", err)
+			return "", [3]int{}, fmt.Errorf("parse %s version: %w", component, err)
 		}
 		parts[index] = value
 	}
 	return fmt.Sprintf("%d.%d.%d", parts[0], parts[1], parts[2]), parts, nil
+}
+
+func ComposePluginPath(ctx context.Context, docker string) (string, error) {
+	const format = `{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}`
+	output, err := runCheck(ctx, docker, "info", "--format", format)
+	if err != nil {
+		return "", fmt.Errorf("inspect Docker Compose plugin path: %w", err)
+	}
+	path := strings.TrimSpace(string(output))
+	if path == "" || path == "<no value>" {
+		return "", errors.New("Docker did not report the active Compose plugin path")
+	}
+	return path, nil
 }
 
 func compareVersion(left, right [3]int) int {

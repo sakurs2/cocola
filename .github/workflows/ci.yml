@@ -17,6 +17,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docker-compatibility:
+    name: docker compatibility / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: minimum
+            engine: "20.10.0"
+            compose: "2.23.1"
+          - name: current
+            engine: "29.7.2"
+            compose: "5.5.0"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: start Docker Engine ${{ matrix.engine }}
+        run: |
+          docker run --privileged --detach --name cocola-compatibility-dind \
+            --publish 127.0.0.1:2375:2375 \
+            --env DOCKER_TLS_CERTDIR= \
+            "docker:${{ matrix.engine }}-dind"
+          for attempt in {1..60}; do
+            if DOCKER_HOST=tcp://127.0.0.1:2375 docker info >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs cocola-compatibility-dind
+          exit 1
+      - name: install Docker Compose ${{ matrix.compose }}
+        env:
+          COMPOSE_VERSION: ${{ matrix.compose }}
+        run: |
+          plugin_dir="$RUNNER_TEMP/cocola-docker-config/cli-plugins"
+          asset="docker-compose-linux-x86_64"
+          mkdir -p "$plugin_dir"
+          curl --fail --silent --show-error --location --retry 3 \
+            --connect-timeout 15 --max-time 120 \
+            --output "$plugin_dir/$asset" \
+            "https://github.com/docker/compose/releases/download/v$COMPOSE_VERSION/$asset"
+          curl --fail --silent --show-error --location --retry 3 \
+            --connect-timeout 15 --max-time 120 \
+            --output "$plugin_dir/$asset.sha256" \
+            "https://github.com/docker/compose/releases/download/v$COMPOSE_VERSION/$asset.sha256"
+          (cd "$plugin_dir" && sha256sum --check "$asset.sha256")
+          mv "$plugin_dir/$asset" "$plugin_dir/docker-compose"
+          chmod +x "$plugin_dir/docker-compose"
+          printf 'DOCKER_CONFIG=%s\n' "$RUNNER_TEMP/cocola-docker-config" >> "$GITHUB_ENV"
+      - name: verify Compose deployment semantics
+        env:
+          COCOLA_EXPECT_DOCKER_VERSION: ${{ matrix.engine }}
+          COCOLA_EXPECT_COMPOSE_VERSION: ${{ matrix.compose }}
+          DOCKER_HOST: tcp://127.0.0.1:2375
+        run: scripts/verify-docker-compatibility.sh
+      - name: clean up Docker Engine
+        if: always()
+        run: docker rm --force cocola-compatibility-dind || true
+
   # ------------------------------------------------------------------ proto
   proto:
     name: proto / buf
