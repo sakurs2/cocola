@@ -199,7 +199,7 @@ export default function NewProjectPage() {
   const githubReady = connection?.status === "ready";
 
   return (
-    <WorkspacePageFrame layout="content">
+    <WorkspacePageFrame>
       <header className="flex items-center gap-3">
         <Button isIconOnly aria-label={t("back")} variant="ghost" onPress={() => router.back()}>
           <ArrowLeft className="size-4" />

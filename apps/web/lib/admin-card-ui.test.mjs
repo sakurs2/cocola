@@ -40,8 +40,8 @@ test("Admin catalog cards have the approved HeroUI Demo hover contract", () => {
   assert.match(mcpsSource, /className="admin-mcp-card p-5/);
   assert.doesNotMatch(skillsSource, /admin-skill-card h-full/);
   assert.doesNotMatch(mcpsSource, /admin-mcp-card h-full/);
-  assert.match(skillsSource, /cocola-admin-catalog-grid cocola-resource-card-grid/);
-  assert.match(mcpsSource, /cocola-admin-catalog-grid cocola-resource-card-grid/);
+  assert.match(skillsSource, /grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4/);
+  assert.match(mcpsSource, /grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3/);
   assert.match(globalStyles, /\.cocola-admin-ui \.admin-skill-card:hover/);
   assert.match(globalStyles, /\.cocola-admin-ui \.admin-mcp-card:hover/);
   assert.match(globalStyles, /\.cocola-admin-ui \.admin-toolbox-card:hover/);
@@ -52,7 +52,7 @@ test("Toolbox uses the compact business-card layout from the HeroUI Demo", () =>
   assert.match(toolboxCardSource, /admin-toolbox-card-icon/);
   assert.match(toolboxCardSource, /admin-toolbox-card-arrow/);
   assert.doesNotMatch(toolboxClientSource, /title="More tools"/);
-  assert.match(toolboxClientSource, /cocola-admin-catalog-grid cocola-resource-card-grid/);
+  assert.match(toolboxClientSource, /grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3/);
 });
 
 test("Token Usage keeps range, trend, and user rows compact", () => {

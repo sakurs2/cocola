@@ -96,7 +96,7 @@ export default function MCPPage() {
           <LoaderCircle className="text-muted size-5 animate-spin" />
         </div>
       ) : mcps.length ? (
-        <section className="cocola-web-catalog-grid cocola-resource-card-grid">
+        <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
           {mcps.map((mcp) => {
             const working = workingId === mcp.id;
             const endpoint = mcp.transport === "stdio" ? mcp.command : mcp.url_hint;

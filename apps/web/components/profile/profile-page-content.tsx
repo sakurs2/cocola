@@ -21,7 +21,7 @@ export function ProfilePageContent({ user }: { user: SessionUser }) {
   const isAdmin = user.role === "admin";
 
   return (
-    <WorkspacePageFrame layout="content">
+    <WorkspacePageFrame>
       <WorkspacePageHeader
         description={t("description")}
         icon={<UserRound className="size-5" />}

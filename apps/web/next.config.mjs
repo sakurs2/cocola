@@ -8,6 +8,9 @@ const nextConfig = {
   reactStrictMode: true,
   outputFileTracingRoot: workspaceRoot,
   transpilePackages: ["@cocola/ts-common", "@cocola/ui-compat"],
+  experimental: {
+    optimizePackageImports: ["@heroui/react"],
+  },
   // The Preview Proxy iframe (code-server, dev servers) is served under
   // /api/preview/{id}/{port}/ and relies on that trailing slash: code-server
   // emits RELATIVE asset paths and a `./?folder=...` redirect, which the browser

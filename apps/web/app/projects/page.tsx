@@ -5,7 +5,7 @@ import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { Folder, FolderOpen, GitBranch, GitFork, HardDrive, Loader2, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useNow, useTranslations } from "next-intl";
 import type { ProjectSummary } from "@/app/runtime-provider";
 import { useCocola } from "@/app/runtime-provider";
 import {
@@ -41,6 +41,7 @@ function sourceLabel(project: ProjectSummary) {
 export default function ProjectsPage() {
   const t = useTranslations("projects.list");
   const format = useFormatter();
+  const now = useNow({ updateInterval: 60_000 });
   const { projects, projectsLoaded } = useCocola();
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState<ProviderFilter>("all");
@@ -99,7 +100,7 @@ export default function ProjectsPage() {
       ) : filtered.length ? (
         <section
           aria-label={t("regionLabel")}
-          className="cocola-web-catalog-grid cocola-web-project-grid cocola-resource-card-grid"
+          className="cocola-web-catalog-grid cocola-web-project-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3"
         >
           {filtered.map((project) => {
             const status = STATUS_META[project.status];
@@ -110,7 +111,7 @@ export default function ProjectsPage() {
                 description={project.description || t("noDescription")}
                 footerLabel={t("open")}
                 footerMeta={t("updated", {
-                  time: formatProjectTime(project.updated_at, format, t("recently")),
+                  time: formatProjectTime(project.updated_at, format, now, t("recently")),
                 })}
                 href={`/projects/${encodeURIComponent(project.id)}`}
                 icon={isGithub ? <GitFork className="size-5" /> : <FolderOpen className="size-5" />}
@@ -180,15 +181,20 @@ export default function ProjectsPage() {
   );
 }
 
-function formatProjectTime(iso: string, format: ReturnType<typeof useFormatter>, fallback: string) {
+function formatProjectTime(
+  iso: string,
+  format: ReturnType<typeof useFormatter>,
+  now: Date,
+  fallback: string,
+) {
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return fallback;
-  const minutes = Math.max(0, Math.round((Date.now() - then) / 60_000));
-  if (minutes < 60) return format.relativeTime(new Date(then), { unit: "minute" });
+  const minutes = Math.max(0, Math.round((now.getTime() - then) / 60_000));
+  if (minutes < 60) return format.relativeTime(new Date(then), { now, unit: "minute" });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return format.relativeTime(new Date(then), { unit: "hour" });
+  if (hours < 24) return format.relativeTime(new Date(then), { now, unit: "hour" });
   const days = Math.round(hours / 24);
   return days < 30
-    ? format.relativeTime(new Date(then), { unit: "day" })
+    ? format.relativeTime(new Date(then), { now, unit: "day" })
     : format.dateTime(new Date(then), { dateStyle: "medium" });
 }

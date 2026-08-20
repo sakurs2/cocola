@@ -515,7 +515,7 @@ function SkillSection({
         description={t("sectionCount", { count: total, name: title })}
         title={title}
       />
-      <div className="cocola-web-catalog-grid cocola-resource-card-grid">
+      <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
         {skills.map((skill) => (
           <SkillCard
             key={skill.id}

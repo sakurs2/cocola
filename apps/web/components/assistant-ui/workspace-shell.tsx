@@ -221,42 +221,51 @@ function WorkspaceTopbar({
 }) {
   const t = useTranslations("navigation");
   const isChat = pathname === "/";
+  const fullWidthTopbar = immersive || pathname === "/wiki";
   return (
-    <div className={`flex w-full items-center gap-3 px-4 ${compact ? "h-10" : "h-14"}`}>
-      {immersive ? (
-        <Tooltip delay={0}>
-          <Button
-            isIconOnly
-            aria-label={t("exitImmersive")}
-            aria-pressed="true"
-            size="sm"
-            variant="ghost"
-            onPress={onExitImmersive}
-          >
-            <ChevronsRight className="size-4" />
-          </Button>
-          <Tooltip.Content>{t("exitImmersiveHint")}</Tooltip.Content>
-        </Tooltip>
-      ) : (
-        <AppLayout.MenuToggle />
-      )}
-      {isChat ? (
-        <div className="min-w-0 flex-1" />
-      ) : (
-        <div className="min-w-0 flex-1">
-          {compact ? (
-            <p className="text-foreground truncate text-sm font-medium">{label}</p>
-          ) : (
-            <>
-              <p className="text-accent truncate text-[11px] font-semibold tracking-[0.14em] uppercase">
-                {t("agentWorkspace")}
-              </p>
+    <div className={`relative flex w-full items-center ${compact ? "h-10" : "h-14"}`}>
+      <div
+        className={`cocola-workspace-topbar-content flex min-w-0 items-center gap-3 ${
+          fullWidthTopbar ? "w-full px-4" : "mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8"
+        }`}
+      >
+        {immersive ? (
+          <Tooltip delay={0}>
+            <Button
+              isIconOnly
+              aria-label={t("exitImmersive")}
+              aria-pressed="true"
+              size="sm"
+              variant="ghost"
+              onPress={onExitImmersive}
+            >
+              <ChevronsRight className="size-4" />
+            </Button>
+            <Tooltip.Content>{t("exitImmersiveHint")}</Tooltip.Content>
+          </Tooltip>
+        ) : (
+          <AppLayout.MenuToggle />
+        )}
+        {isChat ? (
+          <div className="min-w-0 flex-1" />
+        ) : (
+          <div className="min-w-0 flex-1 pr-28">
+            {compact ? (
               <p className="text-foreground truncate text-sm font-medium">{label}</p>
-            </>
-          )}
-        </div>
-      )}
-      <WorkspaceHeaderActions />
+            ) : (
+              <>
+                <p className="text-accent truncate text-[11px] font-semibold tracking-[0.14em] uppercase">
+                  {t("agentWorkspace")}
+                </p>
+                <p className="text-foreground truncate text-sm font-medium">{label}</p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="cocola-workspace-topbar-actions absolute right-4 top-1/2 -translate-y-1/2">
+        <WorkspaceHeaderActions />
+      </div>
     </div>
   );
 }

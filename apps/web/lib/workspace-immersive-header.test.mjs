@@ -10,7 +10,7 @@ const pageFrameSource = await readFile(
   new URL("../components/heroui-workspace/workspace-ui.tsx", import.meta.url),
   "utf8",
 );
-const globalStyles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const demoStyles = await readFile(new URL("../app/cocola-web-demo.css", import.meta.url), "utf8");
 const profileSource = await readFile(
   new URL("../components/profile/profile-page-content.tsx", import.meta.url),
   "utf8",
@@ -19,43 +19,33 @@ const newProjectSource = await readFile(
   new URL("../app/projects/new/page.tsx", import.meta.url),
   "utf8",
 );
-const resourceCatalogSources = await Promise.all(
-  [
-    "../app/agents/page.tsx",
-    "../app/mcps/page.tsx",
-    "../app/skills/page.tsx",
-    "../app/projects/page.tsx",
-    "../app/projects/[id]/page.tsx",
-    "../app/admin/skills/page.tsx",
-    "../app/admin/mcps/page.tsx",
-    "../app/admin/toolbox/toolbox-client.tsx",
-  ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
-);
-
-test("workspace header keeps global actions aligned to the viewport edge", () => {
-  assert.match(source, /flex w-full items-center gap-3 px-4/);
-  assert.doesNotMatch(source, /mx-auto max-w-7xl px-4 sm:px-6 lg:px-8/);
-});
-
-test("workspace pages separate fluid work canvases from readable content", () => {
-  assert.match(pageFrameSource, /layout = "fluid"/);
-  assert.match(pageFrameSource, /layout === "content" \? "mx-auto max-w-5xl" : ""/);
-  assert.doesNotMatch(pageFrameSource, /max-w-\[100rem\]|max-w-7xl/);
-  assert.match(profileSource, /<WorkspacePageFrame layout="content">/);
-  assert.match(newProjectSource, /<WorkspacePageFrame layout="content">/);
-});
-
-test("resource catalog cards stay fixed-width, left-aligned, and responsive", () => {
+test("workspace header aligns its title with page content while keeping global actions at the edge", () => {
   assert.match(
-    globalStyles,
-    /\.cocola-resource-card-grid\s*\{[\s\S]*?display: flex;[\s\S]*?flex-wrap: wrap;[\s\S]*?justify-content: start;[\s\S]*?gap: 1rem/,
+    source,
+    /cocola-workspace-topbar-content[\s\S]*?mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8/,
   );
   assert.match(
-    globalStyles,
-    /\.cocola-resource-card-grid > \*\s*\{[\s\S]*?flex: 0 0 min\(100%, 20rem\);[\s\S]*?width: min\(100%, 20rem\)/,
+    source,
+    /cocola-workspace-topbar-actions absolute right-4 top-1\/2 -translate-y-1\/2/,
   );
-  assert.match(pageFrameSource, /cocola-web-catalog-grid cocola-resource-card-grid/);
-  resourceCatalogSources.forEach((catalogSource) => {
-    assert.match(catalogSource, /cocola-resource-card-grid/);
-  });
+  assert.match(source, /const fullWidthTopbar = immersive \|\| pathname === "\/wiki"/);
+  assert.match(source, /fullWidthTopbar \? "w-full px-4"/);
+  assert.match(
+    demoStyles,
+    /\.cocola-user-ui\.cocola-web-shell \.app-layout__main\s*\{\s*scrollbar-gutter: stable;/,
+  );
+});
+
+test("workspace pages keep their core content centered at a stable maximum width", () => {
+  assert.match(pageFrameSource, /mx-auto flex w-full max-w-7xl/);
+  assert.doesNotMatch(pageFrameSource, /layout = "fluid"|layout\?: "fluid" \| "content"/);
+  assert.match(profileSource, /<WorkspacePageFrame>/);
+  assert.match(newProjectSource, /<WorkspacePageFrame>/);
+});
+
+test("shared workspace catalogs use responsive page-specific columns", () => {
+  assert.match(
+    pageFrameSource,
+    /cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3/,
+  );
 });

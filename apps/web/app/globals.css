@@ -3710,26 +3710,6 @@
   will-change: transform;
 }
 
-.cocola-resource-card-grid {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  justify-content: start;
-  gap: 1rem;
-}
-
-.cocola-resource-card-grid > * {
-  flex: 0 0 min(100%, 20rem);
-  width: min(100%, 20rem);
-  max-width: 100%;
-  min-width: 0;
-}
-
-.cocola-resource-card-grid > .cocola-resource-card-grid-full {
-  flex-basis: 100%;
-  width: 100%;
-}
-
 .cocola-user-ui .cocola-web-catalog-trigger {
   animation: cocola-web-catalog-enter 200ms ease-out both;
 }

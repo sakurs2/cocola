@@ -359,7 +359,7 @@ export default function AdminMCPPage() {
           {t("loading")}
         </div>
       ) : visibleMcps.length ? (
-        <div className="cocola-admin-catalog-grid cocola-resource-card-grid">
+        <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visibleMcps.map((mcp) => (
             <MCPCard
               key={mcp.id}

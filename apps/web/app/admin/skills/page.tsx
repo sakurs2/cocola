@@ -480,9 +480,9 @@ export default function AdminSkillsPage() {
         ) : null}
       </div>
 
-      <section className="cocola-admin-catalog-grid cocola-resource-card-grid">
+      <section className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
         {loading ? (
-          <div className="cocola-resource-card-grid-full flex h-28 items-center justify-center text-muted">
+          <div className="col-span-full flex h-28 items-center justify-center text-muted">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
             {t("loading")}
           </div>
@@ -501,7 +501,7 @@ export default function AdminSkillsPage() {
             />
           ))
         ) : (
-          <Card className="cocola-resource-card-grid-full border-separator border border-dashed p-8 text-center text-sm text-muted">
+          <Card className="border-separator col-span-full border border-dashed p-8 text-center text-sm text-muted">
             {searching ? t("noMatch", { query: search.trim() }) : t("empty")}
           </Card>
         )}

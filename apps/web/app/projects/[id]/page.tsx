@@ -529,7 +529,7 @@ export default function ProjectPage() {
         </Chip>
       </div>
       {tasks.length ? (
-        <section className="cocola-web-catalog-grid cocola-resource-card-grid">
+        <section className="cocola-web-catalog-grid grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {tasks.map((task) => (
             <button
               key={task.id}
