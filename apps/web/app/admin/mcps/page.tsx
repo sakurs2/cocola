@@ -359,7 +359,7 @@ export default function AdminMCPPage() {
           {t("loading")}
         </div>
       ) : visibleMcps.length ? (
-        <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="cocola-admin-catalog-grid cocola-resource-card-grid">
           {visibleMcps.map((mcp) => (
             <MCPCard
               key={mcp.id}
@@ -639,7 +639,7 @@ function MCPCard({
     : mcp.url_hint;
   const { Icon, style } = glyphFor(mcp.id);
   return (
-    <Card className="admin-mcp-card h-full p-5">
+    <Card className="admin-mcp-card p-5">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <div className="flex items-start gap-3">
           <span

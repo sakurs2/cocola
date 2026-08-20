@@ -347,6 +347,7 @@
       "description": "Physical usage is read from the filesystem backing Cocola Session storage. It can include non-Session data on the same filesystem.",
       "loading": "Loading storage",
       "loadingDescription": "Reading node filesystem capacity…",
+      "unavailable": "Node filesystems could not be loaded. Other available storage data is still shown.",
       "empty": "No storage nodes found",
       "emptyDescription": "Storage nodes will appear after the runtime is connected."
     },
@@ -355,6 +356,7 @@
       "description": "Requested values are soft limits. Measurements stay on this page until refresh.",
       "tableAria": "Session storage",
       "loading": "Loading storage",
+      "unavailable": "Session Storage could not be loaded. Node filesystem data remains available.",
       "empty": "No Session Volumes",
       "emptyDescription": "Session storage will appear after a workspace is created.",
       "paginationLabel": "volumes"
@@ -580,6 +582,8 @@
     "memory": "Memory",
     "sandboxPods": "{count, plural, one {# sandbox pod} other {# sandbox pods}}",
     "workspaces": "{count, plural, one {# workspace} other {# workspaces}}",
+    "usageUnavailable": "Node status is available, but Session Workspace usage could not be loaded. Operations that depend on local Workspace data remain fail-closed.",
+    "usageUnknown": "Session usage unavailable",
     "unlimited": "Unlimited",
     "columns": {
       "node": "Node",

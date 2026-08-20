@@ -99,7 +99,7 @@ export default function ProjectsPage() {
       ) : filtered.length ? (
         <section
           aria-label={t("regionLabel")}
-          className="cocola-web-catalog-grid cocola-web-project-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3"
+          className="cocola-web-catalog-grid cocola-web-project-grid cocola-resource-card-grid"
         >
           {filtered.map((project) => {
             const status = STATUS_META[project.status];

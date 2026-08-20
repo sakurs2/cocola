@@ -60,11 +60,11 @@ func (m *hostSessionStorageMonitor) Close() { m.pool.Close() }
 func (m *hostSessionStorageMonitor) List(ctx context.Context) ([]SessionStorageView, error) {
 	roots, err := m.host.SessionRoots(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list host session roots: %w", err)
 	}
 	conversations, err := m.conversations(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query session conversations: %w", err)
 	}
 	rootByPath := make(map[string]hostAgentSessionRoot, len(roots))
 	for _, root := range roots {

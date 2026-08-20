@@ -1,7 +1,7 @@
 "use client";
 
 import { HardDrive as StoragePageIcon } from "lucide-react";
-import { Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
+import { AlertTriangle, Gauge, HardDrive, LoaderCircle, Trash2 } from "lucide-react";
 import { Button, Card } from "@heroui/react";
 import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
@@ -9,6 +9,7 @@ import { signOut } from "next-auth/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import {
+  AdminAlert,
   AdminConfirmDialog,
   AdminDataGrid,
   AdminErrorDialog,
@@ -75,6 +76,8 @@ export default function StoragePage() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [error, setError] = useState("");
+  const [nodeLoadError, setNodeLoadError] = useState("");
+  const [volumeLoadError, setVolumeLoadError] = useState("");
   const [toast, setToast] = useState<{
     message: string;
     tone: "loading" | "success";
@@ -83,21 +86,28 @@ export default function StoragePage() {
 
   const refresh = useCallback(async () => {
     setError("");
+    setNodeLoadError("");
+    setVolumeLoadError("");
     setLoading(true);
     const volumeQuery = new URLSearchParams({
       limit: String(SESSION_STORAGE_PAGE_SIZE),
       offset: String(volumePage * SESSION_STORAGE_PAGE_SIZE),
     });
     try {
-      const [nodesRes, volumesRes] = await Promise.all([
+      const [nodesResult, volumesResult] = await Promise.allSettled([
         fetch("/api/admin/storage/nodes", { cache: "no-store" }),
         fetch(`/api/admin/session-storage?${volumeQuery}`, { cache: "no-store" }),
       ]);
-      if (isAccountDisabledResponse(nodesRes) || isAccountDisabledResponse(volumesRes)) {
+      const nodesRes = nodesResult.status === "fulfilled" ? nodesResult.value : null;
+      const volumesRes = volumesResult.status === "fulfilled" ? volumesResult.value : null;
+      if (
+        (nodesRes && isAccountDisabledResponse(nodesRes)) ||
+        (volumesRes && isAccountDisabledResponse(volumesRes))
+      ) {
         await signOut({ callbackUrl: "/login?error=account_disabled" });
         return;
       }
-      if (await isUnsupportedResponse(nodesRes)) {
+      if (nodesRes && (await isUnsupportedResponse(nodesRes))) {
         setUnsupported(true);
         setNodes([]);
         setVolumes([]);
@@ -105,19 +115,39 @@ export default function StoragePage() {
         setOrphanCount(0);
         return;
       }
-      if (!nodesRes.ok) throw new Error(await responseError(nodesRes));
-      if (!volumesRes.ok) throw new Error(await responseError(volumesRes));
-      const nodeBody = (await nodesRes.json()) as { nodes?: NodeFilesystem[] };
-      const volumeBody = (await volumesRes.json()) as {
-        volumes?: SessionVolume[];
-        total?: number;
-        orphan_count?: number;
-      };
       setUnsupported(false);
-      setNodes(Array.isArray(nodeBody.nodes) ? nodeBody.nodes : []);
-      setVolumes(Array.isArray(volumeBody.volumes) ? volumeBody.volumes : []);
-      setVolumeTotal(typeof volumeBody.total === "number" ? volumeBody.total : 0);
-      setOrphanCount(typeof volumeBody.orphan_count === "number" ? volumeBody.orphan_count : 0);
+
+      if (nodesResult.status === "rejected") {
+        setNodes([]);
+        setNodeLoadError(errorMessage(nodesResult.reason));
+      } else if (!nodesResult.value.ok) {
+        setNodes([]);
+        setNodeLoadError(await responseError(nodesResult.value));
+      } else {
+        const nodeBody = (await nodesResult.value.json()) as { nodes?: NodeFilesystem[] };
+        setNodes(Array.isArray(nodeBody.nodes) ? nodeBody.nodes : []);
+      }
+
+      if (volumesResult.status === "rejected") {
+        setVolumes([]);
+        setVolumeTotal(0);
+        setOrphanCount(0);
+        setVolumeLoadError(errorMessage(volumesResult.reason));
+      } else if (!volumesResult.value.ok) {
+        setVolumes([]);
+        setVolumeTotal(0);
+        setOrphanCount(0);
+        setVolumeLoadError(await responseError(volumesResult.value));
+      } else {
+        const volumeBody = (await volumesResult.value.json()) as {
+          volumes?: SessionVolume[];
+          total?: number;
+          orphan_count?: number;
+        };
+        setVolumes(Array.isArray(volumeBody.volumes) ? volumeBody.volumes : []);
+        setVolumeTotal(typeof volumeBody.total === "number" ? volumeBody.total : 0);
+        setOrphanCount(typeof volumeBody.orphan_count === "number" ? volumeBody.orphan_count : 0);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -538,6 +568,12 @@ export default function StoragePage() {
               <h2 className="text-sm font-semibold">{t("nodes.title")}</h2>
               <p className="mt-0.5 text-xs text-muted">{t("nodes.description")}</p>
             </div>
+            {nodeLoadError ? (
+              <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
+                <p className="font-medium">{t("nodes.unavailable")}</p>
+                <p className="mt-0.5 text-xs opacity-80">{nodeLoadError}</p>
+              </AdminAlert>
+            ) : null}
             {loading && nodes.length === 0 ? (
               <Card className="p-6">
                 <EmptyState>
@@ -550,7 +586,7 @@ export default function StoragePage() {
                   </EmptyState.Header>
                 </EmptyState>
               </Card>
-            ) : nodes.length === 0 ? (
+            ) : nodeLoadError && nodes.length === 0 ? null : nodes.length === 0 ? (
               <Card className="p-6">
                 <EmptyState>
                   <EmptyState.Header>
@@ -618,42 +654,51 @@ export default function StoragePage() {
               </div>
             </div>
 
-            <div className="min-w-0">
-              <AdminDataGrid
-                aria-label={t("sessions.tableAria")}
-                columns={columns}
-                contentClassName="min-w-[940px]"
-                data={volumes}
-                getRowId={volumeKey}
-                selectionMode="none"
-                variant="primary"
-                renderEmptyState={() => (
-                  <EmptyState>
-                    <EmptyState.Header>
-                      <EmptyState.Media variant="icon">
-                        <HardDrive className="text-purple-500" />
-                      </EmptyState.Media>
-                      <EmptyState.Title>
-                        {loading ? t("sessions.loading") : t("sessions.empty")}
-                      </EmptyState.Title>
-                      <EmptyState.Description>
-                        {t("sessions.emptyDescription")}
-                      </EmptyState.Description>
-                    </EmptyState.Header>
-                  </EmptyState>
-                )}
-              />
-              <AdminPagination
-                page={volumePage}
-                pageSize={SESSION_STORAGE_PAGE_SIZE}
-                count={volumes.length}
-                total={volumeTotal}
-                loading={loading}
-                label={t("sessions.paginationLabel")}
-                onPageChange={setVolumePage}
-                variant="embedded"
-              />
-            </div>
+            {volumeLoadError ? (
+              <AdminAlert tone="error" icon={<AlertTriangle className="size-4" />}>
+                <p className="font-medium">{t("sessions.unavailable")}</p>
+                <p className="mt-0.5 text-xs opacity-80">{volumeLoadError}</p>
+              </AdminAlert>
+            ) : null}
+
+            {volumeLoadError && volumes.length === 0 ? null : (
+              <div className="min-w-0">
+                <AdminDataGrid
+                  aria-label={t("sessions.tableAria")}
+                  columns={columns}
+                  contentClassName="min-w-[940px]"
+                  data={volumes}
+                  getRowId={volumeKey}
+                  selectionMode="none"
+                  variant="primary"
+                  renderEmptyState={() => (
+                    <EmptyState>
+                      <EmptyState.Header>
+                        <EmptyState.Media variant="icon">
+                          <HardDrive className="text-purple-500" />
+                        </EmptyState.Media>
+                        <EmptyState.Title>
+                          {loading ? t("sessions.loading") : t("sessions.empty")}
+                        </EmptyState.Title>
+                        <EmptyState.Description>
+                          {t("sessions.emptyDescription")}
+                        </EmptyState.Description>
+                      </EmptyState.Header>
+                    </EmptyState>
+                  )}
+                />
+                <AdminPagination
+                  page={volumePage}
+                  pageSize={SESSION_STORAGE_PAGE_SIZE}
+                  count={volumes.length}
+                  total={volumeTotal}
+                  loading={loading}
+                  label={t("sessions.paginationLabel")}
+                  onPageChange={setVolumePage}
+                  variant="embedded"
+                />
+              </div>
+            )}
           </section>
         </>
       )}
@@ -821,6 +866,10 @@ async function responseError(res: Response) {
   } catch {
     return text || `${res.status} ${res.statusText}`;
   }
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function isUnsupportedResponse(res: Response) {

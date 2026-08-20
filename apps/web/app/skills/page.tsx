@@ -515,7 +515,7 @@ function SkillSection({
         description={t("sectionCount", { count: total, name: title })}
         title={title}
       />
-      <div className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="cocola-web-catalog-grid cocola-resource-card-grid">
         {skills.map((skill) => (
           <SkillCard
             key={skill.id}
@@ -627,7 +627,7 @@ function SkillCard({
     </>
   );
   const card = (
-    <Card className="cocola-web-catalog-card cocola-web-skill-card h-full min-h-[13rem] p-4">
+    <Card className="cocola-web-catalog-card cocola-web-skill-card min-h-[13rem] p-4">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <Link
           className="group min-w-0 no-underline"

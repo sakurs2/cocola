@@ -3,6 +3,8 @@
 import {
   ArrowLeft,
   BookOpenText,
+  Check,
+  ChevronDown,
   ChevronRight,
   Download,
   File,
@@ -18,9 +20,19 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { Button, Card, Chip, Input, Label, SearchField, TextField, Tooltip } from "@heroui/react";
+import {
+  Button,
+  Card,
+  Chip,
+  Dropdown,
+  Input,
+  Label,
+  Modal,
+  SearchField,
+  TextField,
+  Tooltip,
+} from "@heroui/react";
 import { useTranslations } from "next-intl";
-import { Sheet } from "@cocola/ui-compat/sheet";
 import {
   Fragment,
   useCallback,
@@ -29,6 +41,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
@@ -62,6 +75,7 @@ type WikiNameDialogState = {
 };
 
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
+const REFRESH_FEEDBACK_MS = 1200;
 const DEFAULT_SIDEBAR_WIDTH = 304;
 const MIN_SIDEBAR_WIDTH = 240;
 const MAX_SIDEBAR_WIDTH = 520;
@@ -97,6 +111,11 @@ function formatBytes(bytes = 0) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function displayWikiPath(path?: string) {
+  const normalized = (path ?? "").replace(/^\/+|\/+$/g, "");
+  return normalized ? `/${normalized}` : "/";
+}
+
 function fileIcon(node: WikiNode) {
   if (node.kind === "folder") return Folder;
   if (node.extension === ".md") return FileText;
@@ -119,6 +138,7 @@ export function WikiWorkspace() {
   const [currentFolderID, setCurrentFolderID] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshConfirmed, setRefreshConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -132,6 +152,7 @@ export function WikiWorkspace() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
   const pendingDiscardAction = useRef<(() => void) | null>(null);
+  const refreshFeedbackTimer = useRef<number | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const sidebarResize = useRef<{
     pointerID: number;
@@ -176,6 +197,7 @@ export function WikiWorkspace() {
   }, [nodes, query]);
 
   const loadTree = useCallback(async (preferredID?: string) => {
+    setLoading(true);
     setError("");
     try {
       const response = await fetch("/api/wiki/tree", { cache: "no-store" });
@@ -190,12 +212,28 @@ export function WikiWorkspace() {
         const target = preferredID ?? current;
         return next.some((node) => node.id === target) ? target : "";
       });
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const refreshTree = async () => {
+    setRefreshConfirmed(false);
+    const succeeded = await loadTree();
+    if (!succeeded) return;
+    setRefreshConfirmed(true);
+    if (refreshFeedbackTimer.current !== null) {
+      window.clearTimeout(refreshFeedbackTimer.current);
+    }
+    refreshFeedbackTimer.current = window.setTimeout(() => {
+      setRefreshConfirmed(false);
+      refreshFeedbackTimer.current = null;
+    }, REFRESH_FEEDBACK_MS);
+  };
 
   useEffect(() => {
     void loadTree();
@@ -248,6 +286,15 @@ export function WikiWorkspace() {
   }, [setDirty, unsavedFileID]);
 
   useEffect(() => () => setDirty(false), [setDirty]);
+
+  useEffect(
+    () => () => {
+      if (refreshFeedbackTimer.current !== null) {
+        window.clearTimeout(refreshFeedbackTimer.current);
+      }
+    },
+    [],
+  );
 
   const createFolder = () => {
     runAfterDiscardCheck(() => {
@@ -482,8 +529,8 @@ export function WikiWorkspace() {
       )}
     >
       <aside
-        className={`${selected ? "hidden lg:flex" : "flex"} bg-surface-secondary border-separator w-full shrink-0 flex-col border-r lg:flex`}
-        style={{ width: sidebarWidth }}
+        className={`${selected ? "hidden lg:flex" : "flex"} bg-surface-secondary border-separator w-full shrink-0 flex-col border-r lg:flex lg:w-[var(--cocola-wiki-sidebar-width)]`}
+        style={{ "--cocola-wiki-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
       >
         <header className="border-separator border-b px-4 pb-3 pt-5">
           <div className="flex items-center justify-between gap-3">
@@ -496,14 +543,20 @@ export function WikiWorkspace() {
             <Tooltip delay={0}>
               <Button
                 isIconOnly
-                aria-label={t("refresh")}
+                aria-label={refreshConfirmed ? t("refreshed") : t("refresh")}
+                aria-busy={loading}
+                isDisabled={loading}
                 size="sm"
                 variant="ghost"
-                onPress={() => void loadTree()}
+                onPress={() => void refreshTree()}
               >
-                <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+                {refreshConfirmed ? (
+                  <Check className="text-success size-4" />
+                ) : (
+                  <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+                )}
               </Button>
-              <Tooltip.Content>{t("refresh")}</Tooltip.Content>
+              <Tooltip.Content>{refreshConfirmed ? t("refreshed") : t("refresh")}</Tooltip.Content>
             </Tooltip>
           </div>
           <SearchField
@@ -539,27 +592,84 @@ export function WikiWorkspace() {
               className="flex min-w-0 flex-1 items-center overflow-hidden text-xs"
             >
               <Button
-                className="h-7 min-w-0 shrink-0 px-2 text-xs"
+                aria-label={t("allFiles")}
+                className="h-7 min-w-0 shrink-0 px-1.5 font-mono text-xs font-semibold"
                 variant="ghost"
                 onPress={() => navigateToFolder("")}
               >
-                {t("allFiles")}
+                /
               </Button>
               {folderTrail.map((folder, index) => (
                 <Fragment key={folder.id}>
-                  <ChevronRight className="text-muted size-3 shrink-0" />
-                  <Button
-                    className={`h-7 min-w-0 px-1.5 text-xs ${index === folderTrail.length - 1 ? "font-semibold" : "text-muted"}`}
-                    variant="ghost"
-                    onPress={() => navigateToFolder(folder.id)}
-                  >
-                    {folder.name}
-                  </Button>
+                  {index > 0 ? (
+                    <span aria-hidden="true" className="text-muted shrink-0 font-mono text-xs">
+                      /
+                    </span>
+                  ) : null}
+                  <Tooltip delay={0}>
+                    <Button
+                      aria-label={folder.name}
+                      className={`h-7 min-w-0 max-w-24 truncate px-1 font-mono text-xs ${index === folderTrail.length - 1 ? "font-semibold" : "text-muted"}`}
+                      variant="ghost"
+                      onPress={() => navigateToFolder(folder.id)}
+                    >
+                      {folder.name}
+                    </Button>
+                    <Tooltip.Content>{folder.name}</Tooltip.Content>
+                  </Tooltip>
                 </Fragment>
               ))}
             </nav>
+            <Dropdown>
+              <Dropdown.Trigger
+                aria-label={t("newMenu")}
+                className="bg-accent text-accent-foreground hover:bg-accent/90 flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus"
+                isDisabled={busy}
+              >
+                <Plus className="size-3.5" />
+                {t("new")}
+                <ChevronDown className="size-3" />
+              </Dropdown.Trigger>
+              <Dropdown.Popover className="min-w-44" placement="bottom end">
+                <Dropdown.Menu
+                  aria-label={t("newMenu")}
+                  onAction={(key) => {
+                    if (key === "folder") createFolder();
+                    if (key === "page") createMarkdown();
+                    if (key === "upload") requestUpload();
+                  }}
+                >
+                  <Dropdown.Item id="folder" textValue={t("folder")}>
+                    <span className="flex items-center gap-2">
+                      <Folder className="size-4" />
+                      {t("folder")}
+                    </span>
+                  </Dropdown.Item>
+                  <Dropdown.Item id="page" textValue={t("page")}>
+                    <span className="flex items-center gap-2">
+                      <FileText className="size-4" />
+                      {t("page")}
+                    </span>
+                  </Dropdown.Item>
+                  <Dropdown.Item id="upload" textValue={t("upload")}>
+                    <span className="flex items-center gap-2">
+                      <Upload className="size-4" />
+                      {t("upload")}
+                    </span>
+                  </Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
           </div>
         </header>
+        <input
+          ref={uploadRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_FILES}
+          className="hidden"
+          onChange={upload}
+        />
         <div
           className="flex-1 overflow-y-auto px-2 py-3"
           onDragOver={(event) => event.preventDefault()}
@@ -595,29 +705,6 @@ export function WikiWorkspace() {
             <EmptyTree label={t("emptyTree")} />
           )}
         </div>
-        <footer className="border-separator border-t p-3">
-          <div className="grid grid-cols-3 gap-1.5">
-            <QuickAction icon={Folder} label={t("folder")} disabled={busy} onClick={createFolder} />
-            <QuickAction icon={Plus} label={t("page")} disabled={busy} onClick={createMarkdown} />
-            <QuickAction
-              icon={Upload}
-              label={t("upload")}
-              disabled={busy}
-              onClick={requestUpload}
-            />
-          </div>
-          <input
-            ref={uploadRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_FILES}
-            className="hidden"
-            onChange={upload}
-          />
-          <p className="text-muted mt-2 text-center text-[10px]">
-            {t("fileLimit", { size: formatBytes(maxFileBytes) })}
-          </p>
-        </footer>
       </aside>
       <div
         role="separator"
@@ -690,9 +777,8 @@ export function WikiWorkspace() {
         )}
       </main>
 
-      <Sheet
+      <Modal
         isOpen={nameDialog !== null}
-        placement="right"
         onOpenChange={(open) => {
           if (!open && !busy) {
             setNameDialog(null);
@@ -700,18 +786,18 @@ export function WikiWorkspace() {
           }
         }}
       >
-        <Sheet.Backdrop>
-          <Sheet.Content className="w-full md:w-[430px]">
-            <Sheet.Dialog>
-              <Sheet.CloseTrigger aria-label={t("dialog.close")} />
-              <Sheet.Header>
-                <Sheet.Heading>
+        <Modal.Backdrop isDismissable={!busy}>
+          <Modal.Container placement="center" size="sm">
+            <Modal.Dialog>
+              <Modal.CloseTrigger aria-label={t("dialog.close")} />
+              <Modal.Header>
+                <Modal.Heading>
                   {nameDialog?.kind === "folder"
                     ? t("dialog.createFolder")
                     : nameDialog?.kind === "markdown"
                       ? t("dialog.createMarkdown")
                       : t("dialog.renameItem")}
-                </Sheet.Heading>
+                </Modal.Heading>
                 <p className="text-muted text-sm">
                   {nameDialog?.kind === "folder"
                     ? t("dialog.folderDescription")
@@ -719,8 +805,8 @@ export function WikiWorkspace() {
                       ? t("dialog.markdownDescription")
                       : t("dialog.renameDescription")}
                 </p>
-              </Sheet.Header>
-              <Sheet.Body className="grid content-start gap-4">
+              </Modal.Header>
+              <Modal.Body className="grid content-start gap-4">
                 <TextField value={nameDraft} variant="secondary" onChange={setNameDraft}>
                   <Label>
                     {nameDialog?.kind === "folder"
@@ -739,8 +825,8 @@ export function WikiWorkspace() {
                     {nameDialogError}
                   </div>
                 ) : null}
-              </Sheet.Body>
-              <Sheet.Footer className="gap-2">
+              </Modal.Body>
+              <Modal.Footer className="gap-2">
                 <Button variant="outline" onPress={() => setNameDialog(null)}>
                   {t("dialog.cancel")}
                 </Button>
@@ -751,11 +837,11 @@ export function WikiWorkspace() {
                 >
                   {nameDialog?.kind === "rename" ? t("dialog.rename") : t("dialog.create")}
                 </Button>
-              </Sheet.Footer>
-            </Sheet.Dialog>
-          </Sheet.Content>
-        </Sheet.Backdrop>
-      </Sheet>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
 
       <DeleteConfirmDialog
         busy={busy}
@@ -875,25 +961,6 @@ function EmptyTree({ label }: { label: string }) {
   return <p className="text-muted px-3 py-8 text-center text-xs leading-5">{label}</p>;
 }
 
-function QuickAction({
-  icon: Icon,
-  label,
-  disabled,
-  onClick,
-}: {
-  icon: typeof Folder;
-  label: string;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button className="h-9 px-2 text-xs" isDisabled={disabled} variant="outline" onPress={onClick}>
-      <Icon className="size-3.5" />
-      {label}
-    </Button>
-  );
-}
-
 function PageActions({
   node,
   onRename,
@@ -963,23 +1030,23 @@ function FolderView({
   const t = useTranslations("wiki.workspace.folderView");
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8 lg:py-9">
-        <header className="border-separator flex items-start justify-between gap-5 border-b pb-6">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="bg-accent-soft text-accent grid size-11 shrink-0 place-items-center rounded-2xl">
-              <FolderOpen className="size-5" />
+      <div className="flex w-full flex-col px-5 py-5 lg:px-6 lg:py-6">
+        <header className="border-separator flex items-start justify-between gap-5 border-b pb-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="bg-accent-soft text-accent grid size-9 shrink-0 place-items-center rounded-xl">
+              <FolderOpen className="size-4.5" />
             </span>
             <div className="min-w-0">
-              <h2 className="truncate text-2xl font-semibold tracking-[-0.03em]">{folder.name}</h2>
-              <p className="text-muted mt-1 truncate text-sm">
-                {t("items", { count: nodes.length })} · {folder.logical_path}
+              <h2 className="truncate text-xl font-semibold tracking-[-0.025em]">{folder.name}</h2>
+              <p className="text-muted mt-0.5 truncate text-xs">
+                {t("items", { count: nodes.length })} · {displayWikiPath(folder.logical_path)}
               </p>
             </div>
           </div>
           <PageActions node={folder} onRename={onRename} onDelete={onDelete} />
         </header>
         {nodes.length ? (
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-4 flex flex-wrap items-start gap-2.5">
             {nodes.map((node) => {
               const Icon = fileIcon(node);
               return (
@@ -987,19 +1054,20 @@ function FolderView({
                   key={node.id}
                   type="button"
                   onClick={() => onSelect(node)}
-                  className="rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  className="cocola-web-wiki-node-card border-separator bg-surface hover:bg-surface-secondary group flex min-h-16 w-64 max-w-full items-center gap-3 rounded-2xl border p-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <Card className="cocola-web-wiki-node-card h-full p-4">
-                    <Card.Content className="p-0">
-                      <span className="bg-surface-secondary text-accent grid size-10 place-items-center rounded-2xl">
-                        <Icon className="size-5" />
-                      </span>
-                      <p className="mt-4 truncate text-sm font-semibold">{node.name}</p>
-                      <p className="text-muted mt-1 text-xs">
-                        {node.kind === "folder" ? t("folder") : formatBytes(node.size_bytes)}
-                      </p>
-                    </Card.Content>
-                  </Card>
+                  <span className="bg-surface-secondary text-accent grid size-9 shrink-0 place-items-center rounded-xl">
+                    <Icon className="size-4.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">{node.name}</span>
+                    <span className="text-muted mt-0.5 block text-xs">
+                      {node.kind === "folder" ? t("folder") : formatBytes(node.size_bytes)}
+                    </span>
+                  </span>
+                  {node.kind === "folder" ? (
+                    <ChevronRight className="text-muted size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                  ) : null}
                 </button>
               );
             })}

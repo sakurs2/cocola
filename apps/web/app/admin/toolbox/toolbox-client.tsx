@@ -47,7 +47,7 @@ export function ToolboxClient({ initialTool }: { initialTool: ToolboxToolId | nu
         description={t("description")}
       />
 
-      <section className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="cocola-admin-catalog-grid cocola-resource-card-grid">
         {TOOLBOX_ITEMS.map((item) => {
           const Tool = item.component;
           return (

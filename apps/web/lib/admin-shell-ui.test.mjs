@@ -118,3 +118,10 @@ test("Admin Settings aligns controls and actions to the same row start", () => {
   assert.match(settingsSource, /admin-setting-actions flex items-center justify-end gap-2/);
   assert.doesNotMatch(settingsSource, /admin-setting-row[^\"]*lg:items-center/);
 });
+
+test("Admin content reserves scrollbar space across route changes", () => {
+  assert.match(
+    globalStyles,
+    /\.cocola-admin-ui \.app-layout__main\s*\{[\s\S]*?scrollbar-gutter:\s*stable/,
+  );
+});

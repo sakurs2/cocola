@@ -211,7 +211,7 @@ export default function AgentsPage() {
           <Loader2 className="text-muted size-5 animate-spin" />
         </div>
       ) : agents.length ? (
-        <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <section className="cocola-web-catalog-grid cocola-resource-card-grid">
           {agents.map((agent) => {
             const model = modelsByID.get(agent.model_route_id);
             const selectedSkills = (agent.skill_ids ?? [])

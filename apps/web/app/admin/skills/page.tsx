@@ -480,9 +480,9 @@ export default function AdminSkillsPage() {
         ) : null}
       </div>
 
-      <section className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <section className="cocola-admin-catalog-grid cocola-resource-card-grid">
         {loading ? (
-          <div className="col-span-full flex h-28 items-center justify-center text-muted">
+          <div className="cocola-resource-card-grid-full flex h-28 items-center justify-center text-muted">
             <LoaderCircle className="mr-2 size-4 animate-spin" />
             {t("loading")}
           </div>
@@ -501,7 +501,7 @@ export default function AdminSkillsPage() {
             />
           ))
         ) : (
-          <Card className="border-separator col-span-full border border-dashed p-8 text-center text-sm text-muted">
+          <Card className="cocola-resource-card-grid-full border-separator border border-dashed p-8 text-center text-sm text-muted">
             {searching ? t("noMatch", { query: search.trim() }) : t("empty")}
           </Card>
         )}
@@ -558,7 +558,7 @@ function SkillCard({
   const skillsT = useTranslations("skills");
   const { Icon, style } = glyphFor(skill.id);
   return (
-    <Card className="admin-skill-card h-full min-h-64 p-5">
+    <Card className="admin-skill-card min-h-64 p-5">
       <Link href={href} className="block min-w-0">
         <div className="flex items-start gap-3">
           <div className="admin-entity-glyph admin-skill-card-icon" style={style}>

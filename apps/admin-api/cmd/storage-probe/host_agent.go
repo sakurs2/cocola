@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -68,6 +69,10 @@ type componentLogsResponse struct {
 }
 
 func (s *probeServer) health(w http.ResponseWriter, r *http.Request) {
+	if _, err := os.ReadDir(s.root); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "storage root is unavailable")
+		return
+	}
 	if s.hostAgentKey != "" {
 		if s.docker == nil {
 			writeError(w, http.StatusServiceUnavailable, "docker API is unavailable")
@@ -104,6 +109,7 @@ func (s *probeServer) sessionRoots(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	if err != nil {
+		log.Printf("session storage scan failed: path=%q: %v", usersRoot, err)
 		writeError(w, http.StatusInternalServerError, "session storage scan failed")
 		return
 	}
@@ -118,6 +124,7 @@ func (s *probeServer) sessionRoots(w http.ResponseWriter, _ *http.Request) {
 			continue
 		}
 		if readErr != nil {
+			log.Printf("session storage scan failed: path=%q: %v", sessionsPath, readErr)
 			writeError(w, http.StatusInternalServerError, "session storage scan failed")
 			return
 		}

@@ -222,9 +222,7 @@ function WorkspaceTopbar({
   const t = useTranslations("navigation");
   const isChat = pathname === "/";
   return (
-    <div
-      className={`flex w-full items-center gap-3 ${immersive ? "px-4" : "mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"} ${compact ? "h-10" : "h-14"}`}
-    >
+    <div className={`flex w-full items-center gap-3 px-4 ${compact ? "h-10" : "h-14"}`}>
       {immersive ? (
         <Tooltip delay={0}>
           <Button

@@ -290,6 +290,7 @@
       "description": "物理用量读取自 Cocola 会话存储所在的文件系统，其中可能包含同一文件系统上的非会话数据。",
       "loading": "正在加载存储",
       "loadingDescription": "正在读取节点文件系统容量…",
+      "unavailable": "无法读取节点文件系统，其他可用的存储数据仍会显示。",
       "empty": "未找到存储节点",
       "emptyDescription": "运行时连接后，存储节点会显示在这里。"
     },
@@ -298,6 +299,7 @@
       "description": "请求值是软限制；测量结果仅保留在当前页面，刷新后需重新测量。",
       "tableAria": "会话存储",
       "loading": "正在加载存储",
+      "unavailable": "无法读取会话存储，节点文件系统数据仍可使用。",
       "empty": "暂无会话卷",
       "emptyDescription": "创建工作区后，会话存储会显示在这里。",
       "paginationLabel": "个卷"
@@ -523,6 +525,8 @@
     "memory": "内存",
     "sandboxPods": "{count} 个沙箱 Pod",
     "workspaces": "{count} 个工作区",
+    "usageUnavailable": "节点状态已加载，但暂时无法读取会话工作区用量。涉及本地工作区的下线操作仍会保持安全关闭。",
+    "usageUnknown": "会话用量不可用",
     "unlimited": "无限制",
     "columns": {
       "node": "节点",

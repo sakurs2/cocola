@@ -18,3 +18,13 @@ test("Wiki interactions do not use browser-native dialogs", async () => {
     assert.doesNotMatch(source, nativeDialogPattern, file.pathname);
   }
 });
+
+test("Wiki simple name forms use a centered HeroUI modal", async () => {
+  const source = await readFile(
+    new URL("../components/wiki/wiki-workspace.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /<Modal[\s\S]*?<Modal\.Container placement="center" size="sm">/);
+  assert.doesNotMatch(source, /@cocola\/ui-compat\/sheet/);
+});

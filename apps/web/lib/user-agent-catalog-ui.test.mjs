@@ -75,7 +75,8 @@ test("Skills cards keep isolated state actions and catalog hover motion", () => 
     globalStyles,
     /\.cocola-web-skill-card:hover \.cocola-web-catalog-card-icon,[\s\S]*?rotate\(-2deg\) scale\(1\.06\)/,
   );
-  assert.match(skillsPageSource, /xl:grid-cols-4/);
+  assert.match(skillsPageSource, /cocola-web-catalog-grid cocola-resource-card-grid/);
+  assert.doesNotMatch(skillsPageSource, /xl:grid-cols-4/);
   assert.match(
     skillsPageSource,
     /<Switch[\s\S]*?isSelected=\{skill\.enabled\}[\s\S]*?<Switch\.Content>[\s\S]*?<Switch\.Control>[\s\S]*?<Switch\.Thumb \/>/,
@@ -122,8 +123,11 @@ test("MCP cards use a single Switch control without repeating enabled state", ()
 });
 
 test("MCP cards use the compact catalog layout and matching hover motion", () => {
-  assert.match(mcpsPageSource, /xl:grid-cols-4/);
-  assert.match(mcpsPageSource, /cocola-web-mcp-card h-full p-4/);
+  assert.match(mcpsPageSource, /cocola-web-catalog-grid cocola-resource-card-grid/);
+  assert.doesNotMatch(mcpsPageSource, /xl:grid-cols-4/);
+  assert.match(mcpsPageSource, /cocola-web-mcp-card p-4/);
+  assert.doesNotMatch(mcpsPageSource, /cocola-web-mcp-card h-full/);
+  assert.doesNotMatch(skillsPageSource, /cocola-web-skill-card h-full/);
   assert.match(mcpsPageSource, /className="cocola-web-catalog-card-icon/);
   assert.doesNotMatch(mcpsPageSource, /min-h-\[15rem\]/);
   assert.match(
@@ -133,5 +137,9 @@ test("MCP cards use the compact catalog layout and matching hover motion", () =>
   assert.match(
     globalStyles,
     /\.cocola-user-ui \.cocola-web-mcp-card:hover \.cocola-web-catalog-card-icon,[\s\S]*?rotate\(-2deg\) scale\(1\.06\)/,
+  );
+  assert.match(
+    globalStyles,
+    /\.cocola-resource-card-grid > \*\s*\{[\s\S]*?flex: 0 0 min\(100%, 20rem\);[\s\S]*?width: min\(100%, 20rem\)/,
   );
 });

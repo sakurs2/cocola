@@ -128,6 +128,18 @@ test("Admin runtime surfaces keep feedback compact and omit inapplicable Compose
   assert.doesNotMatch(storageSource, /formatPercent\(occupiedRatio\)\} unavailable/);
 });
 
+test("Admin node and storage pages preserve independently available diagnostics", () => {
+  assert.match(nodesSource, /usage_available\?: boolean/);
+  assert.match(nodesSource, /<AdminAlert tone="warning"/);
+  assert.match(nodesSource, /t\("usageUnavailable"\)/);
+  assert.match(nodesSource, /t\("usageUnknown"\)/);
+  assert.match(storageSource, /Promise\.allSettled/);
+  assert.match(storageSource, /setNodeLoadError/);
+  assert.match(storageSource, /setVolumeLoadError/);
+  assert.match(storageSource, /t\("nodes\.unavailable"\)/);
+  assert.match(storageSource, /t\("sessions\.unavailable"\)/);
+});
+
 test("Sandbox rows keep one-line summaries and move diagnostics into a centered details modal", () => {
   for (const key of ["sandbox", "status", "owner", "node", "created", "actions"]) {
     assert.match(sandboxesSource, new RegExp(`header: t\\("columns\\.${key}"\\)`));

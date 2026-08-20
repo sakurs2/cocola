@@ -6,6 +6,7 @@ import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
 import {
+  AdminAlert,
   AdminDataGrid,
   AdminEmptyState,
   AdminErrorDialog,
@@ -51,7 +52,7 @@ type SandboxNode = {
   labels?: Record<string, string>;
 };
 
-type NodeListResponse = { nodes: SandboxNode[] };
+type NodeListResponse = { nodes: SandboxNode[]; usage_available?: boolean };
 type OfflineNodeResult = {
   node: SandboxNode;
   pending_pods?: string[];
@@ -80,6 +81,7 @@ export default function SandboxNodesPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [unsupported, setUnsupported] = useState(false);
+  const [usageAvailable, setUsageAvailable] = useState(true);
   const [capacityTarget, setCapacityTarget] = useState<SandboxNode | null>(null);
   const [offlineTarget, setOfflineTarget] = useState<OfflineTarget | null>(null);
 
@@ -92,6 +94,7 @@ export default function SandboxNodesPage() {
       if (await isUnsupportedResponse(nodesRes)) {
         setUnsupported(true);
         setNodes([]);
+        setUsageAvailable(true);
         return;
       }
       if (!nodesRes.ok) throw new Error(await responseError(nodesRes));
@@ -99,6 +102,7 @@ export default function SandboxNodesPage() {
       const nextNodes = Array.isArray(nodeBody.nodes) ? nodeBody.nodes : [];
       setUnsupported(false);
       setNodes(nextNodes);
+      setUsageAvailable(nodeBody.usage_available ?? true);
       setCapacityDrafts(
         Object.fromEntries(
           nextNodes.map((node) => [
@@ -273,8 +277,9 @@ export default function SandboxNodesPage() {
         <span className="text-xs">
           <span className="block">{t("sandboxPods", { count: node.sandbox_pods })}</span>
           <span className="text-muted mt-1 block">
-            {t("workspaces", { count: node.session_count })} ·{" "}
-            {formatBytes(node.session_requested_bytes)}
+            {usageAvailable
+              ? `${t("workspaces", { count: node.session_count })} · ${formatBytes(node.session_requested_bytes)}`
+              : t("usageUnknown")}
           </span>
         </span>
       ),
@@ -407,6 +412,12 @@ export default function SandboxNodesPage() {
         tone="success"
         onDismiss={() => setNotice("")}
       />
+
+      {!unsupported && !usageAvailable ? (
+        <AdminAlert tone="warning" icon={<AlertTriangle className="size-4" />}>
+          {t("usageUnavailable")}
+        </AdminAlert>
+      ) : null}
 
       {unsupported ? (
         <UnsupportedState />

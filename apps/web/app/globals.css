@@ -30,6 +30,10 @@
   animation-delay: var(--overview-delay, 0ms);
 }
 
+.cocola-admin-ui .app-layout__main {
+  scrollbar-gutter: stable;
+}
+
 .admin-overview-card {
   transition:
     transform 200ms ease,
@@ -3704,6 +3708,26 @@
     background-color 200ms ease,
     box-shadow 200ms ease;
   will-change: transform;
+}
+
+.cocola-resource-card-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: start;
+  gap: 1rem;
+}
+
+.cocola-resource-card-grid > * {
+  flex: 0 0 min(100%, 20rem);
+  width: min(100%, 20rem);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.cocola-resource-card-grid > .cocola-resource-card-grid-full {
+  flex-basis: 100%;
+  width: 100%;
 }
 
 .cocola-user-ui .cocola-web-catalog-trigger {

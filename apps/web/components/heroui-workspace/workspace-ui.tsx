@@ -8,9 +8,19 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 
-export function WorkspacePageFrame({ children }: { children: ReactNode }) {
+export function WorkspacePageFrame({
+  children,
+  layout = "fluid",
+}: {
+  children: ReactNode;
+  layout?: "fluid" | "content";
+}) {
   return (
-    <div className="cocola-web-page mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6 lg:p-8">
+    <div
+      className={`cocola-web-page flex w-full flex-col gap-5 p-4 sm:p-6 lg:p-8 ${
+        layout === "content" ? "mx-auto max-w-5xl" : ""
+      }`}
+    >
       {children}
     </div>
   );
@@ -124,9 +134,7 @@ export function WorkspaceSectionHeader({
 
 export function WorkspaceCatalogGrid({ children }: { children: ReactNode }) {
   return (
-    <section className="cocola-web-catalog-grid grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {children}
-    </section>
+    <section className="cocola-web-catalog-grid cocola-resource-card-grid">{children}</section>
   );
 }
 

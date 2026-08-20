@@ -204,3 +204,26 @@ func TestComposeAuthenticatesPostgreSQLHealthChecks(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeGrantsHostAgentOnlyRequiredStorageCapability(t *testing.T) {
+	start := bytes.Index(Compose, []byte("  host-agent:\n"))
+	if start < 0 {
+		t.Fatal("production compose host-agent service block is missing")
+	}
+	relativeEnd := bytes.Index(Compose[start:], []byte("\n  llm-gateway:\n"))
+	if relativeEnd < 0 {
+		t.Fatal("production compose host-agent service block is missing")
+	}
+	hostAgent := Compose[start : start+relativeEnd]
+	for _, required := range [][]byte{
+		[]byte(`cap_drop: ["ALL"]`),
+		[]byte(`cap_add: ["DAC_OVERRIDE"]`),
+	} {
+		if !bytes.Contains(hostAgent, required) {
+			t.Fatalf("host-agent storage permissions are incomplete: missing %q", required)
+		}
+	}
+	if bytes.Contains(hostAgent, []byte("privileged:")) {
+		t.Fatal("host-agent must not use privileged mode")
+	}
+}

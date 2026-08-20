@@ -123,13 +123,14 @@ func (f *fakeSandboxNodeManager) JoinCommand(context.Context) (JoinCommand, erro
 
 type fakeSessionStorageMonitor struct {
 	usage map[string]NodeStorageUsage
+	err   error
 }
 
 func (*fakeSessionStorageMonitor) List(context.Context) ([]SessionStorageView, error) {
 	return nil, nil
 }
 func (f *fakeSessionStorageMonitor) NodeUsage(context.Context) (map[string]NodeStorageUsage, error) {
-	return f.usage, nil
+	return f.usage, f.err
 }
 func (*fakeSessionStorageMonitor) NodeFilesystems(context.Context) ([]NodeStorageFilesystem, error) {
 	return nil, nil
@@ -157,6 +158,9 @@ func TestSandboxNodesIncludeLocalStorageUsageAndRequireOfflineConfirmation(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !listed.UsageAvailable {
+		t.Fatal("node storage usage should be available")
+	}
 	got := listed.Nodes[0]
 	if got.SessionCount != 2 || got.SessionRequestedBytes != 4*1024*1024*1024 || got.WorkspaceResetCount != 1 {
 		t.Fatalf("node storage usage = %+v", got)
@@ -170,17 +174,37 @@ func TestSandboxNodesIncludeLocalStorageUsageAndRequireOfflineConfirmation(t *te
 	}
 }
 
-func TestSandboxNodeOperationsFailClosedWithoutStorageMonitor(t *testing.T) {
-	nodes := &fakeSandboxNodeManager{}
+func TestSandboxNodeListDegradesWithoutStorageMonitorAndOperationsFailClosed(t *testing.T) {
+	nodes := &fakeSandboxNodeManager{nodes: SandboxNodeList{Nodes: []SandboxNode{{Name: "node-a"}}}}
 	svc := New(store.NewMemory(), nil, time.Now).WithSandboxNodeManager(nodes)
 
-	if _, err := svc.ListSandboxNodes(context.Background()); !errors.Is(err, ErrNotConfigured) {
-		t.Fatalf("ListSandboxNodes error = %v, want ErrNotConfigured", err)
+	listed, err := svc.ListSandboxNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ListSandboxNodes error = %v", err)
+	}
+	if listed.UsageAvailable || len(listed.Nodes) != 1 || listed.Nodes[0].Name != "node-a" {
+		t.Fatalf("ListSandboxNodes result = %+v", listed)
 	}
 	if _, err := svc.OfflineSandboxNode(context.Background(), "node-a", true, "admin"); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("OfflineSandboxNode error = %v, want ErrNotConfigured", err)
 	}
 	if nodes.offlineCalls != 0 {
 		t.Fatalf("offline calls = %d, want 0", nodes.offlineCalls)
+	}
+}
+
+func TestSandboxNodeListDegradesWhenStorageUsageFails(t *testing.T) {
+	nodes := &fakeSandboxNodeManager{nodes: SandboxNodeList{Nodes: []SandboxNode{{Name: "node-a"}}}}
+	monitor := &fakeSessionStorageMonitor{err: errors.New("storage probe failed")}
+	svc := New(store.NewMemory(), nil, time.Now).
+		WithSandboxNodeManager(nodes).
+		WithSessionStorageMonitor(monitor)
+
+	listed, err := svc.ListSandboxNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ListSandboxNodes error = %v", err)
+	}
+	if listed.UsageAvailable || len(listed.Nodes) != 1 {
+		t.Fatalf("ListSandboxNodes result = %+v", listed)
 	}
 }

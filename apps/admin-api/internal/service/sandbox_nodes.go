@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -25,7 +26,8 @@ type SandboxNodeManager interface {
 }
 
 type SandboxNodeList struct {
-	Nodes []SandboxNode `json:"nodes"`
+	Nodes          []SandboxNode `json:"nodes"`
+	UsageAvailable bool          `json:"usage_available"`
 }
 
 type SandboxNode struct {
@@ -63,28 +65,34 @@ func (a *Admin) ListSandboxNodes(ctx context.Context) (SandboxNodeList, error) {
 	if a.sandboxNodes == nil {
 		return SandboxNodeList{}, ErrNotConfigured
 	}
-	if a.sessionStorage == nil {
-		return SandboxNodeList{}, ErrNotConfigured
-	}
 	out, err := a.sandboxNodes.ListNodes(ctx)
 	if err != nil {
 		return out, err
 	}
+	if a.sandboxRuntimes != nil {
+		runtimes, runtimeErr := a.sandboxRuntimes.ListSandboxes(ctx)
+		if runtimeErr == nil {
+			for i := range out.Nodes {
+				if out.Nodes[i].Labels["cocola.dev/runtime-mode"] == "compose" {
+					out.Nodes[i].SandboxPods = len(runtimes.Sandboxes)
+				}
+			}
+		}
+	}
+	if a.sessionStorage == nil {
+		return out, nil
+	}
 	usage, err := a.sessionStorage.NodeUsage(ctx)
 	if err != nil {
-		return SandboxNodeList{}, err
+		log.Printf("sandbox node usage unavailable: %v", err)
+		return out, nil
 	}
+	out.UsageAvailable = true
 	for i := range out.Nodes {
 		nodeUsage := usage[out.Nodes[i].Name]
 		out.Nodes[i].SessionCount = nodeUsage.SessionCount
 		out.Nodes[i].SessionRequestedBytes = nodeUsage.RequestedBytes
 		out.Nodes[i].WorkspaceResetCount = nodeUsage.ResetCount
-		if out.Nodes[i].Labels["cocola.dev/runtime-mode"] == "compose" && a.sandboxRuntimes != nil {
-			runtimes, runtimeErr := a.sandboxRuntimes.ListSandboxes(ctx)
-			if runtimeErr == nil {
-				out.Nodes[i].SandboxPods = len(runtimes.Sandboxes)
-			}
-		}
 	}
 	return out, nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,6 +68,52 @@ func TestHostAgentAuthSessionRootsAndDeletion(t *testing.T) {
 	}
 	if _, err := os.Stat(session); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("session root still exists: %v", err)
+	}
+}
+
+func TestHostAgentHealthRequiresReadableStorageRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "storage")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := newProbeServer(root, "local", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+
+	health := httptest.NewRecorder()
+	probe.handler().ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusServiceUnavailable || !strings.Contains(health.Body.String(), "storage root is unavailable") {
+		t.Fatalf("health status = %d %s", health.Code, health.Body.String())
+	}
+}
+
+func TestHostAgentLogsSessionRootScanFailure(t *testing.T) {
+	root := t.TempDir()
+	usersRoot := filepath.Join(root, "users")
+	if err := os.WriteFile(usersRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := newProbeServer(root, "local", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previousOutput := log.Writer()
+	var output bytes.Buffer
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+
+	list := httptest.NewRecorder()
+	probe.handler().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/session-roots", nil))
+	if list.Code != http.StatusInternalServerError {
+		t.Fatalf("session roots status = %d %s", list.Code, list.Body.String())
+	}
+	if !strings.Contains(output.String(), "session storage scan failed: path=\""+usersRoot+"\"") {
+		t.Fatalf("session root error was not logged with its source path: %s", output.String())
 	}
 }
 

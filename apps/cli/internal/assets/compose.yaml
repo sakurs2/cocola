@@ -253,6 +253,7 @@ services:
       - "${COCOLA_DOCKER_SOCKET_SOURCE:-/var/run/docker.sock}:/var/run/docker.sock"
       - "${COCOLA_SANDBOX_ROOT}:/storage"
     cap_drop: ["ALL"]
+    cap_add: ["DAC_OVERRIDE"]
     security_opt:
       - no-new-privileges:true
     healthcheck:
