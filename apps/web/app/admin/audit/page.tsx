@@ -7,7 +7,7 @@ import { type DataGridColumn } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Segment } from "@cocola/ui-compat/segment";
 import { useCallback, useEffect, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import {
   AdminDataGrid,
   AdminErrorDialog,
@@ -39,6 +39,7 @@ const PAGE_SIZE = 50;
 export default function AdminAuditPage() {
   const t = useTranslations("admin.runs");
   const format = useFormatter();
+  const locale = useLocale();
   const [runs, setRuns] = useState<ConversationRun[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -89,7 +90,7 @@ export default function AdminAuditPage() {
       header: t("columns.started"),
       minWidth: 170,
       cell: (run) => (
-        <span className="text-muted text-xs tabular-nums">
+        <span className="text-muted whitespace-nowrap text-xs tabular-nums">
           {format.dateTime(new Date(run.started_at), {
             month: "short",
             day: "2-digit",
@@ -116,9 +117,11 @@ export default function AdminAuditPage() {
       id: "conversation",
       header: t("columns.conversation"),
       isRowHeader: true,
-      minWidth: 280,
+      minWidth: 360,
+      headerClassName: "w-[360px] min-w-[360px]",
+      cellClassName: "w-[360px] min-w-[360px]",
       cell: (run) => (
-        <span className="block min-w-0">
+        <span className="grid min-w-0 gap-0.5">
           <AdminTruncatedValue
             className="text-sm font-semibold"
             copyLabel={t("copy.conversationTitle")}
@@ -140,7 +143,7 @@ export default function AdminAuditPage() {
       header: t("columns.source"),
       minWidth: 140,
       cell: (run) => (
-        <span className="text-muted text-sm">
+        <span className="text-muted whitespace-nowrap text-sm">
           {run.source === "scheduled_task" ? t("sources.scheduled") : t("sources.interactive")}
         </span>
       ),
@@ -162,7 +165,7 @@ export default function AdminAuditPage() {
       header: t("columns.latency"),
       minWidth: 150,
       cell: (run) => (
-        <span className="font-mono text-xs">
+        <span className="whitespace-nowrap font-mono text-xs">
           <span className="block">
             {t("latency.total", { duration: formatDuration(run.duration_ms) })}
           </span>
@@ -299,6 +302,7 @@ export default function AdminAuditPage() {
       />
 
       <AdminDataGrid
+        key={locale}
         aria-label={t("tableAria")}
         columns={columns}
         contentClassName="min-w-[1420px]"
@@ -346,7 +350,7 @@ function RunStatus({ status }: { status: string }) {
           ? "amber"
           : "red";
   return (
-    <AdminStatusBadge tone={tone} dot>
+    <AdminStatusBadge className="whitespace-nowrap" tone={tone} dot>
       {status === "success" || status === "running" || status === "error" || status === "cancelled"
         ? t(status)
         : status === "interrupted"

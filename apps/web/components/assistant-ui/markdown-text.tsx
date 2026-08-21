@@ -12,6 +12,8 @@ import {
   type FC,
   isValidElement,
   type ReactNode,
+  useEffect,
+  useRef,
   useState,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -384,17 +386,65 @@ const renderInlineToken = (token: string, key: string): ReactNode => {
 const safeHref = (href: string) =>
   /^(https?:|mailto:|\/|#)/i.test(href.trim()) ? href.trim() : "";
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // HTTP deployments may expose the Clipboard API but reject writes.
+    }
+  }
+
+  const activeElement =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } finally {
+    textarea.remove();
+    activeElement?.focus();
+  }
+  if (!copied) throw new Error("Clipboard copy failed");
+}
+
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   const t = useTranslations("chat.markdown");
   const [copied, setCopied] = useState(false);
+  const copiedTimeoutRef = useRef<number | null>(null);
   const label = language && language !== "unknown" ? language : "text";
   const shell = normalizeLanguage(language) === "shell";
 
+  useEffect(
+    () => () => {
+      if (copiedTimeoutRef.current != null) window.clearTimeout(copiedTimeoutRef.current);
+    },
+    [],
+  );
+
   const onCopy = async () => {
+    if (copiedTimeoutRef.current != null) {
+      window.clearTimeout(copiedTimeoutRef.current);
+      copiedTimeoutRef.current = null;
+    }
     try {
-      await navigator.clipboard.writeText(code);
+      await copyTextToClipboard(code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
+      copiedTimeoutRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copiedTimeoutRef.current = null;
+      }, 1200);
     } catch {
       setCopied(false);
     }
@@ -421,7 +471,11 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         aria-label={copied ? t("copiedCode") : t("copyCode")}
         title={copied ? t("copied") : t("copyCode")}
       >
-        {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+        {copied ? (
+          <CheckIcon className="size-3 text-emerald-400" />
+        ) : (
+          <CopyIcon className="size-3" />
+        )}
       </button>
     </div>
   );

@@ -121,6 +121,17 @@ test("shell code uses a compact macOS terminal treatment", () => {
   assert.doesNotMatch(markdownSource, /rounded-t-xl[^"\n]*bg-surface-secondary\/50/);
 });
 
+test("code blocks confirm copy success and support HTTP deployments", () => {
+  assert.match(
+    markdownSource,
+    /async function copyTextToClipboard[\s\S]*?navigator\.clipboard\?\.writeText[\s\S]*?document\.execCommand\("copy"\)/,
+  );
+  assert.match(
+    markdownSource,
+    /const copiedTimeoutRef = useRef<number \| null>\(null\)[\s\S]*?await copyTextToClipboard\(code\)[\s\S]*?<CheckIcon className="size-3 text-emerald-400" \/>/,
+  );
+});
+
 test("the empty thread preserves the HeroUI demo welcome composition", () => {
   assert.match(
     threadSource,

@@ -7,7 +7,6 @@ import {
   Bot,
   Box,
   BrainCircuit,
-  CheckCircle2,
   Clock3,
   Database,
   Hammer,
@@ -181,7 +180,7 @@ export default function AdminTracePage() {
 
       <section className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(18rem,0.75fr)]">
         <Card className="p-5 sm:p-6">
-          <Card.Header className="flex items-start justify-between gap-4 p-0">
+          <Card.Header className="flex-row items-start justify-between gap-4 p-0">
             <div>
               <Card.Title>{t("timeline")}</Card.Title>
               <Card.Description>{t("timelineDescription")}</Card.Description>
@@ -192,7 +191,7 @@ export default function AdminTracePage() {
               </span>
             ) : (
               <span className="text-muted inline-flex items-center gap-2 text-xs">
-                <CheckCircle2 className="size-3.5" /> {t("events", { count: orderedSpans.length })}
+                <TimerReset className="size-3.5" /> {t("events", { count: orderedSpans.length })}
               </span>
             )}
           </Card.Header>
@@ -205,7 +204,10 @@ export default function AdminTracePage() {
                   return (
                     <li key={span.span_id} className="relative flex gap-3 pb-1 last:pb-0">
                       {index < orderedSpans.length - 1 ? (
-                        <span className="bg-separator absolute bottom-0 left-[1.25rem] top-10 w-px" />
+                        <span
+                          aria-hidden="true"
+                          className="bg-separator absolute left-[1.625rem] top-[1.9375rem] -bottom-[1.9375rem] w-px"
+                        />
                       ) : null}
                       <Button
                         variant="ghost"

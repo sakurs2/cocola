@@ -18,6 +18,7 @@ const [
   scheduledTasksSource,
   tokenUsageSource,
   usersSource,
+  traceSource,
 ] = await Promise.all([
   read("../components/admin/admin-ui.tsx"),
   read("../components/ui/action-dialog.tsx"),
@@ -32,6 +33,7 @@ const [
   read("../app/admin/scheduled-tasks/page.tsx"),
   read("../app/admin/token-usage/page.tsx"),
   read("../app/admin/users/page.tsx"),
+  read("../app/admin/traces/[traceId]/page.tsx"),
 ]);
 
 test("Admin operational tables expose a viewport-bottom synchronized scrollbar", () => {
@@ -165,6 +167,12 @@ test("Truncated Admin table values share tooltip, navigation, and visible copy a
   assert.match(adminUISource, /onPress\?: \(\) => void/);
   assert.match(adminUISource, /group inline-flex min-w-0 max-w-full items-center align-middle/);
   assert.match(adminUISource, /className="size-6 min-w-6 shrink-0 opacity-70/);
+  assert.match(
+    adminUISource,
+    /const \[tooltipOpen, setTooltipOpen\] = useState\(false\)[\s\S]*?containerRef\.current\?\.firstElementChild[\s\S]*?trigger\.scrollWidth > trigger\.clientWidth \+ 1[\s\S]*?<TooltipPrimitive\.Root open=\{tooltipOpen\} onOpenChange=\{updateTooltipOpen\}>[\s\S]*?<TooltipPrimitive\.Trigger asChild>\{text\}<\/TooltipPrimitive\.Trigger>[\s\S]*?<TooltipPrimitive\.Portal>[\s\S]*?className="z-50 max-w-80/,
+  );
+  assert.match(adminUISource, /<TooltipPrimitive\.Provider delayDuration=\{0\}>/);
+  assert.doesNotMatch(adminUISource, /<span className="min-w-0">\{text\}<\/span>/);
   assert.doesNotMatch(adminUISource, /group flex min-w-0 flex-1 items-center gap-1/);
   assert.match(adminUISource, /opacity-70 transition-opacity/);
   for (const source of [
@@ -185,6 +193,38 @@ test("Truncated Admin table values share tooltip, navigation, and visible copy a
   assert.doesNotMatch(tokenUsageSource, /block min-w-0 truncate text-sm font-semibold/);
   assert.doesNotMatch(scheduledTasksSource, /block truncate font-semibold/);
   assert.match(usersSource, /function CredentialRow[\s\S]*?<AdminTruncatedValue/);
+});
+
+test("Agent Runs keeps conversation metadata on two deterministic rows", () => {
+  assert.match(
+    auditSource,
+    /id: "conversation"[\s\S]*?className="grid min-w-0 gap-0\.5"[\s\S]*?copy\.conversationTitle[\s\S]*?copy\.conversationId/,
+  );
+  assert.doesNotMatch(
+    auditSource,
+    /id: "conversation"[\s\S]*?className="block min-w-0"[\s\S]*?id: "source"/,
+  );
+  assert.match(auditSource, /AdminStatusBadge className="whitespace-nowrap"/);
+  assert.match(auditSource, /className="whitespace-nowrap font-mono text-xs"/);
+  assert.match(
+    auditSource,
+    /id: "conversation"[\s\S]*?minWidth: 360,[\s\S]*?headerClassName: "w-\[360px\] min-w-\[360px\]",[\s\S]*?cellClassName: "w-\[360px\] min-w-\[360px\]",[\s\S]*?id: "source"/,
+  );
+});
+
+test("Agent Runs rebuilds cached table cells when the locale changes", () => {
+  assert.match(auditSource, /const locale = useLocale\(\)/);
+  assert.match(auditSource, /<AdminDataGrid[\s\S]*?key=\{locale\}/);
+});
+
+test("Trace timeline keeps its summary and continuous rail aligned with event icons", () => {
+  assert.match(
+    traceSource,
+    /<Card\.Header className="flex-row items-start justify-between gap-4 p-0">/,
+  );
+  assert.match(traceSource, /<TimerReset className="size-3\.5" \/>/);
+  assert.match(traceSource, /left-\[1\.625rem\] top-\[1\.9375rem\] -bottom-\[1\.9375rem\] w-px/);
+  assert.doesNotMatch(traceSource, /<CheckCircle2 className="size-3\.5" \/>/);
 });
 
 test("Admin confirmation loading icons stay centered in every shared confirmation dialog", () => {

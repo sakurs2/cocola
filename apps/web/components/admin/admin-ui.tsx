@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -12,15 +13,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  AlertDialog,
-  Button,
-  Card,
-  Chip,
-  Dropdown,
-  Tooltip,
-  type ButtonProps,
-} from "@heroui/react";
+import { AlertDialog, Button, Card, Chip, Dropdown, type ButtonProps } from "@heroui/react";
 import { DataGrid, type DataGridProps } from "@cocola/ui-compat/data-grid";
 import { EmptyState } from "@cocola/ui-compat/empty-state";
 import { Sheet } from "@cocola/ui-compat/sheet";
@@ -39,21 +32,23 @@ export function AdminPage({
   width?: "standard" | "wide";
 }) {
   return (
-    <motion.main
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
-      className={cn("min-h-full bg-transparent text-foreground", className)}
-    >
-      <div
-        className={cn(
-          "mx-auto w-full space-y-5 px-4 py-5 sm:px-6 sm:py-6",
-          width === "standard" ? "max-w-6xl" : "max-w-[100rem]",
-        )}
+    <TooltipPrimitive.Provider delayDuration={0}>
+      <motion.main
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
+        className={cn("min-h-full bg-transparent text-foreground", className)}
       >
-        {children}
-      </div>
-    </motion.main>
+        <div
+          className={cn(
+            "mx-auto w-full space-y-5 px-4 py-5 sm:px-6 sm:py-6",
+            width === "standard" ? "max-w-6xl" : "max-w-[100rem]",
+          )}
+        >
+          {children}
+        </div>
+      </motion.main>
+    </TooltipPrimitive.Provider>
   );
 }
 
@@ -449,6 +444,8 @@ export function AdminTruncatedValue({
 }) {
   const t = useTranslations("admin.shared");
   const [copied, setCopied] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const containerRef = useRef<HTMLSpanElement>(null);
 
   const copy = async () => {
     await navigator.clipboard.writeText(value);
@@ -457,7 +454,7 @@ export function AdminTruncatedValue({
   };
 
   const textClassName = cn(
-    "block min-w-0 truncate text-left",
+    "block min-w-0 max-w-full truncate text-left",
     (href || onPress) &&
       "rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus",
     className,
@@ -471,14 +468,36 @@ export function AdminTruncatedValue({
       {value}
     </button>
   ) : (
-    <span className={textClassName}>{value}</span>
+    <span className={textClassName} tabIndex={0}>
+      {value}
+    </span>
   );
+  const updateTooltipOpen = (open: boolean) => {
+    const trigger = containerRef.current?.firstElementChild;
+    setTooltipOpen(
+      Boolean(
+        open && trigger instanceof HTMLElement && trigger.scrollWidth > trigger.clientWidth + 1,
+      ),
+    );
+  };
   return (
-    <span className="group inline-flex min-w-0 max-w-full items-center align-middle">
-      <Tooltip delay={0}>
-        <span className="min-w-0">{text}</span>
-        <Tooltip.Content className="max-w-sm break-all">{value}</Tooltip.Content>
-      </Tooltip>
+    <span
+      ref={containerRef}
+      className="group inline-flex min-w-0 max-w-full items-center align-middle"
+    >
+      <TooltipPrimitive.Root open={tooltipOpen} onOpenChange={updateTooltipOpen}>
+        <TooltipPrimitive.Trigger asChild>{text}</TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Content
+            collisionPadding={12}
+            sideOffset={6}
+            className="z-50 max-w-80 whitespace-normal break-words rounded-md border border-border bg-overlay px-2.5 py-1.5 text-xs leading-5 text-overlay-foreground shadow-lg [overflow-wrap:anywhere]"
+          >
+            {value}
+            <TooltipPrimitive.Arrow className="fill-overlay" />
+          </TooltipPrimitive.Content>
+        </TooltipPrimitive.Portal>
+      </TooltipPrimitive.Root>
       {value !== "—" ? (
         <Button
           isIconOnly
