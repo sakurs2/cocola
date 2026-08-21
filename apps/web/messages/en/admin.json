@@ -964,6 +964,7 @@
       "retry": "Retry",
       "globalPrompt": "Global system prompt",
       "globalPromptDescription": "Saved content is injected server-side and is never copied into trace metadata.",
+      "identityBuiltIn": "Cocola identity is built in. Use this field to append administrator rules that every conversation must follow.",
       "enabled": "Enabled",
       "disabled": "Disabled",
       "placeholder": "Write the global behavior policy for agents…",

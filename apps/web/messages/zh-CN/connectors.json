@@ -66,6 +66,77 @@
     "back": "返回连接器",
     "completing": "正在完成安全交接…"
   },
+  "workspaceFeishu": {
+    "title": "飞书",
+    "description": "普通对话中的飞书能力",
+    "checking": "检查中…",
+    "retry": "重试",
+    "unavailable": "不可用",
+    "connect": "连接飞书",
+    "continueSetup": "继续设置",
+    "manageConnection": "管理连接",
+    "authorizationCompleted": "飞书连接已完成",
+    "authorizationCancelled": "飞书授权已取消",
+    "enabled": "飞书连接已启用",
+    "paused": "飞书连接已暂停",
+    "disconnected": "飞书连接已断开",
+    "status": {
+      "checking": "正在检查连接",
+      "unavailable": "连接检查失败",
+      "notConnected": "未连接",
+      "connecting": "连接中",
+      "connected": "已连接",
+      "paused": "已暂停",
+      "attention": "需要处理"
+    },
+    "setup": {
+      "close": "关闭飞书设置",
+      "title": "连接飞书",
+      "description": "为普通对话配置工作区级飞书应用身份。",
+      "quick": "快速连接",
+      "manual": "使用现有应用",
+      "preparing": "正在准备授权…",
+      "expiresIn": "授权将在 {time} 后过期",
+      "continue": "在飞书中继续",
+      "copyLink": "复制链接",
+      "linkCopied": "授权链接已复制",
+      "copyFailed": "无法复制授权链接",
+      "cancelling": "正在取消…",
+      "cancelAuthorization": "取消授权",
+      "failedCode": "飞书授权失败（{code}）。",
+      "appInUse": "这个飞书应用已连接到另一个 Cocola 连接，请使用其他应用。",
+      "failed": "飞书授权失败。",
+      "tryAgain": "重试",
+      "done": "关闭"
+    },
+    "manual": {
+      "close": "关闭现有飞书应用设置",
+      "title": "使用现有应用",
+      "description": "凭据验证成功后，Cocola 会加密保存 App Secret。",
+      "platform": "平台",
+      "cancel": "取消",
+      "connect": "连接应用",
+      "connected": "现有飞书应用已连接"
+    },
+    "manage": {
+      "close": "关闭飞书连接管理",
+      "title": "管理飞书连接",
+      "description": "此连接只为普通对话提供飞书工具，不接收飞书消息。",
+      "status": "状态",
+      "enabled": "已启用",
+      "paused": "已暂停",
+      "lastConnected": "最近验证：{date}",
+      "enable": "启用",
+      "pause": "暂停",
+      "disconnect": "断开连接",
+      "done": "完成"
+    },
+    "disconnect": {
+      "title": "断开飞书连接？",
+      "description": "Cocola 将删除加密的应用凭据；已有普通对话会在数据库中解除绑定。",
+      "confirm": "断开飞书连接"
+    }
+  },
   "feishu": {
     "title": "飞书机器人",
     "description": "为此智能体提供独立的飞书入口。一个智能体可绑定一个机器人。",

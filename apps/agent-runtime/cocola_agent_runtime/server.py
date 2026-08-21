@@ -125,6 +125,14 @@ PLAN_SYSTEM_PROMPT = (
     "Claude session for execution."
 )
 ADMIN_SYSTEM_PROMPT_HEADER = "Administrator-configured system instructions:"
+COCOLA_IDENTITY_SYSTEM_PROMPT_V1 = (
+    "Cocola product identity:\n"
+    "You are the AI assistant running in Cocola, a self-hosted agent workspace. "
+    "In ordinary conversations, identify yourself as Cocola rather than Claude Code. "
+    "When a selected Cocola Agent defines its own name or role, use that identity and "
+    "describe it as an Agent in Cocola. Claude Code is an underlying runtime; mention "
+    "it only when the user explicitly asks about the runtime or implementation."
+)
 AGENT_INSTRUCTIONS_HEADER = (
     "Selected Agent instructions:\n"
     "These instructions define the selected Agent's role and working style. Follow them when "
@@ -351,6 +359,12 @@ def _merge_system_prompt(base: str | None, extra: str) -> str:
     return extra + "\n\n" + base
 
 
+def _append_system_prompt(base: str | None, extra: str) -> str:
+    if not base:
+        return extra
+    return base + "\n\n" + extra
+
+
 def _append_user_agents_md(base: str | None, content: str) -> str:
     content = content.strip()
     if not content:
@@ -359,12 +373,20 @@ def _append_user_agents_md(base: str | None, content: str) -> str:
     return f"{base}\n\n{user_instructions}" if base else user_instructions
 
 
-def _append_agent_instructions(base: str | None, content: str) -> str:
+def _append_agent_instructions(base: str | None, name: str, content: str) -> str:
+    name = name.strip()
     content = content.strip()
-    if not content:
+    if not name and not content:
         return base or ""
+    identity = (
+        f'The selected Cocola Agent is named "{name}". Use this name and its configured role '
+        "when identifying yourself, and describe it as an Agent running in Cocola."
+        if name
+        else ""
+    )
+    body = "\n\n".join(part for part in (identity, content) if part)
     instructions = (
-        f"{AGENT_INSTRUCTIONS_HEADER}\n\n<agent-instructions>\n{content}\n</agent-instructions>"
+        f"{AGENT_INSTRUCTIONS_HEADER}\n\n<agent-instructions>\n{body}\n</agent-instructions>"
     )
     return f"{base}\n\n{instructions}" if base else instructions
 
@@ -1770,25 +1792,35 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 (skill_broker_credential or None) if interaction_mode != "plan" else None
             ),
             skill_broker_url=skill_broker_url or None,
-            lark_status=lark_status or None,
-            lark_app_id=lark_app_id or None,
-            lark_brand=lark_brand or None,
-            lark_tenant_access_token=lark_tenant_access_token or None,
+            lark_status=(lark_status or None) if interaction_mode != "plan" else None,
+            lark_app_id=(lark_app_id or None) if interaction_mode != "plan" else None,
+            lark_brand=(lark_brand or None) if interaction_mode != "plan" else None,
+            lark_tenant_access_token=(
+                (lark_tenant_access_token or None) if interaction_mode != "plan" else None
+            ),
         )
         admin_prompt = active_prompt.system_prompt.strip()
+        opts = dataclasses.replace(
+            opts,
+            system_prompt=_merge_system_prompt(
+                opts.system_prompt,
+                COCOLA_IDENTITY_SYSTEM_PROMPT_V1,
+            ),
+        )
         if admin_prompt:
             opts = dataclasses.replace(
                 opts,
-                system_prompt=_merge_system_prompt(
+                system_prompt=_append_system_prompt(
                     opts.system_prompt,
                     f"{ADMIN_SYSTEM_PROMPT_HEADER}\n{admin_prompt}",
                 ),
             )
-        if agent_instructions.strip():
+        if agent_name:
             opts = dataclasses.replace(
                 opts,
                 system_prompt=_append_agent_instructions(
                     opts.system_prompt,
+                    agent_name,
                     agent_instructions,
                 ),
             )
@@ -1800,7 +1832,7 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                     active_prompt.user_agents_md,
                 ),
             )
-        if lark_status:
+        if interaction_mode != "plan" and lark_status:
             opts = dataclasses.replace(
                 opts,
                 system_prompt=_merge_system_prompt(

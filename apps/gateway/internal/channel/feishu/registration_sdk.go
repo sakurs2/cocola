@@ -17,11 +17,11 @@ func (SDKRegistrar) Register(
 	input RegistrationInput,
 	onUpdate func(RegistrationUpdate),
 ) (RegistrationResult, error) {
-	preset := true
 	var avatars []string
 	if strings.TrimSpace(input.AvatarURL) != "" {
 		avatars = []string{strings.TrimSpace(input.AvatarURL)}
 	}
+	addons := registrationAddons(input.InboundMessages)
 	result, err := registration.RegisterApp(ctx, &registration.Options{
 		Source: "cocola",
 		AppPreset: &registration.AppPreset{
@@ -29,17 +29,7 @@ func (SDKRegistrar) Register(
 			Desc:   input.AppDesc,
 			Avatar: avatars,
 		},
-		Addons: &registration.AppAddons{
-			Preset: &preset,
-			Scopes: registration.AppAddonsScopes{
-				Tenant: registrationTenantScopes(),
-			},
-			Events: registration.AppAddonsEvents{
-				Items: registration.AppAddonsEventItems{
-					Tenant: []string{"im.message.receive_v1"},
-				},
-			},
-		},
+		Addons: addons,
 		OnQRCode: func(info *registration.QRCodeInfo) {
 			if onUpdate != nil {
 				onUpdate(RegistrationUpdate{
@@ -73,6 +63,24 @@ func (SDKRegistrar) Register(
 		output.TenantBrand = result.UserInfo.TenantBrand
 	}
 	return output, nil
+}
+
+func registrationAddons(inboundMessages bool) *registration.AppAddons {
+	preset := true
+	addons := &registration.AppAddons{
+		Preset: &preset,
+		Scopes: registration.AppAddonsScopes{
+			Tenant: registrationTenantScopes(),
+		},
+	}
+	if inboundMessages {
+		addons.Events = registration.AppAddonsEvents{
+			Items: registration.AppAddonsEventItems{
+				Tenant: []string{"im.message.receive_v1"},
+			},
+		}
+	}
+	return addons
 }
 
 func registrationTenantScopes() []string {

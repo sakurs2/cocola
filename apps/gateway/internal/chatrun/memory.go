@@ -43,6 +43,10 @@ func (m *Memory) Start(ctx context.Context, in StartInput) (StartResult, error) 
 			return StartResult{}, ErrRuntimeMismatch
 		}
 		effective = existing
+		if effective.AgentID == "" && effective.ChatType == "chat" &&
+			effective.ChannelConnectorID == "" && in.Conversation.ChannelConnectorID != "" {
+			effective.ChannelConnectorID = in.Conversation.ChannelConnectorID
+		}
 		if in.Conversation.ProjectID != "" && in.Conversation.ProjectID != existing.ProjectID {
 			return StartResult{}, ErrProjectMismatch
 		}

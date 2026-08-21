@@ -30,6 +30,143 @@ func feishuIdentity(r *http.Request) (feishuconnector.Identity, bool) {
 	}, ok
 }
 
+func (a *API) feishuWorkspaceRequest(
+	w http.ResponseWriter,
+	r *http.Request,
+	requireService bool,
+) (feishuconnector.Identity, bool) {
+	id, ok := feishuIdentity(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing identity")
+		return feishuconnector.Identity{}, false
+	}
+	if requireService && a.feishu == nil {
+		writeErr(w, http.StatusServiceUnavailable, "FEISHU_UNAVAILABLE", "Feishu connector is unavailable")
+		return feishuconnector.Identity{}, false
+	}
+	return id, true
+}
+
+func (a *API) feishuWorkspaceConnection(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.feishuWorkspaceRequest(w, r, false)
+	if !ok {
+		return
+	}
+	if a.feishu == nil {
+		writeJSON(w, http.StatusOK, feishuconnector.ConnectorView{
+			Status: "disabled", Enabled: false,
+		})
+		return
+	}
+	view, err := a.feishu.Connection(r.Context(), id, "")
+	if a.writeFeishuError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *API) feishuWorkspaceRegistrationStart(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.feishuWorkspaceRequest(w, r, true)
+	if !ok || !decodeOptionalEmptyObject(w, r) {
+		return
+	}
+	flow, err := a.feishu.StartWorkspaceRegistration(r.Context(), id)
+	if a.writeFeishuError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, flow)
+}
+
+func (a *API) feishuWorkspaceRegistration(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.feishuWorkspaceRequest(w, r, true)
+	if !ok {
+		return
+	}
+	flowID := strings.TrimSpace(r.PathValue("flow_id"))
+	if _, err := uuid.Parse(flowID); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "registration id must be a UUID")
+		return
+	}
+	flow, err := a.feishu.Registration(r.Context(), id, "", flowID)
+	if a.writeFeishuError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, flow)
+}
+
+func (a *API) feishuWorkspaceRegistrationCancel(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.feishuWorkspaceRequest(w, r, true)
+	if !ok {
+		return
+	}
+	flowID := strings.TrimSpace(r.PathValue("flow_id"))
+	if _, err := uuid.Parse(flowID); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "registration id must be a UUID")
+		return
+	}
+	if err := a.feishu.CancelRegistration(r.Context(), id, "", flowID); a.writeFeishuError(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) feishuWorkspaceManual(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.feishuWorkspaceRequest(w, r, true)
+	if !ok {
+		return
+	}
+	var input feishuManualRequest
+	if !decodeFeishuJSON(w, r, &input) {
+		return
+	}
+	view, err := a.feishu.ConfigureWorkspaceManual(
+		r.Context(), id, input.Domain, input.AppID, input.AppSecret,
+	)
+	if a.writeFeishuError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, view)
+}
+
+func (a *API) feishuWorkspaceEnable(w http.ResponseWriter, r *http.Request) {
+	a.feishuWorkspaceToggle(w, r, true)
+}
+
+func (a *API) feishuWorkspaceDisable(w http.ResponseWriter, r *http.Request) {
+	a.feishuWorkspaceToggle(w, r, false)
+}
+
+func (a *API) feishuWorkspaceToggle(w http.ResponseWriter, r *http.Request, enabled bool) {
+	id, ok := a.feishuWorkspaceRequest(w, r, true)
+	if !ok || !decodeOptionalEmptyObject(w, r) {
+		return
+	}
+	var (
+		view feishuconnector.ConnectorView
+		err  error
+	)
+	if enabled {
+		view, err = a.feishu.EnableWorkspace(r.Context(), id)
+	} else {
+		view, err = a.feishu.Disable(r.Context(), id, "")
+	}
+	if a.writeFeishuError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *API) feishuWorkspaceDisconnect(w http.ResponseWriter, r *http.Request) {
+	id, ok := a.feishuWorkspaceRequest(w, r, true)
+	if !ok || !decodeOptionalEmptyObject(w, r) {
+		return
+	}
+	if err := a.feishu.Disconnect(r.Context(), id, ""); a.writeFeishuError(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *API) feishuAgentRequest(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -237,11 +374,16 @@ func (a *API) writeFeishuError(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
+	var registrationErr *feishuconnector.RegistrationError
 	switch {
+	case errors.As(err, &registrationErr) && registrationErr.Code == "credentials_invalid":
+		writeErr(w, http.StatusBadRequest, "FEISHU_CREDENTIALS_INVALID", "Feishu application credentials were rejected")
 	case errors.Is(err, feishuconnector.ErrInvalid):
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "invalid Feishu connector request")
 	case errors.Is(err, feishuconnector.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "NOT_FOUND", "Feishu connector or registration was not found")
+	case errors.Is(err, feishuconnector.ErrAppConflict):
+		writeErr(w, http.StatusConflict, "FEISHU_APP_IN_USE", "this Feishu application is already connected to another Cocola connector")
 	case errors.Is(err, feishuconnector.ErrConflict):
 		writeErr(w, http.StatusConflict, "CONFLICT", "a Feishu connection or registration is already active")
 	case errors.Is(err, feishuconnector.ErrFlowTerminated):

@@ -3721,6 +3721,10 @@
     box-shadow 200ms ease;
 }
 
+.cocola-user-ui .cocola-web-connector-grid > :nth-child(2) {
+  animation-delay: 35ms;
+}
+
 .cocola-user-ui .cocola-web-catalog-grid > :nth-child(2) {
   animation-delay: 35ms;
 }
@@ -3804,10 +3808,24 @@
     box-shadow: 0 20px 40px -18px color-mix(in oklab, var(--foreground) 30%, transparent);
   }
 
+  .cocola-user-ui .cocola-web-connector-card[data-provider="feishu"]:hover,
+  .cocola-user-ui .cocola-web-connector-card[data-provider="feishu"]:focus-within {
+    box-shadow: 0 20px 40px -18px color-mix(in oklab, #3370ff 38%, transparent);
+  }
+
   .cocola-user-ui .cocola-web-connector-card:hover .cocola-web-connector-icon,
   .cocola-user-ui .cocola-web-connector-card:focus-within .cocola-web-connector-icon {
     transform: scale(1.06) rotate(-3deg);
     box-shadow: 0 10px 20px -8px color-mix(in oklab, var(--foreground) 50%, transparent);
+  }
+
+  .cocola-user-ui
+    .cocola-web-connector-card[data-provider="feishu"]:hover
+    .cocola-web-connector-icon,
+  .cocola-user-ui
+    .cocola-web-connector-card[data-provider="feishu"]:focus-within
+    .cocola-web-connector-icon {
+    box-shadow: 0 10px 20px -8px color-mix(in oklab, #3370ff 46%, transparent);
   }
 }
 

@@ -185,14 +185,42 @@ func (s *Service) StartRegistration(
 	id Identity,
 	agent AgentRegistration,
 ) (RegistrationFlow, error) {
-	if s.registrar == nil {
-		return RegistrationFlow{}, errors.New("feishu application registration is unavailable")
-	}
 	if strings.TrimSpace(agent.ID) == "" || strings.TrimSpace(agent.Name) == "" {
 		return RegistrationFlow{}, ErrInvalid
 	}
+	return s.startRegistration(ctx, id, agent, true)
+}
+
+func (s *Service) StartWorkspaceRegistration(
+	ctx context.Context,
+	id Identity,
+) (RegistrationFlow, error) {
+	if strings.TrimSpace(id.UserID) == "" {
+		return RegistrationFlow{}, ErrInvalid
+	}
+	return s.startRegistration(ctx, id, AgentRegistration{
+		Name:        "Cocola",
+		Description: "让 Cocola 普通对话使用飞书开放能力",
+	}, false)
+}
+
+func (s *Service) startRegistration(
+	ctx context.Context,
+	id Identity,
+	agent AgentRegistration,
+	inboundMessages bool,
+) (RegistrationFlow, error) {
+	if s.registrar == nil {
+		return RegistrationFlow{}, errors.New("feishu application registration is unavailable")
+	}
 	now := s.now()
 	_ = s.store.InterruptRegistrationFlows(ctx, now.Add(-staleRegistration), now)
+	connectorID := uuid.NewString()
+	if existing, err := s.store.GetConnector(ctx, id, agent.ID); err == nil {
+		connectorID = existing.ID
+	} else if !errors.Is(err, ErrNotFound) {
+		return RegistrationFlow{}, err
+	}
 	flow := RegistrationFlow{
 		ID: uuid.NewString(), TenantID: id.TenantID, UserID: id.UserID,
 		AgentID:  agent.ID,
@@ -203,19 +231,12 @@ func (s *Service) StartRegistration(
 		return RegistrationFlow{}, err
 	}
 
-	connectorID := uuid.NewString()
-	if existing, err := s.store.GetConnector(ctx, id, agent.ID); err == nil {
-		connectorID = existing.ID
-	} else if !errors.Is(err, ErrNotFound) {
-		return RegistrationFlow{}, err
-	}
-
 	runCtx, cancel := context.WithTimeout(s.root, registrationTTL)
 	s.mu.Lock()
 	s.cancels[flow.ID] = cancel
 	s.mu.Unlock()
 	updated := make(chan struct{}, 1)
-	go s.runRegistration(runCtx, flow, id, agent, connectorID, updated)
+	go s.runRegistration(runCtx, flow, id, agent, connectorID, inboundMessages, updated)
 
 	timer := time.NewTimer(registrationWait)
 	defer timer.Stop()
@@ -234,6 +255,7 @@ func (s *Service) runRegistration(
 	id Identity,
 	agent AgentRegistration,
 	connectorID string,
+	inboundMessages bool,
 	updated chan<- struct{},
 ) {
 	defer func() {
@@ -249,9 +271,10 @@ func (s *Service) runRegistration(
 		}
 	}
 	result, err := s.registrar.Register(ctx, RegistrationInput{
-		AppName:   registrationAppName(agent.Name),
-		AppDesc:   registrationAppDescription(agent),
-		AvatarURL: s.avatarURL,
+		AppName:         registrationAppName(agent.Name),
+		AppDesc:         registrationAppDescription(agent),
+		AvatarURL:       s.avatarURL,
+		InboundMessages: inboundMessages,
 	}, func(update RegistrationUpdate) {
 		now := s.now()
 		if update.ExpiresIn > 0 {
@@ -307,14 +330,39 @@ func (s *Service) runRegistration(
 		return
 	}
 	now := s.now()
-	completeErr := s.store.CompleteRegistration(context.Background(), id, flow.ID, Connector{
+	connector := Connector{
 		ID: connectorID, TenantID: id.TenantID, UserID: id.UserID,
 		AgentID:  agent.ID,
 		Provider: ProviderFeishu, Domain: domain, AppID: result.AppID,
 		AppSecretCiphertext: ciphertext, OwnerOpenID: result.OwnerOpenID,
 		DesiredEnabled: true, Status: StatusConnecting,
 		CreatedAt: now, UpdatedAt: now,
-	}, now)
+	}
+	if !inboundMessages {
+		if existing, existingErr := s.store.GetConnector(ctx, id, ""); existingErr == nil {
+			connector.CreatedAt = existing.CreatedAt
+			connector.Version = existing.Version + 1
+		} else if !errors.Is(existingErr, ErrNotFound) {
+			s.finishRegistrationError(flow.ID, existingErr, expiresAt)
+			signalUpdate()
+			return
+		}
+		if _, credentialErr := s.tokens.Resolve(ctx, connector, result.AppSecret); credentialErr != nil {
+			s.finishRegistrationError(
+				flow.ID,
+				&RegistrationError{Code: "credentials_invalid", Err: credentialErr},
+				expiresAt,
+			)
+			signalUpdate()
+			return
+		}
+		connector.Status = StatusReady
+		connector.LastConnectedAt = &now
+	}
+	completeErr := s.store.CompleteRegistration(context.Background(), id, flow.ID, connector, now)
+	if errors.Is(completeErr, ErrAppConflict) {
+		completeErr = &RegistrationError{Code: "app_in_use", Err: completeErr}
+	}
 	if completeErr != nil && !errors.Is(completeErr, ErrFlowTerminated) {
 		s.finishRegistrationError(flow.ID, completeErr, expiresAt)
 	}
@@ -462,6 +510,58 @@ func (s *Service) ConfigureManual(
 	}, nil
 }
 
+func (s *Service) ConfigureWorkspaceManual(
+	ctx context.Context,
+	id Identity,
+	domain string,
+	appID string,
+	appSecret string,
+) (ConnectorView, error) {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	appID = strings.TrimSpace(appID)
+	appSecret = strings.TrimSpace(appSecret)
+	if strings.TrimSpace(id.UserID) == "" ||
+		(domain != DomainFeishu && domain != DomainLark) ||
+		appID == "" || len(appID) > maxAppIDLength ||
+		appSecret == "" || len(appSecret) > maxAppSecretLength {
+		return ConnectorView{}, ErrInvalid
+	}
+	connectorID := uuid.NewString()
+	createdAt := s.now()
+	version := int64(1)
+	if existing, err := s.store.GetConnector(ctx, id, ""); err == nil {
+		connectorID = existing.ID
+		createdAt = existing.CreatedAt
+		version = existing.Version + 1
+	} else if !errors.Is(err, ErrNotFound) {
+		return ConnectorView{}, err
+	}
+	now := s.now()
+	connector := Connector{
+		ID: connectorID, TenantID: id.TenantID, UserID: id.UserID,
+		Provider: ProviderFeishu, Domain: domain, AppID: appID,
+		DesiredEnabled: true, Status: StatusReady, LastConnectedAt: &now,
+		Version: version, CreatedAt: createdAt, UpdatedAt: now,
+	}
+	if _, err := s.tokens.Resolve(ctx, connector, appSecret); err != nil {
+		return ConnectorView{}, &RegistrationError{Code: "credentials_invalid", Err: err}
+	}
+	ciphertext, err := s.box.Encrypt(
+		appSecret,
+		connectorSecretAAD(id.TenantID, id.UserID, connectorID),
+	)
+	if err != nil {
+		return ConnectorView{}, err
+	}
+	connector.AppSecretCiphertext = ciphertext
+	stored, err := s.store.UpsertConnector(ctx, connector)
+	if err != nil {
+		return ConnectorView{}, err
+	}
+	s.notify()
+	return connectorView(stored), nil
+}
+
 func (s *Service) BindOwner(
 	ctx context.Context,
 	connectorID string,
@@ -490,6 +590,29 @@ func (s *Service) Enable(ctx context.Context, id Identity, agentID string) (Conn
 	}
 	s.notify()
 	return connectorView(connector), nil
+}
+
+func (s *Service) EnableWorkspace(ctx context.Context, id Identity) (ConnectorView, error) {
+	connector, err := s.store.GetConnector(ctx, id, "")
+	if err != nil {
+		return ConnectorView{}, err
+	}
+	appSecret, err := s.AppSecret(connector)
+	if err != nil {
+		return ConnectorView{}, err
+	}
+	connector.DesiredEnabled = true
+	connector.Status = StatusReady
+	connector.Version++
+	if _, err := s.tokens.Resolve(ctx, connector, appSecret); err != nil {
+		return ConnectorView{}, &RegistrationError{Code: "credentials_invalid", Err: err}
+	}
+	stored, err := s.store.SetConnectorEnabled(ctx, id, "", true, s.now())
+	if err != nil {
+		return ConnectorView{}, err
+	}
+	s.notify()
+	return connectorView(stored), nil
 }
 
 func (s *Service) Disable(ctx context.Context, id Identity, agentID string) (ConnectorView, error) {

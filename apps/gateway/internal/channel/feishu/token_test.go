@@ -314,6 +314,67 @@ func TestServiceRuntimeCredentialStates(t *testing.T) {
 	}
 }
 
+func TestConfigureWorkspaceManualValidatesBeforeReplacingConnection(t *testing.T) {
+	store := &workspaceConfigStore{
+		connector: Connector{
+			ID: "connector-1", TenantID: "tenant", UserID: "user",
+			Domain: DomainFeishu, AppID: "old-app", Status: StatusReady,
+			DesiredEnabled: true, Version: 4, CreatedAt: time.Now().UTC(),
+		},
+	}
+	service, err := NewService(
+		context.Background(),
+		store,
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	service.WithTokenHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			var payload struct {
+				AppID string `json:"app_id"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				return nil, err
+			}
+			if payload.AppID == "invalid-app" {
+				return jsonResponse(`{"code":10003,"msg":"invalid credentials"}`), nil
+			}
+			return jsonResponse(
+				`{"code":0,"tenant_access_token":"runtime-token","expire":3600}`,
+			), nil
+		}),
+	})
+	identity := Identity{TenantID: "tenant", UserID: "user"}
+
+	if _, err := service.ConfigureWorkspaceManual(
+		context.Background(), identity, DomainFeishu, "invalid-app", "invalid-secret",
+	); err == nil {
+		t.Fatal("invalid credentials unexpectedly replaced the workspace connection")
+	}
+	if store.upserts != 0 || store.connector.AppID != "old-app" {
+		t.Fatalf("invalid credentials changed connector: %+v", store.connector)
+	}
+
+	view, err := service.ConfigureWorkspaceManual(
+		context.Background(), identity, DomainLark, "new-app", "new-secret",
+	)
+	if err != nil {
+		t.Fatalf("ConfigureWorkspaceManual valid: %v", err)
+	}
+	if store.upserts != 1 || store.connector.ID != "connector-1" ||
+		store.connector.AppID != "new-app" || store.connector.Status != StatusReady ||
+		!view.Connected || !view.Enabled {
+		t.Fatalf("workspace connector = %+v, view = %+v", store.connector, view)
+	}
+	secret, err := service.AppSecret(store.connector)
+	if err != nil || secret != "new-secret" {
+		t.Fatalf("stored workspace secret = %q, %v", secret, err)
+	}
+}
+
 func tokenTestConnector(id string) Connector {
 	return Connector{
 		ID: id, TenantID: "tenant", UserID: "user",
@@ -326,6 +387,33 @@ type runtimeCredentialStore struct {
 	Store
 	connector Connector
 	err       error
+}
+
+type workspaceConfigStore struct {
+	Store
+	connector Connector
+	upserts   int
+}
+
+func (store *workspaceConfigStore) GetConnector(
+	_ context.Context,
+	id Identity,
+	agentID string,
+) (Connector, error) {
+	if agentID != "" || store.connector.ID == "" ||
+		store.connector.TenantID != id.TenantID || store.connector.UserID != id.UserID {
+		return Connector{}, ErrNotFound
+	}
+	return store.connector, nil
+}
+
+func (store *workspaceConfigStore) UpsertConnector(
+	_ context.Context,
+	connector Connector,
+) (Connector, error) {
+	store.upserts++
+	store.connector = connector
+	return connector, nil
 }
 
 func (store *runtimeCredentialStore) GetConnectorByID(

@@ -410,6 +410,22 @@ func (a *API) Handler() http.Handler {
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubInstallationComplete))))
 	mux.Handle("DELETE /v1/connectors/github", a.instrument("DELETE /v1/connectors/github",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.githubDisconnect))))
+	mux.Handle("GET /v1/connectors/feishu", a.instrument("GET /v1/connectors/feishu",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceConnection))))
+	mux.Handle("POST /v1/connectors/feishu/registrations", a.instrument("POST /v1/connectors/feishu/registrations",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceRegistrationStart))))
+	mux.Handle("GET /v1/connectors/feishu/registrations/{flow_id}", a.instrument("GET /v1/connectors/feishu/registrations/{flow_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceRegistration))))
+	mux.Handle("DELETE /v1/connectors/feishu/registrations/{flow_id}", a.instrument("DELETE /v1/connectors/feishu/registrations/{flow_id}",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceRegistrationCancel))))
+	mux.Handle("POST /v1/connectors/feishu/manual", a.instrument("POST /v1/connectors/feishu/manual",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceManual))))
+	mux.Handle("POST /v1/connectors/feishu/enable", a.instrument("POST /v1/connectors/feishu/enable",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceEnable))))
+	mux.Handle("POST /v1/connectors/feishu/disable", a.instrument("POST /v1/connectors/feishu/disable",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceDisable))))
+	mux.Handle("DELETE /v1/connectors/feishu", a.instrument("DELETE /v1/connectors/feishu",
+		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuWorkspaceDisconnect))))
 	mux.Handle("GET /v1/agents/{id}/channels/feishu", a.instrument("GET /v1/agents/{id}/channels/feishu",
 		a.verifier.Middleware(writeErr)(http.HandlerFunc(a.feishuConnection))))
 	mux.Handle("POST /v1/agents/{id}/channels/feishu/registrations", a.instrument("POST /v1/agents/{id}/channels/feishu/registrations",

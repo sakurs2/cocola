@@ -160,6 +160,9 @@ export function SystemPromptTool({
                   <p className="mt-1 max-w-xl text-xs leading-5 text-muted">
                     {t("globalPromptDescription")}
                   </p>
+                  <p className="text-accent mt-2 max-w-xl text-xs leading-5">
+                    {t("identityBuiltIn")}
+                  </p>
                 </div>
                 <Switch
                   isDisabled={saving || Boolean(loadError)}

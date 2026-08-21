@@ -199,6 +199,20 @@ func (p *Postgres) Start(ctx context.Context, in StartInput) (StartResult, error
 		if in.Conversation.AgentID != effective.AgentID {
 			return StartResult{}, ErrAgentMismatch
 		}
+		if effective.AgentID == "" && effective.ChatType == "chat" &&
+			effective.ChannelConnectorID == "" && in.Conversation.ChannelConnectorID != "" {
+			tag, updateErr := tx.Exec(ctx, `UPDATE conversations
+				SET channel_connector_id=$2::uuid, updated_at=$3
+				WHERE id=$1 AND agent_id IS NULL AND channel_connector_id IS NULL`,
+				effective.ID, in.Conversation.ChannelConnectorID, in.Conversation.UpdatedAt)
+			if updateErr != nil {
+				return StartResult{}, updateErr
+			}
+			if tag.RowsAffected() == 1 {
+				effective.ChannelConnectorID = in.Conversation.ChannelConnectorID
+				effective.UpdatedAt = in.Conversation.UpdatedAt
+			}
+		}
 		if in.Run.ClientRequestID != "" {
 			run, requestErr := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+` FROM conversation_runs
 				WHERE user_id=$1 AND conversation_id=$2 AND client_request_id=$3`,

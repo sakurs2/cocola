@@ -485,7 +485,7 @@ async def test_query_materializes_enabled_skills_without_prompt_injection():
         skills=cat,
         executor=StaticSandboxExecutor(),
     ).Query(FakeRequest(sandbox_id="box-1"), FakeContext())
-    assert prov.seen_options.system_prompt is None
+    assert "You are the AI assistant running in Cocola" in prov.seen_options.system_prompt
     assert prov.seen_options.lark_tenant_access_token is None
     assert prov.seen_options.structured_result_policy == "optional"
     assert prov.seen_options.environment_skills == [
@@ -535,7 +535,7 @@ async def test_query_forwards_lark_credential_without_skill_name_gate():
     assert binder.egress == ["open.feishu.cn", "open.larksuite.com"]
 
 
-async def test_plan_mode_forwards_lark_executable_credential():
+async def test_plan_mode_does_not_forward_lark_executable_credential():
     provider = ListProvider([AgentEvent(kind="done", data={})])
     context = FakeContext(
         (
@@ -556,9 +556,11 @@ async def test_plan_mode_forwards_lark_executable_credential():
 
     options = provider.seen_options
     assert options is not None
-    assert options.lark_app_id == "cli_app_id"
-    assert options.lark_brand == "feishu"
-    assert options.lark_tenant_access_token == "tenant-token"
+    assert options.lark_status is None
+    assert options.lark_app_id is None
+    assert options.lark_brand is None
+    assert options.lark_tenant_access_token is None
+    assert "Cocola-managed Feishu capability policy" not in options.system_prompt
 
 
 async def test_scheduled_task_does_not_enable_interactive_questions():
@@ -570,7 +572,7 @@ async def test_scheduled_task_does_not_enable_interactive_questions():
     assert provider.seen_options is not None
     assert provider.seen_options.user_input_enabled is False
     assert provider.seen_options.structured_result_policy == "optional"
-    assert provider.seen_options.system_prompt is None
+    assert "You are the AI assistant running in Cocola" in provider.seen_options.system_prompt
 
 
 async def test_query_reports_image_baked_skill_when_market_is_empty():
@@ -639,7 +641,7 @@ async def test_query_validates_and_forwards_selected_skill():
     assert prov.seen_options.selected_skill_id == "pdf"
     assert prov.seen_options.selected_skill_result_contract == contract
     assert prov.seen_options.structured_result_policy == "required"
-    assert prov.seen_options.system_prompt is None
+    assert "You are the AI assistant running in Cocola" in prov.seen_options.system_prompt
 
 
 async def test_query_keeps_personal_catalog_id_out_of_runtime():
@@ -1695,9 +1697,10 @@ async def test_query_injects_user_agents_md_below_admin_prompt():
     assert provider.seen_options is not None
     assert provider.seen_options.system_prompt is not None
     system_prompt = provider.seen_options.system_prompt
+    identity_index = system_prompt.index("Cocola product identity:")
     admin_index = system_prompt.index("Administrator-configured system instructions:")
     user_index = system_prompt.index("User-authored persistent instructions (AGENTS.md):")
-    assert admin_index < user_index
+    assert identity_index < admin_index < user_index
     assert "Always protect credentials." in system_prompt
     assert "# Preferences\n- Answer in Chinese." in system_prompt
     assert "ignore only the conflicting part" in system_prompt
@@ -1728,11 +1731,33 @@ async def test_query_injects_agent_between_admin_and_user_instructions():
 
     assert provider.seen_options is not None
     system_prompt = provider.seen_options.system_prompt
+    identity_index = system_prompt.index("Cocola product identity:")
     admin_index = system_prompt.index("Administrator-configured system instructions:")
     agent_index = system_prompt.index("Selected Agent instructions:")
     user_index = system_prompt.index("User-authored persistent instructions (AGENTS.md):")
-    assert admin_index < agent_index < user_index
-    assert "<agent-instructions>\nCite primary sources.\n</agent-instructions>" in system_prompt
+    assert identity_index < admin_index < agent_index < user_index
+    assert 'The selected Cocola Agent is named "Research".' in system_prompt
+    assert "<agent-instructions>" in system_prompt
+    assert "Cite primary sources.\n</agent-instructions>" in system_prompt
+
+
+async def test_query_injects_selected_agent_identity_without_custom_instructions():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(provider).Query(
+        FakeRequest(
+            agent_context=SimpleNamespace(
+                id="agent-1",
+                version=1,
+                name="Research",
+                instructions="",
+            ),
+        ),
+        FakeContext(),
+    )
+
+    assert provider.seen_options is not None
+    assert 'The selected Cocola Agent is named "Research".' in provider.seen_options.system_prompt
 
 
 async def test_query_rejects_oversized_agent_instructions_without_running_provider():

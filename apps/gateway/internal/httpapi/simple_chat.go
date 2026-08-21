@@ -724,6 +724,10 @@ func (a *API) resolveChatAgent(
 		}
 		if existing.AgentID == "" {
 			req.AgentSnapshot = nil
+			req.ChannelConnectorID = existing.ChannelConnectorID
+			if req.ChannelConnectorID == "" && existing.ChatType == "chat" {
+				a.applyWorkspaceFeishuConnector(ctx, identity, req)
+			}
 			return nil
 		}
 		if existing.AgentSnapshot == nil ||
@@ -757,6 +761,9 @@ func (a *API) resolveChatAgent(
 	}
 	if req.AgentID == "" {
 		req.AgentSnapshot = nil
+		if chatTypeForConversation(*req) == "chat" {
+			a.applyWorkspaceFeishuConnector(ctx, identity, req)
+		}
 		return nil
 	}
 	if a.agents == nil {
@@ -781,6 +788,24 @@ func (a *API) resolveChatAgent(
 		req.ChannelConnectorID = connectorID
 	}
 	return nil
+}
+
+func (a *API) applyWorkspaceFeishuConnector(
+	ctx context.Context,
+	identity auth.Identity,
+	req *chatRequest,
+) {
+	if a.feishu == nil || req.ChannelConnectorID != "" {
+		return
+	}
+	connectorID, err := a.feishu.ConnectorID(ctx, feishuconnector.Identity{
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}, "")
+	if err != nil {
+		a.log.Warn("workspace Feishu connector lookup failed: " + strings.ReplaceAll(err.Error(), "\n", " "))
+		return
+	}
+	req.ChannelConnectorID = connectorID
 }
 
 func (a *API) writeConversationAgentError(w http.ResponseWriter, err error) bool {

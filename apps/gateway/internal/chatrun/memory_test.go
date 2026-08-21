@@ -52,6 +52,35 @@ func TestMemoryStartIsIdempotentAndSingleFlight(t *testing.T) {
 	}
 }
 
+func TestMemoryStartLazilyBindsWorkspaceConnectorToOrdinaryConversation(t *testing.T) {
+	ctx := context.Background()
+	conversations := convo.NewMemory()
+	store := NewMemory(conversations)
+	first := testStartInput("run-1", "request-1", "user-1", "conversation-1")
+	if _, err := store.Start(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Finalize(ctx, FinalizeInput{
+		RunID: "run-1", UserID: "user-1", Status: StatusSuccess,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	next := testStartInput("run-2", "request-2", "user-1", "conversation-1")
+	next.Conversation.ChannelConnectorID = "workspace-connector"
+	result, err := store.Start(ctx, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Conversation.ChannelConnectorID != "workspace-connector" {
+		t.Fatalf("lazy connector binding = %+v", result.Conversation)
+	}
+	stored, err := conversations.GetConversation(ctx, "conversation-1", "user-1")
+	if err != nil || stored.ChannelConnectorID != "workspace-connector" {
+		t.Fatalf("stored lazy connector binding = %+v, %v", stored, err)
+	}
+}
+
 func TestMemoryFinalizePreservesAuthoritativeLLMCallCount(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory(convo.NewMemory())

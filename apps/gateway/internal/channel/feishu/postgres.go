@@ -51,7 +51,7 @@ func lockActiveAgent(
 	return nil
 }
 
-const connectorColumns = `id::text, tenant_id, user_id, agent_id::text, provider, domain, app_id,
+const connectorColumns = `id::text, tenant_id, user_id, COALESCE(agent_id::text,''), provider, domain, app_id,
 	app_secret_ciphertext, owner_open_id, bot_open_id, bot_name,
 	desired_enabled, status, bind_code_hash, bind_expires_at,
 	last_connected_at, last_error_code, lease_owner, lease_expires_at, version,
@@ -81,7 +81,9 @@ func (p *Postgres) GetConnector(
 ) (Connector, error) {
 	return scanConnector(p.pool.QueryRow(ctx, `SELECT `+connectorColumns+`
 		FROM channel_connectors
-		WHERE tenant_id=$1 AND user_id=$2 AND agent_id=$3::uuid AND provider='feishu'`,
+		WHERE tenant_id=$1 AND user_id=$2
+			AND agent_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+			AND provider='feishu'`,
 		id.TenantID, id.UserID, agentID))
 }
 
@@ -96,22 +98,28 @@ func (p *Postgres) UpsertConnector(ctx context.Context, value Connector) (Connec
 		return Connector{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := lockActiveAgent(ctx, tx, Identity{
-		TenantID: value.TenantID,
-		UserID:   value.UserID,
-	}, value.AgentID); err != nil {
-		return Connector{}, err
+	if value.AgentID != "" {
+		if err := lockActiveAgent(ctx, tx, Identity{
+			TenantID: value.TenantID,
+			UserID:   value.UserID,
+		}, value.AgentID); err != nil {
+			return Connector{}, err
+		}
 	}
-	const query = `INSERT INTO channel_connectors (
+	conflict := `ON CONFLICT (agent_id) WHERE agent_id IS NOT NULL DO UPDATE SET`
+	if value.AgentID == "" {
+		conflict = `ON CONFLICT (tenant_id, user_id, provider) WHERE agent_id IS NULL DO UPDATE SET`
+	}
+	query := `INSERT INTO channel_connectors (
 		id, tenant_id, user_id, agent_id, provider, domain, app_id, app_secret_ciphertext,
 		owner_open_id, bot_open_id, bot_name,
 		desired_enabled, status, bind_code_hash, bind_expires_at,
 		last_connected_at, last_error_code, lease_owner, lease_expires_at,
 		version, created_at, updated_at
 	) VALUES (
-		$1::uuid,$2,$3,$4::uuid,'feishu',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'',NULL,1,$17,$18
+		$1::uuid,$2,$3,NULLIF($4,'')::uuid,'feishu',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'',NULL,1,$17,$18
 	)
-	ON CONFLICT (agent_id) DO UPDATE SET
+	` + conflict + `
 		domain=EXCLUDED.domain,
 		app_id=EXCLUDED.app_id,
 		app_secret_ciphertext=EXCLUDED.app_secret_ciphertext,
@@ -137,6 +145,9 @@ func (p *Postgres) UpsertConnector(ctx context.Context, value Connector) (Connec
 		value.BindExpiresAt, value.LastConnectedAt, value.LastErrorCode,
 		value.CreatedAt, value.UpdatedAt,
 	))
+	if postgresConstraint(err, "channel_connectors_app_unique") {
+		return Connector{}, ErrAppConflict
+	}
 	if postgresCode(err, "23505") {
 		return Connector{}, ErrConflict
 	}
@@ -151,7 +162,9 @@ func (p *Postgres) UpsertConnector(ctx context.Context, value Connector) (Connec
 
 func (p *Postgres) DeleteConnector(ctx context.Context, id Identity, agentID string) error {
 	tag, err := p.pool.Exec(ctx, `DELETE FROM channel_connectors
-		WHERE tenant_id=$1 AND user_id=$2 AND agent_id=$3::uuid AND provider='feishu'`,
+		WHERE tenant_id=$1 AND user_id=$2
+			AND agent_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+			AND provider='feishu'`,
 		id.TenantID, id.UserID, agentID)
 	if err != nil {
 		return err
@@ -173,12 +186,15 @@ func (p *Postgres) SetConnectorEnabled(
 		desired_enabled=$4,
 		status=CASE
 			WHEN $4=FALSE THEN 'disabled'
+			WHEN agent_id IS NULL THEN 'ready'
 			WHEN owner_open_id='' THEN 'awaiting_bind'
 			ELSE 'connecting'
 		END,
 		last_error_code='',
 		lease_owner='', lease_expires_at=NULL, version=version+1, updated_at=$5
-		WHERE tenant_id=$1 AND user_id=$2 AND agent_id=$3::uuid AND provider='feishu'
+		WHERE tenant_id=$1 AND user_id=$2
+			AND agent_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+			AND provider='feishu'
 		RETURNING `+connectorColumns, id.TenantID, id.UserID, agentID, enabled, now))
 }
 
@@ -240,6 +256,7 @@ func (p *Postgres) ClaimConnectors(
 	rows, err := p.pool.Query(ctx, `WITH candidates AS (
 		SELECT id AS candidate_id FROM channel_connectors
 		WHERE desired_enabled=TRUE
+			AND agent_id IS NOT NULL
 			AND status <> 'error'
 			AND (lease_expires_at IS NULL OR lease_expires_at < $2)
 		ORDER BY updated_at, id
@@ -270,7 +287,7 @@ func (p *Postgres) ClaimConnectors(
 
 func (p *Postgres) OwnedConnectors(ctx context.Context, owner string) ([]Connector, error) {
 	rows, err := p.pool.Query(ctx, `SELECT `+connectorColumns+`
-		FROM channel_connectors WHERE lease_owner=$1`, owner)
+		FROM channel_connectors WHERE lease_owner=$1 AND agent_id IS NOT NULL`, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -324,16 +341,18 @@ func (p *Postgres) CreateRegistrationFlow(ctx context.Context, flow Registration
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := lockActiveAgent(ctx, tx, Identity{
-		TenantID: flow.TenantID,
-		UserID:   flow.UserID,
-	}, flow.AgentID); err != nil {
-		return err
+	if flow.AgentID != "" {
+		if err := lockActiveAgent(ctx, tx, Identity{
+			TenantID: flow.TenantID,
+			UserID:   flow.UserID,
+		}, flow.AgentID); err != nil {
+			return err
+		}
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO channel_registration_flows (
 		id, tenant_id, user_id, agent_id, provider, status, verification_url,
 		expires_at, error_code, created_at, updated_at
-	) VALUES ($1::uuid,$2,$3,$4::uuid,'feishu',$5,$6,$7,$8,$9,$10)`,
+	) VALUES ($1::uuid,$2,$3,NULLIF($4,'')::uuid,'feishu',$5,$6,$7,$8,$9,$10)`,
 		flow.ID, flow.TenantID, flow.UserID, flow.AgentID, flow.Status, flow.VerificationURL,
 		flow.ExpiresAt, flow.ErrorCode, flow.CreatedAt, flow.UpdatedAt)
 	if postgresCode(err, "23505") {
@@ -345,7 +364,7 @@ func (p *Postgres) CreateRegistrationFlow(ctx context.Context, flow Registration
 	return tx.Commit(ctx)
 }
 
-const flowColumns = `id::text, tenant_id, user_id, agent_id::text, provider, status,
+const flowColumns = `id::text, tenant_id, user_id, COALESCE(agent_id::text,''), provider, status,
 	verification_url, expires_at, error_code, created_at, updated_at`
 
 func scanFlow(row pgx.Row) (RegistrationFlow, error) {
@@ -370,7 +389,8 @@ func (p *Postgres) GetRegistrationFlow(
 	return scanFlow(p.pool.QueryRow(ctx, `SELECT `+flowColumns+`
 		FROM channel_registration_flows
 		WHERE id=$1::uuid AND tenant_id=$2 AND user_id=$3
-			AND agent_id=$4::uuid AND provider='feishu'`,
+			AND agent_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+			AND provider='feishu'`,
 		flowID, id.TenantID, id.UserID, agentID))
 }
 
@@ -381,7 +401,9 @@ func (p *Postgres) GetActiveRegistrationFlow(
 ) (RegistrationFlow, error) {
 	return scanFlow(p.pool.QueryRow(ctx, `SELECT `+flowColumns+`
 		FROM channel_registration_flows
-		WHERE tenant_id=$1 AND user_id=$2 AND agent_id=$3::uuid AND provider='feishu'
+		WHERE tenant_id=$1 AND user_id=$2
+			AND agent_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+			AND provider='feishu'
 			AND status IN ('starting','awaiting_user','authorizing')
 		ORDER BY created_at DESC
 		LIMIT 1`, id.TenantID, id.UserID, agentID))
@@ -424,7 +446,7 @@ func (p *Postgres) CancelRegistrationFlow(
 	tag, err := p.pool.Exec(ctx, `UPDATE channel_registration_flows SET
 		status='cancelled', updated_at=$5
 		WHERE id=$1::uuid AND tenant_id=$2 AND user_id=$3
-			AND agent_id=$4::uuid
+			AND agent_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
 			AND status IN ('starting','awaiting_user','authorizing')`,
 		flowID, id.TenantID, id.UserID, agentID, now)
 	if err != nil {
@@ -449,7 +471,7 @@ func (p *Postgres) CompleteRegistration(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var status, agentID string
-	err = tx.QueryRow(ctx, `SELECT status, agent_id::text FROM channel_registration_flows
+	err = tx.QueryRow(ctx, `SELECT status, COALESCE(agent_id::text,'') FROM channel_registration_flows
 		WHERE id=$1::uuid AND tenant_id=$2 AND user_id=$3
 		FOR UPDATE`, flowID, id.TenantID, id.UserID).Scan(&status, &agentID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -467,14 +489,20 @@ func (p *Postgres) CompleteRegistration(
 	if connector.AgentID != agentID {
 		return ErrInvalid
 	}
-	if err := lockActiveAgent(ctx, tx, id, agentID); err != nil {
-		return err
+	if agentID != "" {
+		if err := lockActiveAgent(ctx, tx, id, agentID); err != nil {
+			return err
+		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO channel_connectors (
+	conflict := `ON CONFLICT (agent_id) WHERE agent_id IS NOT NULL DO UPDATE SET`
+	if agentID == "" {
+		conflict = `ON CONFLICT (tenant_id, user_id, provider) WHERE agent_id IS NULL DO UPDATE SET`
+	}
+	query := `INSERT INTO channel_connectors (
 		id, tenant_id, user_id, agent_id, provider, domain, app_id, app_secret_ciphertext,
-		owner_open_id, desired_enabled, status, created_at, updated_at
-	) VALUES ($1::uuid,$2,$3,$4::uuid,'feishu',$5,$6,$7,$8,TRUE,'connecting',$9,$9)
-	ON CONFLICT (agent_id) DO UPDATE SET
+		owner_open_id, desired_enabled, status, last_connected_at, created_at, updated_at
+	) VALUES ($1::uuid,$2,$3,NULLIF($4,'')::uuid,'feishu',$5,$6,$7,$8,TRUE,$9,$10,$11,$12)
+	` + conflict + `
 		domain=EXCLUDED.domain,
 		app_id=EXCLUDED.app_id,
 		app_secret_ciphertext=EXCLUDED.app_secret_ciphertext,
@@ -482,16 +510,22 @@ func (p *Postgres) CompleteRegistration(
 		bot_open_id='',
 		bot_name='',
 		desired_enabled=TRUE,
-		status='connecting',
+		status=EXCLUDED.status,
 		bind_code_hash='',
 		bind_expires_at=NULL,
 		last_error_code='',
+		last_connected_at=EXCLUDED.last_connected_at,
 		lease_owner='',
 		lease_expires_at=NULL,
 		version=channel_connectors.version+1,
-		updated_at=EXCLUDED.updated_at`,
+		updated_at=EXCLUDED.updated_at`
+	_, err = tx.Exec(ctx, query,
 		connector.ID, id.TenantID, id.UserID, connector.AgentID, connector.Domain,
-		connector.AppID, connector.AppSecretCiphertext, connector.OwnerOpenID, now)
+		connector.AppID, connector.AppSecretCiphertext, connector.OwnerOpenID,
+		connector.Status, connector.LastConnectedAt, connector.CreatedAt, now)
+	if postgresConstraint(err, "channel_connectors_app_unique") {
+		return ErrAppConflict
+	}
 	if postgresCode(err, "23505") {
 		return ErrConflict
 	}
@@ -823,4 +857,9 @@ func (p *Postgres) CleanupInbox(ctx context.Context, before time.Time) error {
 func postgresCode(err error, code string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == code
+}
+
+func postgresConstraint(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.ConstraintName == constraint
 }

@@ -66,7 +66,7 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 			id UUID PRIMARY KEY,
 			tenant_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
-			agent_id UUID NOT NULL,
+			agent_id UUID,
 			provider TEXT NOT NULL,
 			domain TEXT NOT NULL,
 			app_id TEXT NOT NULL,
@@ -85,14 +85,17 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 			version BIGINT NOT NULL DEFAULT 1,
 			created_at TIMESTAMPTZ NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL,
-			UNIQUE (agent_id),
-			UNIQUE (provider, domain, app_id)
+			CONSTRAINT channel_connectors_app_unique UNIQUE (provider, domain, app_id)
 		)`,
+		`CREATE UNIQUE INDEX channel_connectors_agent_unique
+			ON channel_connectors (agent_id) WHERE agent_id IS NOT NULL`,
+		`CREATE UNIQUE INDEX channel_connectors_workspace_unique
+			ON channel_connectors (tenant_id, user_id, provider) WHERE agent_id IS NULL`,
 		`CREATE TABLE channel_registration_flows (
 			id UUID PRIMARY KEY,
 			tenant_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
-			agent_id UUID NOT NULL,
+			agent_id UUID,
 			provider TEXT NOT NULL,
 			status TEXT NOT NULL,
 			verification_url TEXT NOT NULL DEFAULT '',
@@ -171,6 +174,42 @@ func TestPostgresConnectorClaimAndInboxFIFO(t *testing.T) {
 	}
 	if storedConnector.AgentID != connector.AgentID {
 		t.Fatalf("stored Agent = %q, want %q", storedConnector.AgentID, connector.AgentID)
+	}
+	workspaceConnector, err := store.UpsertConnector(ctx, Connector{
+		ID: uuid.NewString(), TenantID: tenantID, UserID: userID,
+		Domain: DomainFeishu, AppID: uuid.NewString(),
+		AppSecretCiphertext: "workspace-test-only",
+		DesiredEnabled:      true,
+		Status:              StatusReady, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("UpsertConnector(workspace): %v", err)
+	}
+	defer func() {
+		if err := store.DeleteConnector(ctx, Identity{
+			TenantID: workspaceConnector.TenantID,
+			UserID:   workspaceConnector.UserID,
+		}, ""); err != nil && !errors.Is(err, ErrNotFound) {
+			t.Errorf("DeleteConnector(workspace): %v", err)
+		}
+	}()
+	workspaceUpdated, err := store.UpsertConnector(ctx, Connector{
+		ID: uuid.NewString(), TenantID: tenantID, UserID: userID,
+		Domain: DomainLark, AppID: uuid.NewString(),
+		AppSecretCiphertext: "workspace-updated-test-only",
+		DesiredEnabled:      true,
+		Status:              StatusReady, CreatedAt: now, UpdatedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("UpsertConnector(workspace update): %v", err)
+	}
+	if workspaceUpdated.ID != workspaceConnector.ID || workspaceUpdated.AgentID != "" {
+		t.Fatalf("workspace upsert = %+v, want stable id %q", workspaceUpdated, workspaceConnector.ID)
+	}
+	if _, err := store.GetConnector(ctx, Identity{
+		TenantID: tenantID, UserID: "other-user",
+	}, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-user workspace connector error = %v, want not found", err)
 	}
 	leaseOwner := "gateway-1"
 	claimed, err := store.ClaimConnectors(

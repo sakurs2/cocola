@@ -902,6 +902,7 @@
       "retry": "重试",
       "globalPrompt": "全局系统提示词",
       "globalPromptDescription": "保存的内容会在服务端注入，且不会复制到追踪元数据。",
+      "identityBuiltIn": "Cocola 身份已内置；此处用于追加所有对话必须遵守的管理员规则。",
       "enabled": "已启用",
       "disabled": "已禁用",
       "placeholder": "填写智能体的全局行为规则…",

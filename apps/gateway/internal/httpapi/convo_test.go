@@ -13,6 +13,7 @@ import (
 	"github.com/cocola-project/cocola/apps/gateway/internal/agent"
 	"github.com/cocola-project/cocola/apps/gateway/internal/agentprofile"
 	"github.com/cocola-project/cocola/apps/gateway/internal/auth"
+	feishuconnector "github.com/cocola-project/cocola/apps/gateway/internal/channel/feishu"
 	"github.com/cocola-project/cocola/apps/gateway/internal/chatrun"
 	"github.com/cocola-project/cocola/apps/gateway/internal/convo"
 	"github.com/cocola-project/cocola/packages/go-common/logger"
@@ -186,6 +187,99 @@ func TestExistingConversationKeepsAgentSkillSnapshotAfterAgentUpdate(t *testing.
 			request.AgentKnowledgeRevision,
 			request.AgentKnowledgeSources,
 		)
+	}
+}
+
+type workspaceConnectorLookupStore struct {
+	feishuconnector.Store
+	connector feishuconnector.Connector
+}
+
+func (store workspaceConnectorLookupStore) GetConnector(
+	_ context.Context,
+	id feishuconnector.Identity,
+	agentID string,
+) (feishuconnector.Connector, error) {
+	if agentID != "" || id.TenantID != store.connector.TenantID ||
+		id.UserID != store.connector.UserID {
+		return feishuconnector.Connector{}, feishuconnector.ErrNotFound
+	}
+	return store.connector, nil
+}
+
+func (workspaceConnectorLookupStore) GetActiveRegistrationFlow(
+	context.Context,
+	feishuconnector.Identity,
+	string,
+) (feishuconnector.RegistrationFlow, error) {
+	return feishuconnector.RegistrationFlow{}, feishuconnector.ErrNotFound
+}
+
+func TestOrdinaryConversationUsesWorkspaceFeishuConnector(t *testing.T) {
+	identity := auth.DevIdentity
+	connector := feishuconnector.Connector{
+		ID:       "11111111-1111-1111-1111-111111111111",
+		TenantID: identity.TenantID, UserID: identity.UserID,
+	}
+	service, err := feishuconnector.NewService(
+		context.Background(),
+		workspaceConnectorLookupStore{connector: connector},
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &API{feishu: service, log: logger.Must()}
+	request := &chatRequest{SessionID: "new-ordinary-chat"}
+
+	if err := api.resolveChatAgent(context.Background(), identity, request); err != nil {
+		t.Fatal(err)
+	}
+	if request.ChannelConnectorID != connector.ID {
+		t.Fatalf("ordinary chat connector = %q, want %q", request.ChannelConnectorID, connector.ID)
+	}
+}
+
+func TestWorkspaceFeishuConnectionResponseOmitsAgentAndSecret(t *testing.T) {
+	identity := auth.DevIdentity
+	connector := feishuconnector.Connector{
+		ID:       "11111111-1111-1111-1111-111111111111",
+		TenantID: identity.TenantID, UserID: identity.UserID,
+		Domain: feishuconnector.DomainFeishu, AppID: "cli_workspace",
+		AppSecretCiphertext: "encrypted-secret", DesiredEnabled: true,
+		Status: feishuconnector.StatusReady,
+	}
+	service, err := feishuconnector.NewService(
+		context.Background(),
+		workspaceConnectorLookupStore{connector: connector},
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := New(
+		&fakeStreamer{}, auth.NewVerifier(auth.Config{}), logger.Must(),
+	).WithFeishu(service).Handler()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/v1/connectors/feishu", nil),
+	)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("workspace Feishu GET = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var payload map[string]any
+	mustJSON(t, recorder.Body.Bytes(), &payload)
+	if payload["status"] != feishuconnector.StatusReady || payload["connected"] != true {
+		t.Fatalf("workspace Feishu response = %#v", payload)
+	}
+	if _, exists := payload["agent_id"]; exists {
+		t.Fatalf("workspace Feishu response leaked agent_id: %#v", payload)
+	}
+	if _, exists := payload["app_secret"]; exists {
+		t.Fatalf("workspace Feishu response leaked App Secret: %#v", payload)
 	}
 }
 

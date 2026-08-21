@@ -66,6 +66,77 @@
     "back": "Back to Connectors",
     "completing": "Completing the secure handoff…"
   },
+  "workspaceFeishu": {
+    "title": "Feishu",
+    "description": "Lark tools for everyday chats",
+    "checking": "Checking…",
+    "retry": "Retry",
+    "unavailable": "Unavailable",
+    "connect": "Connect Feishu",
+    "continueSetup": "Continue setup",
+    "manageConnection": "Manage connection",
+    "authorizationCompleted": "Feishu connection completed",
+    "authorizationCancelled": "Feishu authorization cancelled",
+    "enabled": "Feishu connection enabled",
+    "paused": "Feishu connection paused",
+    "disconnected": "Feishu connection disconnected",
+    "status": {
+      "checking": "Checking connection",
+      "unavailable": "Connection check failed",
+      "notConnected": "Not connected",
+      "connecting": "Connecting",
+      "connected": "Connected",
+      "paused": "Paused",
+      "attention": "Needs attention"
+    },
+    "setup": {
+      "close": "Close Feishu setup",
+      "title": "Connect Feishu",
+      "description": "Configure a workspace-level Feishu App identity for everyday chats.",
+      "quick": "Quick connect",
+      "manual": "Use existing App",
+      "preparing": "Preparing authorization…",
+      "expiresIn": "Authorization expires in {time}",
+      "continue": "Continue in Feishu",
+      "copyLink": "Copy link",
+      "linkCopied": "Authorization link copied",
+      "copyFailed": "Could not copy the authorization link",
+      "cancelling": "Cancelling…",
+      "cancelAuthorization": "Cancel authorization",
+      "failedCode": "Feishu authorization failed ({code}).",
+      "appInUse": "This Feishu App is already used by another Cocola connection. Use a different App.",
+      "failed": "Feishu authorization failed.",
+      "tryAgain": "Try again",
+      "done": "Close"
+    },
+    "manual": {
+      "close": "Close existing Feishu App setup",
+      "title": "Use Existing App",
+      "description": "Cocola validates the credentials before storing the App Secret encrypted.",
+      "platform": "Platform",
+      "cancel": "Cancel",
+      "connect": "Connect App",
+      "connected": "Existing Feishu App connected"
+    },
+    "manage": {
+      "close": "Close Feishu connection management",
+      "title": "Manage Feishu Connection",
+      "description": "This connection supplies Feishu tools to everyday chats and does not receive Feishu messages.",
+      "status": "Status",
+      "enabled": "Enabled",
+      "paused": "Paused",
+      "lastConnected": "Last verified {date}",
+      "enable": "Enable",
+      "pause": "Pause",
+      "disconnect": "Disconnect",
+      "done": "Done"
+    },
+    "disconnect": {
+      "title": "Disconnect Feishu?",
+      "description": "Cocola will delete the encrypted App credential and clear it from existing everyday chats.",
+      "confirm": "Disconnect Feishu"
+    }
+  },
   "feishu": {
     "title": "Feishu Bot",
     "description": "Give this Agent its own Feishu entry point. One Agent can have one Bot.",

@@ -10,6 +10,7 @@ import (
 var (
 	ErrNotFound           = errors.New("feishu connector: not found")
 	ErrConflict           = errors.New("feishu connector: conflict")
+	ErrAppConflict        = errors.New("feishu connector: application is already connected")
 	ErrInvalid            = errors.New("feishu connector: invalid argument")
 	ErrQueueFull          = errors.New("feishu connector: inbox queue full")
 	ErrAttachmentTooLarge = errors.New("feishu connector: attachment too large")
@@ -131,9 +132,10 @@ type ManualResult struct {
 }
 
 type RegistrationInput struct {
-	AppName   string
-	AppDesc   string
-	AvatarURL string
+	AppName         string
+	AppDesc         string
+	AvatarURL       string
+	InboundMessages bool
 }
 
 type AgentRegistration struct {

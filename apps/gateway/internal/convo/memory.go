@@ -67,6 +67,10 @@ func (m *Memory) UpsertConversation(_ context.Context, c Conversation) error {
 		if c.ProjectID != "" && existing.ProjectID != c.ProjectID {
 			return ErrProjectMismatch
 		}
+		if existing.AgentID == "" && existing.ChatType == "chat" &&
+			existing.ChannelConnectorID == "" && c.ChannelConnectorID != "" {
+			existing.ChannelConnectorID = c.ChannelConnectorID
+		}
 		// Refresh updated_at only; keep the original title (MVP: never overwrite).
 		existing.UpdatedAt = c.UpdatedAt
 		m.convs[c.ID] = existing

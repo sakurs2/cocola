@@ -7,6 +7,22 @@ const component = await readFile(
   new URL("../components/connectors/feishu-connector-card.tsx", import.meta.url),
   "utf8",
 );
+const workspaceComponent = await readFile(
+  new URL("../components/connectors/workspace-feishu-connector-card.tsx", import.meta.url),
+  "utf8",
+);
+const workspaceSetupDialog = workspaceComponent.slice(
+  workspaceComponent.indexOf("function SetupDialog"),
+  workspaceComponent.indexOf("function ManualAppDialog"),
+);
+const githubComponent = await readFile(
+  new URL("../components/connectors/github-connector-card.tsx", import.meta.url),
+  "utf8",
+);
+const summaryComponent = await readFile(
+  new URL("../components/connectors/connector-summary-card.tsx", import.meta.url),
+  "utf8",
+);
 const connectorsPage = await readFile(
   new URL("../app/connectors/page.tsx", import.meta.url),
   "utf8",
@@ -24,31 +40,53 @@ test("Feishu connector uses owned dialogs and cleans up polling", () => {
 });
 
 test("manual App Secret stays in a password input and is not rendered", () => {
-  assert.match(component, /type="password"/);
-  assert.match(component, /body: JSON\.stringify\(\{[\s\S]*app_secret: appSecret/);
-  assert.doesNotMatch(component, />\s*(?:App Secret:)?\s*\{appSecret\}\s*</);
+  for (const source of [component, workspaceComponent]) {
+    assert.match(source, /type="password"/);
+    assert.match(source, /body: JSON\.stringify\(\{[\s\S]*app_secret: appSecret/);
+    assert.doesNotMatch(source, />\s*(?:App Secret:)?\s*\{appSecret\}\s*</);
+  }
 });
 
-test("global Connectors owns GitHub while each Agent owns its Feishu bot", () => {
-  assert.match(connectorsPage, /not_configured: \{[\s\S]*?label: copy\.notConnected/);
-  assert.match(connectorsPage, /mt-4 flex items-center gap-2 text-xs/);
-  assert.doesNotMatch(connectorsPage, /FeishuConnectorCard/);
+test("global Connectors keeps workspace Feishu separate from Agent bots", () => {
+  assert.match(connectorsPage, /GitHubConnectorCard/);
+  assert.match(connectorsPage, /WorkspaceFeishuConnectorCard/);
+  assert.match(connectorsPage, /grid-cols-1/);
+  assert.match(connectorsPage, /sm:grid-cols-\[repeat\(2,minmax\(0,300px\)\)\]/);
   assert.match(component, /t\("description"\)/);
   assert.doesNotMatch(component, /Give this Agent its own Feishu entry point/);
   assert.match(component, /`\/api\/agents\/\$\{encodeURIComponent\(agentId\)\}\/channels\/feishu`/);
+  assert.match(workspaceComponent, /const endpoint = "\/api\/connectors\/feishu"/);
+  assert.match(workspaceComponent, /src="\/feishu-logo\.svg"/);
+  assert.match(workspaceComponent, /<Modal/);
+  assert.doesNotMatch(workspaceComponent, /<Sheet/);
+});
+
+test("workspace Feishu setup keeps its two choices compact and avoids a duplicate close action", () => {
+  assert.match(workspaceSetupDialog, /Modal\.Dialog className="mx-auto w-full max-w-\[360px\]"/);
+  assert.match(workspaceSetupDialog, /className="h-12 w-full justify-start gap-3 bg-\[#3370FF\]/);
+  assert.match(workspaceSetupDialog, /className="h-12 w-full justify-start gap-3 px-4"/);
+  assert.doesNotMatch(workspaceSetupDialog, /min-h-20 flex-col/);
+  assert.match(workspaceSetupDialog, /\{active \|\| failed \? \(/);
+  assert.doesNotMatch(workspaceSetupDialog, /t\("done"\)/);
 });
 
 test("connector cards leave checking after a failed initial request and offer retry", () => {
-  for (const source of [connectorsPage, component]) {
+  for (const source of [githubComponent, workspaceComponent, component]) {
     assert.match(source, /type ConnectionLoadState = "checking" \| "ready" \| "failed"/);
     assert.match(source, /setLoadState\("failed"\)/);
     assert.match(source, /t\("retry"\)/);
     assert.doesNotMatch(source, /setConnection\(null\)/);
   }
-  assert.match(connectorsPage, /connectionCheckFailed: t\("connectionCheckFailed"\)/);
-  assert.match(connectorsPage, /!connection && loadState === "failed"/);
-  assert.match(connectorsPage, /connection && loadState === "failed"/);
+  assert.match(githubComponent, /loadState === "failed"/);
+  assert.match(workspaceComponent, /loadState === "failed"/);
   assert.match(component, /loadState === "failed"/);
+});
+
+test("summary cards share compact structure while keeping provider branding", () => {
+  assert.match(summaryComponent, /max-w-\[300px\]/);
+  assert.match(summaryComponent, /data-provider=\{provider\}/);
+  assert.match(summaryComponent, /bg-\[#3370FF\]/);
+  assert.match(summaryComponent, /motion-reduce:animate-none/);
 });
 
 test("connector errors accept proxy string and structured error responses", async () => {
@@ -101,5 +139,21 @@ test("Feishu proxy routes are fixed rather than arbitrary catch-all paths", asyn
     registrations,
     /`\/v1\/agents\/\$\{encodeURIComponent\(id\)\}\/channels\/feishu\/registrations\/\$\{encodeURIComponent\(/,
   );
-  assert.doesNotMatch(root + registrations, /\[\.\.\.path\]/);
+  const workspaceRoot = await readFile(
+    new URL("../app/api/connectors/feishu/route.ts", import.meta.url),
+    "utf8",
+  );
+  const workspaceRegistration = await readFile(
+    new URL("../app/api/connectors/feishu/registrations/[id]/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(workspaceRoot, /"\/v1\/connectors\/feishu"/);
+  assert.match(
+    workspaceRegistration,
+    /`\/v1\/connectors\/feishu\/registrations\/\$\{encodeURIComponent\(id\)\}`/,
+  );
+  assert.doesNotMatch(
+    root + registrations + workspaceRoot + workspaceRegistration,
+    /\[\.\.\.path\]/,
+  );
 });
