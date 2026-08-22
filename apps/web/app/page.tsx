@@ -17,18 +17,12 @@ import { WorkspaceHeaderActions } from "@/components/assistant-ui/workspace-head
 import { useWorkspaceToast } from "@/components/assistant-ui/workspace-toast";
 import { cn } from "@/lib/utils";
 import { isProjectTaskPath } from "@/lib/workspace-routes";
+import { beginDockResize } from "@/lib/dock-resize.mjs";
 import { AnimatePresence, motion } from "framer-motion";
 import { PanelRight } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import {
-  type Dispatch,
-  type PointerEvent,
-  type SetStateAction,
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
+import { type PointerEvent, useCallback, useEffect, useRef, useState } from "react";
 
 export default function Home() {
   return <Workspace />;
@@ -56,6 +50,7 @@ function Workspace() {
   const [dockView, setDockView] = useState<"status" | "workspace">("status");
   const [statusOpen, setStatusOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const workspaceResizeCleanup = useRef<(() => void) | null>(null);
   const activeConversation = conversations.find((item) => item.id === activeSessionId);
 
   useEffect(() => {
@@ -93,9 +88,23 @@ function Workspace() {
 
   const startWorkspaceResize = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
-      beginDockResize(event, workspaceWidth, 480, setWorkspaceWidth);
+      workspaceResizeCleanup.current?.();
+      workspaceResizeCleanup.current =
+        beginDockResize({
+          event,
+          currentWidth: workspaceWidth,
+          minWidth: 480,
+          setWidth: setWorkspaceWidth,
+        }) ?? null;
     },
     [workspaceWidth],
+  );
+
+  useEffect(
+    () => () => {
+      workspaceResizeCleanup.current?.();
+    },
+    [],
   );
 
   return (
@@ -188,34 +197,6 @@ function Workspace() {
       </div>
     </div>
   );
-}
-
-function beginDockResize(
-  event: PointerEvent<HTMLDivElement>,
-  currentWidth: number,
-  minWidth: number,
-  setWidth: Dispatch<SetStateAction<number>>,
-) {
-  event.preventDefault();
-  const startX = event.clientX;
-  const previousCursor = document.body.style.cursor;
-  const previousUserSelect = document.body.style.userSelect;
-  document.body.style.cursor = "col-resize";
-  document.body.style.userSelect = "none";
-  const maxWidth = Math.max(minWidth, Math.min(window.innerWidth * 0.62, 760));
-  const onPointerMove = (moveEvent: globalThis.PointerEvent) => {
-    setWidth(Math.min(Math.max(currentWidth - (moveEvent.clientX - startX), minWidth), maxWidth));
-  };
-  const onPointerUp = () => {
-    document.body.style.cursor = previousCursor;
-    document.body.style.userSelect = previousUserSelect;
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
-    window.removeEventListener("pointercancel", onPointerUp);
-  };
-  window.addEventListener("pointermove", onPointerMove);
-  window.addEventListener("pointerup", onPointerUp);
-  window.addEventListener("pointercancel", onPointerUp);
 }
 
 // Slim status bar: model selection now lives inside the composer, matching the

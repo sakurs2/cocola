@@ -61,7 +61,10 @@ test("Project task chrome is compact and workspace starts at its resize minimum"
   assert.doesNotMatch(taskSource, /conversation\?\.title \|\| "Task"/);
   assert.doesNotMatch(taskSource, />\/<\/span>/);
   assert.match(workspaceSource, /useState\(480\)/);
-  assert.match(workspaceSource, /beginDockResize\(event, workspaceWidth, 480/);
+  assert.match(
+    workspaceSource,
+    /beginDockResize\(\{[\s\S]*currentWidth: workspaceWidth,[\s\S]*minWidth: 480/,
+  );
   assert.match(workspaceShellSource, /isProjectTaskPath\(pathname\)/);
   assert.match(workspaceShellSource, /compact=\{compactTopbar\}/);
   assert.match(workspaceShellSource, /compact \? "h-10" : "h-14"/);
