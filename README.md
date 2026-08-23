@@ -1,13 +1,17 @@
+<p align="right">
+  <strong>English</strong> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
 <div align="center">
   <h1>
     <img src="./docs/assets/cocola-readme-brand.png" width="640" alt="Cocola — Your trusty &amp; powerful agent platform" />
   </h1>
-  <p><strong>开源、自部署的团队 AI Agent 工作平台</strong></p>
+  <p><strong>Open-source, self-hosted AI Agent workspace for teams</strong></p>
 
   <p>
-    <a href="#快速开始">快速开始</a> ·
-    <a href="./docs">文档</a> ·
-    <a href="./CONTRIBUTING.md">参与贡献</a> ·
+    <a href="#quick-start">Quick start</a> ·
+    <a href="./docs">Documentation</a> ·
+    <a href="./CONTRIBUTING.md">Contributing</a> ·
     <a href="https://github.com/sakurs2/cocola/releases">Releases</a>
   </p>
 
@@ -35,78 +39,68 @@
   </p>
 </div>
 
-<!--
-产品图占位。建议使用一张 16:9 图片，同时展示对话执行过程与右侧 Workspace。
+<p align="center">
+  <img src="./docs/assets/cocola-web-user.png" width="100%" alt="Cocola user workspace with chat, Agents, Skills, MCP, Wiki, Connectors, Projects, and Folders" />
+</p>
 
-![Cocola product overview](./docs/assets/cocola-product-overview.png)
--->
+Cocola is more than a model chat interface. Every conversation gets an isolated, persistent workspace where an Agent can read files, write code, run commands, browse the web, and stream its execution process directly in the browser. Administrators can centrally manage models, users, Skills, MCP servers, usage, and audit records.
 
-Cocola 不只是一个模型聊天界面。每个会话都会获得独立、可持续使用的工作空间，Agent 可以读取文件、编写代码、运行命令、浏览网页，并将执行过程实时呈现在浏览器中。管理员则可以集中管理模型、用户、Skills、MCP、用量与审计。
+## Core capabilities
 
-## 核心能力
+| Agent workflows                                                                                                               | Platform infrastructure                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 🧠 **Native Agent Runtime**<br>Uses Claude Code's native reasoning loop instead of reducing an Agent to custom tool groups.   | 🔒 **Session-isolated sandboxes**<br>Reasoning and native tools run in an independent OpenSandbox environment with persistent files. |
+| 🧰 **Complete workspace**<br>Use Files, Code, Shell, Git, and Preview in the sidebar to follow execution and inspect outputs. | 🔀 **Unified model gateway**<br>Centrally manage model providers and routing compatible with Anthropic Messages.                     |
+| 🧩 **Reusable capabilities**<br>Assemble team-specific Agents with custom Agents, Skills, MCP servers, and Knowledge.         | 🛡️ **Team governance**<br>Manage users, usage, scheduled tasks, run tracing, audit logs, and sandbox operations.                     |
+| 🌿 **Project workflows**<br>Support local and GitHub Projects; GitHub Tasks use isolated branches and confirm risky writes.   | 🏠 **Fully self-hosted**<br>Keep the application, model credentials, conversations, and workspaces on your infrastructure.           |
 
-| Agent 工作流                                                                                         | 平台基础设施                                                                                     |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| 🧠 **原生 Agent Runtime**<br>使用 Claude Code 原生推理循环，不把 Agent 简化成几组自定义工具。        | 🔒 **会话级隔离沙箱**<br>推理循环和原生工具运行在独立 OpenSandbox 环境中，工作区随会话持续保存。 |
-| 🧰 **完整工作区**<br>在侧边栏直接使用 Files、Code、Shell、Git 和 Preview，实时查看执行状态与产物。   | 🔀 **统一模型入口**<br>集中管理支持 Anthropic Messages 的模型 Provider 与路由。                  |
-| 🧩 **可复用能力**<br>通过自定义 Agent、Skills、MCP 和 Knowledge 组装团队的专属 Agent。               | 🛡️ **团队治理**<br>覆盖用户、用量、定时任务、运行追踪、审计日志和沙箱运维。                      |
-| 🌿 **项目工作流**<br>支持本地与 GitHub Project；GitHub Task 使用独立工作分支，高风险写操作按次确认。 | 🏠 **完全自部署**<br>应用、模型密钥、对话数据和工作区都保留在自己的基础设施中。                  |
+## Quick start
 
-## 快速开始
+Production deployments use the Cocola CLI. Requirements:
 
-正式部署使用 Cocola CLI。开始前需要：
+- Linux or macOS on `amd64` or `arm64`;
+- Docker Engine 20.10.0 or newer, or Docker Desktop with an equivalent engine;
+- Docker Compose 2.23.1 or newer.
 
-- Linux 或 macOS，`amd64` 或 `arm64`；
-- Docker Engine 20.10.0 或更高版本，或提供等效 Engine 的 Docker Desktop；
-- Docker Compose 2.23.1 或更高版本。
+Docker Engine 20.10.0 is the technical minimum required for `host-gateway`; Docker Compose 2.23.1 is the minimum required for inline `configs.content`. Cocola has also completed end-to-end validation of healthy service startup and dynamic Sandbox creation, execution, and teardown on Docker Engine 20.10.24 with Docker Compose 2.23.1.
 
-Docker Engine 20.10.0 是 `host-gateway` 所需的技术最低版本；Docker Compose 2.23.1 是
-内联 `configs.content` 所需的最低版本。Cocola 已在 Docker Engine 20.10.24 与 Compose
-2.23.1 的组合上完成服务健康启动及动态 Sandbox 创建、执行和销毁的全链路验证。
+**1. Install**
 
-**1. 安装**
-
-下载最新版本并完成交互式配置：
+Download the latest release and complete the interactive setup:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sakurs2/cocola/master/scripts/install.sh | sh
 ```
 
-除 OpenSandbox Execd 的阿里云官方镜像外，冷启动镜像统一通过 `ghcr.io` 下载。Cocola 不会修改
-Docker daemon 配置，也不会在下载失败时静默切换公共代理。
+Except for the official Alibaba Cloud image used by OpenSandbox Execd, cold-start images are downloaded from `ghcr.io`. Cocola does not modify the Docker daemon configuration or silently switch to a public proxy when a download fails.
 
-安装器会下载对应平台的 CLI、校验 SHA-256，并把部署配置写入 `~/.cocola`。Web 默认监听
-所有网卡，可直接通过 `http://<server-ip>:3000` 访问，无需额外填写访问地址。请保存安装器
-仅展示一次的管理员密码。
+The installer downloads the CLI for the current platform, verifies its SHA-256 checksum, and writes the deployment configuration to `~/.cocola`. The web application listens on all network interfaces by default and is available at `http://<server-ip>:3000` without additional address configuration. Save the administrator password shown once by the installer.
 
-**2. 启动**
+**2. Start**
 
 ```bash
 cocola start
 ```
 
-中国大陆网络可在首次启动时显式使用兼容的 GHCR 代理；成功健康启动后会记住该端点：
+Users in mainland China can explicitly use a compatible GHCR proxy on the first start. Cocola remembers the endpoint after a healthy startup:
 
 ```bash
 cocola start --ghcr-endpoint ghcr.nju.edu.cn
 ```
 
-切回官方端点使用 `cocola start --ghcr-endpoint ghcr.io`。代理失败会恢复原部署配置，不会隐式
-回退或改变自定义 Cocola Registry。
+Switch back to the official endpoint with `cocola start --ghcr-endpoint ghcr.io`. If the proxy fails, Cocola restores the previous deployment configuration without an implicit fallback or changes to a custom Cocola Registry.
 
-首次启动会检查 Docker、Compose、端口和磁盘空间，提前拉取服务与沙箱运行时的固定版本镜像，
-并等待 Sandbox Manager、Agent Runtime 和 Web 等服务健康。正常停止后恢复会直接复用本地
-镜像，不依赖 Registry 在线。
+On first start, Cocola checks Docker, Compose, ports, and disk space, pre-pulls pinned service and sandbox runtime images, and waits for services including Sandbox Manager, Agent Runtime, and Web to become healthy. After a clean stop, subsequent starts reuse local images without depending on registry availability.
 
-**3. 配置模型**
+**3. Configure a model**
 
-打开 [http://localhost:3000](http://localhost:3000) 并登录。
+Open [http://localhost:3000](http://localhost:3000) and sign in.
 
 > [!IMPORTANT]
-> 首次启动后，请前往 `Admin → Models` 配置模型 Provider 和默认模型，然后再开始第一段对话。
+> After the first start, go to `Admin → Models` to configure a model provider and default model before starting your first conversation.
 
 <details>
-<summary><strong>常用运维命令</strong></summary>
+<summary><strong>Common operational commands</strong></summary>
 
 <br>
 
@@ -119,33 +113,29 @@ cocola stop
 
 </details>
 
-安装指定版本、使用外部 OpenSandbox 或进行非交互部署，请查看 [Cocola CLI 文档](./docs/cli.md)。
-升级时重新执行同一条安装命令即可：CLI 会保留现有账号、端口、Secret 和自定义配置，生成
-升级备份并迁移部署文件；随后运行 `cocola start` 应用新版本。失败时会自动恢复上一版配置，
-并分别提示如何恢复旧版或重新尝试升级。`cocola doctor` 可只读检查服务健康、磁盘、数据卷、
-PostgreSQL 凭据和必需镜像。
+See the [Cocola CLI documentation](./docs/cli.md) to install a specific version, use an external OpenSandbox deployment, or run a non-interactive installation. To upgrade, run the same installation command again. The CLI preserves existing accounts, ports, secrets, and custom configuration, creates an upgrade backup, and migrates the deployment files. Then run `cocola start` to apply the new version. If the upgrade fails, the CLI restores the previous configuration and provides commands to either recover the old version or retry the upgrade. `cocola doctor` performs read-only checks of service health, disk space, volumes, PostgreSQL credentials, and required images.
 
-## 系统架构
+## Architecture
 
 <p align="center">
   <img src="./docs/assets/cocola-architecture.svg" width="100%" alt="Cocola architecture: browser experience, control plane, isolated execution, and shared infrastructure" />
 </p>
 
-Cocola 将控制面和执行面分开：
+Cocola separates the control plane from the execution plane:
 
-1. Web 与 Gateway 负责登录鉴权、会话、SSE/WebSocket 流以及面向浏览器的统一入口。
-2. Agent Runtime 是控制面路由器，负责准备环境并把一次 Run 转发到当前会话的 Sandbox。
-3. Claude Code 连同原生工具运行在 Sandbox 内；文件通过 Session Volume 持久化。
-4. LLM Gateway 统一连接模型 Provider，执行路由、凭证保护、配额和用量记账。
-5. Admin API 管理用户、模型、Skills、MCP、调度、审计与平台配置。
+1. Web and Gateway handle authentication, conversations, SSE/WebSocket streams, and the unified browser entry point.
+2. Agent Runtime acts as the control-plane router, prepares the environment, and forwards each Run to the current conversation's Sandbox.
+3. Claude Code and its native tools run inside the Sandbox; a Session Volume persists files.
+4. LLM Gateway connects model providers and handles routing, credential protection, quotas, and usage metering.
+5. Admin API manages users, models, Skills, MCP servers, schedules, audits, and platform configuration.
 
-核心基础设施包括 PostgreSQL、Redis、S3-compatible Object Storage 和 OpenSandbox。`v0.1.0` 的官方安装方式是由 Cocola CLI 管理的单机 Docker Compose；Sandbox 平面可以使用内置 OpenSandbox，也可以连接外部 OpenSandbox 服务。
+Core infrastructure includes PostgreSQL, Redis, S3-compatible object storage, and OpenSandbox. The official `v0.1.0` installation is a single-host Docker Compose deployment managed by the Cocola CLI. The Sandbox plane can use the bundled OpenSandbox deployment or connect to an external OpenSandbox service.
 
-主要技术栈：Next.js、TypeScript、Go、Python、gRPC、PostgreSQL、Redis、OpenSandbox。
+Primary technologies: Next.js, TypeScript, Go, Python, gRPC, PostgreSQL, Redis, and OpenSandbox.
 
-## 本地开发
+## Local development
 
-本地调试使用原生服务进程和容器化基础设施：
+Local development runs application services as native processes with containerized infrastructure:
 
 ```bash
 git clone https://github.com/sakurs2/cocola.git
@@ -154,28 +144,28 @@ cp .env.example .env
 make dev
 ```
 
-完整工具链、依赖安装和提交检查见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the complete toolchain, dependency setup, and commit checks.
 
-## 文档
+## Documentation
 
-完整文档站将随 `v0.1.0` 发布。在此之前，可以从以下仓库文档开始：
+The complete documentation site will launch with `v0.1.0`. Until then, start with these repository documents:
 
-| 文档                                                      | 内容                             |
-| --------------------------------------------------------- | -------------------------------- |
-| [CLI 安装与运维](./docs/cli.md)                           | 安装、部署、诊断与日常运维       |
-| [配置规范](./docs/configuration.md)                       | 环境变量与部署配置               |
-| [Projects 与 GitHub Connector](./docs/github-projects.md) | 项目、任务和 GitHub 集成         |
-| [对话可靠性](./docs/core-chat-reliability.md)             | Run 生命周期、断线重连与错误处理 |
-| [架构决策记录](./docs/adr/README.md)                      | 关键架构选择及其背景             |
+| Document                                                    | Contents                                              |
+| ----------------------------------------------------------- | ----------------------------------------------------- |
+| [CLI installation and operations](./docs/cli.md)            | Installation, deployment, diagnostics, and operations |
+| [Configuration reference](./docs/configuration.md)          | Environment variables and deployment configuration    |
+| [Projects and GitHub Connector](./docs/github-projects.md)  | Projects, tasks, and GitHub integration               |
+| [Conversation reliability](./docs/core-chat-reliability.md) | Run lifecycle, reconnection, and error handling       |
+| [Architecture decision records](./docs/adr/README.md)       | Important architectural choices and their context     |
 
-<!-- GitHub Pages 上线后，将本节链接替换为正式文档站 URL。 -->
+<!-- Replace this section's links with the documentation site URL when GitHub Pages is available. -->
 
-## 参与贡献
+## Contributing
 
-欢迎提交 Issue 和 Pull Request。开始较大的功能或架构调整前，请先通过 [GitHub Issues](https://github.com/sakurs2/cocola/issues) 讨论范围，并阅读 [贡献指南](./CONTRIBUTING.md)。
+Issues and pull requests are welcome. Before starting a substantial feature or architectural change, discuss the scope in [GitHub Issues](https://github.com/sakurs2/cocola/issues) and read the [contribution guide](./CONTRIBUTING.md).
 
-安全问题请按照 [SECURITY.md](./SECURITY.md) 私密报告，不要创建公开 Issue。
+Report security issues privately by following [SECURITY.md](./SECURITY.md). Do not create a public issue.
 
 ## License
 
-Cocola 使用 [Apache License 2.0](./LICENSE) 开源。
+Cocola is open source under the [Apache License 2.0](./LICENSE).
