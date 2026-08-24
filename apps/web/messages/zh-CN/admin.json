@@ -839,6 +839,7 @@
     "saving": "正在保存…",
     "save": "保存更改",
     "tavily": {
+      "name": "Tavily",
       "title": "配置 Tavily",
       "description": "为普通对话添加工作区网页搜索；用户仍可在 MCP 页面单独关闭。",
       "manageTitle": "管理 Tavily",

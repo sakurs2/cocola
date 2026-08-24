@@ -901,6 +901,7 @@
     "saving": "Saving…",
     "save": "Save changes",
     "tavily": {
+      "name": "Tavily",
       "title": "Configure Tavily",
       "description": "Add workspace web search for ordinary conversations. Users can still turn it off on their MCP page.",
       "manageTitle": "Manage Tavily",

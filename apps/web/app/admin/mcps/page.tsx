@@ -323,7 +323,9 @@ export default function AdminMCPPage() {
   const tavilyConfigured = mcps.some((mcp) => mcp.id === "tavily");
   const tavilyPresetVisible =
     !tavilyConfigured &&
-    `tavily ${t("tavily.serverDescription")} http`.toLowerCase().includes(normalizedQuery);
+    `${t("tavily.name")} ${t("tavily.serverDescription")} http`
+      .toLowerCase()
+      .includes(normalizedQuery);
   const addControl = (
     <Button className="gap-2" onPress={openCreate}>
       <Plus className="size-4" />
@@ -828,7 +830,7 @@ function TavilyPresetCard({ onConfigure }: { onConfigure: () => void }) {
           <MCPServerIcon className="admin-mcp-card-icon" id="tavily" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="min-w-0 flex-1 text-sm font-semibold text-foreground">Tavily</h2>
+              <h2 className="min-w-0 flex-1 text-sm font-semibold text-foreground">{t("name")}</h2>
               <Chip size="sm" variant="soft">
                 {t("notConfigured")}
               </Chip>

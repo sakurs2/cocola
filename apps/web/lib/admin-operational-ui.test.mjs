@@ -156,10 +156,12 @@ test("Sandbox rows keep one-line summaries and move diagnostics into a centered 
   assert.match(sandboxesSource, /label=\{t\("details\.sessionId"\)\}/);
 });
 
-test("Empty MCP state has one create action and no redundant search control", () => {
-  assert.match(mcpsSource, /loading \|\| mcps\.length > 0/);
+test("The Tavily preset replaces the empty MCP state until it is configured", () => {
+  assert.match(mcpsSource, /loading && !mcps\.length/);
+  assert.match(mcpsSource, /tavilyPresetVisible \|\| visibleMcps\.length/);
+  assert.match(mcpsSource, /<TavilyPresetCard onConfigure=\{openTavily\}/);
   assert.match(mcpsSource, /<AdminToast message=\{notice\}/);
-  assert.match(mcpsSource, /t\("empty"\)/);
+  assert.match(mcpsSource, /title=\{t\("noMatch"\)\}/);
 });
 
 test("Truncated Admin table values share tooltip, navigation, and visible copy affordances", () => {
