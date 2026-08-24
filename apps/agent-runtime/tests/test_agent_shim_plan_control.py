@@ -118,6 +118,8 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
     assert options["permission_mode"] == "plan"
     assert options["disallowed_tools"] == [
         "AskUserQuestion",
+        "WebSearch",
+        "WebFetch",
         "Edit",
         "NotebookEdit",
         "Write",
@@ -140,6 +142,21 @@ def test_plan_options_preserve_native_plan_mode_and_install_trusted_controls(mon
         "PostToolUseFailure",
         "Stop",
     }
+
+
+def test_native_web_tools_are_allowed_only_when_route_capability_is_enabled(monkeypatch):
+    captured: dict[str, object] = {}
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", _fake_sdk(captured))
+    module = _load_shim("cocola_agent_shim_native_web_tools")
+
+    module._build_options(
+        {
+            "prompt": "search the web",
+            "anthropic_server_web_tools_enabled": True,
+        }
+    )
+
+    assert captured["options"]["disallowed_tools"] == ["AskUserQuestion"]
 
 
 def test_reasoning_effort_maps_to_claude_agent_options(monkeypatch):
@@ -818,7 +835,11 @@ async def test_resumed_turn_explicitly_switches_the_sdk_permission_mode(monkeypa
         "result",
         "done",
     ]
-    assert captured["options"]["disallowed_tools"] == ["AskUserQuestion"]
+    assert captured["options"]["disallowed_tools"] == [
+        "AskUserQuestion",
+        "WebSearch",
+        "WebFetch",
+    ]
 
 
 async def test_runtime_is_not_accepted_before_the_sdk_init_message(monkeypatch):
@@ -1169,7 +1190,7 @@ def test_execute_options_merge_control_with_user_mcps(monkeypatch):
 
     options = captured["options"]
     assert set(options["mcp_servers"]) == {"github", "cocola_control"}
-    assert options["disallowed_tools"] == ["AskUserQuestion"]
+    assert options["disallowed_tools"] == ["AskUserQuestion", "WebSearch", "WebFetch"]
     assert "env" not in options
     assert "extra_args" not in options
     assert "can_use_tool" not in options

@@ -80,6 +80,76 @@ func TestMCPRemoteURLIsEncryptedBeforePersistence(t *testing.T) {
 	}
 }
 
+func TestTavilyMCPUsesEncryptedHeadersAndDefaultSelection(t *testing.T) {
+	mem := store.NewMemory()
+	admin := newMCPTestAdmin(mem)
+	ctx := context.Background()
+	defaultEnabled := true
+	const (
+		userID            = "user-1"
+		tavilyURL         = "https://mcp.tavily.com/mcp/"
+		authorization     = "Bearer tvly-test-secret"
+		defaultParameters = `{"search_depth":"basic","max_results":5,"include_images":false,"include_raw_content":false}`
+	)
+
+	created, err := admin.CreateMCPServer(ctx, MCPServerInput{
+		ID:          "tavily",
+		Name:        "Tavily",
+		Description: "Web search for ordinary conversations",
+		Transport:   MCPTransportHTTP,
+		URL:         tavilyURL,
+		Headers: map[string]string{
+			"Authorization":      authorization,
+			"DEFAULT_PARAMETERS": defaultParameters,
+		},
+		DefaultEnabled: &defaultEnabled,
+	})
+	if err != nil {
+		t.Fatalf("create Tavily MCP: %v", err)
+	}
+	if created.URLHint != tavilyURL || !created.DefaultEnabled {
+		t.Fatalf("created Tavily MCP = %+v", created)
+	}
+
+	stored, err := mem.GetMCPServer(ctx, "tavily")
+	if err != nil {
+		t.Fatalf("get stored Tavily MCP: %v", err)
+	}
+	if bytes.Contains(stored.HeaderCiphertextJSON, []byte("tvly-test-secret")) {
+		t.Fatalf("stored Tavily headers contain plaintext secret: %s", stored.HeaderCiphertextJSON)
+	}
+
+	runtimeConfig, err := admin.ListEffectiveMCPRuntimeConfig(ctx, userID)
+	if err != nil {
+		t.Fatalf("list effective Tavily runtime config: %v", err)
+	}
+	tavily, ok := runtimeConfig.MCPServers["tavily"]
+	if !ok {
+		t.Fatalf("default-enabled Tavily missing from runtime config: %+v", runtimeConfig)
+	}
+	if tavily["url"] != tavilyURL {
+		t.Fatalf("Tavily runtime URL = %v", tavily["url"])
+	}
+	headers, ok := tavily["headers"].(map[string]string)
+	if !ok {
+		t.Fatalf("Tavily runtime headers = %#v", tavily["headers"])
+	}
+	if headers["Authorization"] != authorization || headers["DEFAULT_PARAMETERS"] != defaultParameters {
+		t.Fatalf("Tavily runtime headers = %#v", headers)
+	}
+
+	if err := admin.SetUserMCPEnabled(ctx, userID, "tavily", false); err != nil {
+		t.Fatalf("disable Tavily for user: %v", err)
+	}
+	runtimeConfig, err = admin.ListEffectiveMCPRuntimeConfig(ctx, userID)
+	if err != nil {
+		t.Fatalf("list disabled Tavily runtime config: %v", err)
+	}
+	if _, ok := runtimeConfig.MCPServers["tavily"]; ok {
+		t.Fatalf("user-disabled Tavily remained in runtime config: %+v", runtimeConfig)
+	}
+}
+
 func TestMCPCreateAndUpdateOnlyPersistConfiguration(t *testing.T) {
 	mem := store.NewMemory()
 	admin := newMCPTestAdmin(mem)

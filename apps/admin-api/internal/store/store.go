@@ -178,23 +178,24 @@ type LLMProvider struct {
 // provider's real model id. Callers route by ID; alias remains presentation and
 // audit metadata and may be reused by another provider.
 type LLMModelRoute struct {
-	ID                 string    `json:"id"`
-	Alias              string    `json:"alias"`
-	ProviderID         string    `json:"provider_id"`
-	Protocol           string    `json:"protocol"`
-	RealModel          string    `json:"real_model"`
-	Label              string    `json:"label"`
-	IconType           string    `json:"icon_type"`
-	IconSlug           string    `json:"icon_slug"`
-	IconURL            string    `json:"icon_url"`
-	Enabled            bool      `json:"enabled"`
-	Visible            bool      `json:"visible"`
-	IsDefault          bool      `json:"is_default"`
-	SortOrder          int       `json:"sort_order"`
-	EmbeddingDimension int       `json:"embedding_dimension,omitempty"`
-	ReasoningEfforts   []string  `json:"reasoning_efforts"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                             string    `json:"id"`
+	Alias                          string    `json:"alias"`
+	ProviderID                     string    `json:"provider_id"`
+	Protocol                       string    `json:"protocol"`
+	RealModel                      string    `json:"real_model"`
+	Label                          string    `json:"label"`
+	IconType                       string    `json:"icon_type"`
+	IconSlug                       string    `json:"icon_slug"`
+	IconURL                        string    `json:"icon_url"`
+	Enabled                        bool      `json:"enabled"`
+	Visible                        bool      `json:"visible"`
+	IsDefault                      bool      `json:"is_default"`
+	SortOrder                      int       `json:"sort_order"`
+	EmbeddingDimension             int       `json:"embedding_dimension,omitempty"`
+	ReasoningEfforts               []string  `json:"reasoning_efforts"`
+	AnthropicServerWebToolsEnabled bool      `json:"anthropic_server_web_tools_enabled"`
+	CreatedAt                      time.Time `json:"created_at"`
+	UpdatedAt                      time.Time `json:"updated_at"`
 }
 
 // MemoryConfig is the singleton administrator-owned switch and model

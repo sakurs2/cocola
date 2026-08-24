@@ -342,6 +342,7 @@ class InSandboxShimProvider:
             req["result_contract"] = options.selected_skill_result_contract
         req["result_policy"] = options.structured_result_policy
         req["user_input_enabled"] = options.user_input_enabled
+        req["anthropic_server_web_tools_enabled"] = bool(options.anthropic_server_web_tools_enabled)
         if options.traceparent:
             req["traceparent"] = options.traceparent
         if options.system_prompt:

@@ -60,6 +60,9 @@ message QueryRequest {
   // Model-native effort selected for this turn. Empty delegates to the model
   // default; non-empty values are validated against the selected model route.
   string reasoning_effort = 17;
+  // Whether the selected upstream fully supports Claude Code's server-side
+  // WebSearch and WebFetch tools. Tavily MCP tools are controlled separately.
+  bool anthropic_server_web_tools_enabled = 18;
 }
 
 enum InteractionMode {

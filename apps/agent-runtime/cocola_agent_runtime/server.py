@@ -133,6 +133,15 @@ COCOLA_IDENTITY_SYSTEM_PROMPT_V1 = (
     "describe it as an Agent in Cocola. Claude Code is an underlying runtime; mention "
     "it only when the user explicitly asks about the runtime or implementation."
 )
+TAVILY_TOOL_ROUTING_SYSTEM_PROMPT_V1 = (
+    "Cocola Tavily web tools policy (v1):\n"
+    "Use tavily_search as the default web-search tool. Use tavily_extract when a URL is already "
+    "known and its full content is needed. Use tavily_map to discover a site's page structure "
+    "and URLs, and tavily_crawl only when a task requires reading multiple pages from the same "
+    "site. Use tavily_research only when the user explicitly requests deep, multi-source research; "
+    "it is slower and consumes more quota. For ordinary web questions, prefer search followed by "
+    "extract. The available Tavily tools are discovered from MCP; do not assume unavailable tools."
+)
 AGENT_INSTRUCTIONS_HEADER = (
     "Selected Agent instructions:\n"
     "These instructions define the selected Agent's role and working style. Follow them when "
@@ -1128,7 +1137,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 # Network policy is fixed when a Sandbox is created, so these
                 # installed-runtime dependencies cannot be decided from the
                 # current turn's selected or enabled Skill names.
-                additional_egress_allowlist.extend(["open.feishu.cn", "open.larksuite.com"])
+                additional_egress_allowlist.extend(
+                    ["open.feishu.cn", "open.larksuite.com", "mcp.tavily.com"]
+                )
                 if additional_egress_allowlist:
                     acquire_options["additional_egress_allowlist"] = list(
                         dict.fromkeys(additional_egress_allowlist)
@@ -1769,6 +1780,9 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
             max_turns=request.max_turns or 30,
             model_route_id=model_route_id,
             reasoning_effort=(str(getattr(request, "reasoning_effort", "") or "").strip() or None),
+            anthropic_server_web_tools_enabled=bool(
+                getattr(request, "anthropic_server_web_tools_enabled", False)
+            ),
             allowed_skill_ids=[skill["id"] for skill in loaded_skills],
             selected_skill_id=selected_skill_id,
             selected_skill_result_contract=selected_skill_result_contract,
@@ -1807,6 +1821,14 @@ class AgentRuntimeServicer(pb_grpc.AgentRuntimeServiceServicer):
                 COCOLA_IDENTITY_SYSTEM_PROMPT_V1,
             ),
         )
+        if "tavily" in active_mcp_servers:
+            opts = dataclasses.replace(
+                opts,
+                system_prompt=_merge_system_prompt(
+                    opts.system_prompt,
+                    TAVILY_TOOL_ROUTING_SYSTEM_PROMPT_V1,
+                ),
+            )
         if admin_prompt:
             opts = dataclasses.replace(
                 opts,

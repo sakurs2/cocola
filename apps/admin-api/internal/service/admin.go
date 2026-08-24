@@ -1485,19 +1485,20 @@ type LLMProviderInput struct {
 }
 
 type LLMModelInput struct {
-	Alias              string
-	ProviderID         string
-	RealModel          string
-	Label              string
-	IconType           string
-	IconSlug           string
-	IconURL            string
-	Enabled            *bool
-	Visible            *bool
-	IsDefault          bool
-	SortOrder          int
-	EmbeddingDimension int
-	Actor              string
+	Alias                          string
+	ProviderID                     string
+	RealModel                      string
+	Label                          string
+	IconType                       string
+	IconSlug                       string
+	IconURL                        string
+	Enabled                        *bool
+	Visible                        *bool
+	IsDefault                      bool
+	SortOrder                      int
+	EmbeddingDimension             int
+	AnthropicServerWebToolsEnabled *bool
+	Actor                          string
 }
 
 func (a *Admin) CreateLLMProvider(ctx context.Context, in LLMProviderInput) (store.LLMProvider, error) {
@@ -1632,12 +1633,17 @@ func (a *Admin) CreateLLMModel(ctx context.Context, in LLMModelInput) (store.LLM
 	}
 	route.Protocol = modelProtocol(provider.Type)
 	route.ReasoningEfforts = reasoningEffortsForProtocol(route.Protocol)
+	if in.AnthropicServerWebToolsEnabled == nil {
+		route.AnthropicServerWebToolsEnabled = route.Protocol == "anthropic-messages" &&
+			isOfficialAnthropicBaseURL(provider.BaseURL)
+	}
 	if route.Protocol == "openai-embeddings" {
 		if route.EmbeddingDimension <= 0 {
 			return store.LLMModelRoute{}, ErrInvalidArg
 		}
 		route.Visible = false
 		route.IsDefault = false
+		route.AnthropicServerWebToolsEnabled = false
 	} else {
 		route.EmbeddingDimension = 0
 	}
@@ -1679,6 +1685,7 @@ func (a *Admin) UpdateLLMModel(ctx context.Context, id string, in LLMModelInput)
 		}
 		route.Visible = false
 		route.IsDefault = false
+		route.AnthropicServerWebToolsEnabled = false
 	} else {
 		route.EmbeddingDimension = 0
 	}
@@ -1807,6 +1814,9 @@ func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput
 	if in.Visible != nil {
 		route.Visible = *in.Visible
 	}
+	if in.AnthropicServerWebToolsEnabled != nil {
+		route.AnthropicServerWebToolsEnabled = *in.AnthropicServerWebToolsEnabled
+	}
 	route.IsDefault = in.IsDefault
 	route.SortOrder = in.SortOrder
 	if in.EmbeddingDimension != 0 || create {
@@ -1820,6 +1830,15 @@ func (a *Admin) llmRouteFromInput(existing store.LLMModelRoute, in LLMModelInput
 		return store.LLMModelRoute{}, ErrInvalidArg
 	}
 	return route, nil
+}
+
+func isOfficialAnthropicBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https") &&
+		strings.EqualFold(parsed.Hostname(), "api.anthropic.com")
 }
 
 func (a *Admin) applyProviderAPIKey(provider *store.LLMProvider, apiKey *string) error {

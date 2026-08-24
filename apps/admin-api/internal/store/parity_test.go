@@ -324,7 +324,7 @@ func runStoreContract(t *testing.T, st Store) {
 		t.Fatalf("provider icon roundtrip: %+v %v", gotProvider, err)
 	}
 	routes := []LLMModelRoute{
-		{ID: "route-chat", Alias: "shared", ProviderID: "provider-chat", Protocol: "anthropic-messages", RealModel: "chat-model", Enabled: true, Visible: true, IsDefault: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "route-chat", Alias: "shared", ProviderID: "provider-chat", Protocol: "anthropic-messages", RealModel: "chat-model", Enabled: true, Visible: true, IsDefault: true, AnthropicServerWebToolsEnabled: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "route-chat-b", Alias: "shared", ProviderID: "provider-chat-b", Protocol: "anthropic-messages", RealModel: "chat-model-b", Enabled: true, Visible: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "route-embedding", Alias: "embedding", ProviderID: "provider-embedding", Protocol: "openai-embeddings", RealModel: "embedding-model", Enabled: true, Visible: false, EmbeddingDimension: 1024, CreatedAt: now, UpdatedAt: now},
 	}
@@ -342,6 +342,10 @@ func runStoreContract(t *testing.T, st Store) {
 	gotRoute, err := st.GetLLMModelRoute(ctx, "route-chat-b")
 	if err != nil || gotRoute.Alias != "shared" || gotRoute.ProviderID != "provider-chat-b" {
 		t.Fatalf("GetLLMModelRoute by id: %+v %v", gotRoute, err)
+	}
+	gotRoute, err = st.GetLLMModelRoute(ctx, "route-chat")
+	if err != nil || !gotRoute.AnthropicServerWebToolsEnabled {
+		t.Fatalf("native web tools setting roundtrip: %+v %v", gotRoute, err)
 	}
 	gotRoutes, err := st.ListLLMModelRoutes(ctx)
 	if err != nil || len(gotRoutes) != 3 {

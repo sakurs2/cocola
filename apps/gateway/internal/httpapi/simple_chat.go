@@ -1323,6 +1323,8 @@ func (a *API) executeLiveRun(live *liveRun) {
 		)
 	}
 	attachments := a.prepareRunAttachments(live.ctx, live.request)
+	modelRouteID := effectiveModelRouteID(live.request)
+	anthropicServerWebToolsEnabled := a.anthropicServerWebToolsEnabled(live.ctx, modelRouteID)
 	memoryContext := ""
 	if a.memory != nil && chatTypeForConversation(live.request) != "scheduled_task" {
 		recall := a.memory.Recall(
@@ -1343,12 +1345,13 @@ func (a *API) executeLiveRun(live *liveRun) {
 		InteractionMode:      agent.InteractionMode(effectiveInteractionMode(live.request)),
 		RequireSessionResume: live.request.RequireSessionResume,
 		Prompt:               agentPrompt(live.request), SandboxID: live.request.SandboxID,
-		MaxTurns:            effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
-		ModelRouteID:        effectiveModelRouteID(live.request),
-		ReasoningEffort:     live.request.ReasoningEffort,
-		AllowWorkspaceReset: live.request.AllowWorkspaceReset,
-		MemoryContext:       memoryContext,
-		TraceID:             live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
+		MaxTurns:                       effectiveMaxTurns(live.request.MaxTurns, live.policy.agentMaxTurns),
+		ModelRouteID:                   modelRouteID,
+		ReasoningEffort:                live.request.ReasoningEffort,
+		AnthropicServerWebToolsEnabled: anthropicServerWebToolsEnabled,
+		AllowWorkspaceReset:            live.request.AllowWorkspaceReset,
+		MemoryContext:                  memoryContext,
+		TraceID:                        live.run.ID, ParentSpanID: conversationRootSpan(live.traceCtx),
 		Source:           live.run.Source,
 		SandboxAuthToken: a.mintSandboxToken(live.identity), Attachments: attachments,
 		WikiReferences: live.request.WikiReferences,

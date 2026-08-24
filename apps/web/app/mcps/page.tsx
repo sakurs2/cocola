@@ -11,6 +11,7 @@ import {
   WorkspacePageHeader,
   WorkspaceSectionHeader,
 } from "@/components/heroui-workspace/workspace-ui";
+import { MCPServerIcon } from "@/components/ui/mcp-server-icon";
 
 type MCPServer = {
   id: string;
@@ -107,9 +108,11 @@ export default function MCPPage() {
                     className="group min-w-0 no-underline"
                     href={`/mcps/${encodeURIComponent(mcp.id)}`}
                   >
-                    <span className="cocola-web-catalog-card-icon flex size-10 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-500">
-                      <Plug className="size-5" />
-                    </span>
+                    <MCPServerIcon
+                      className="cocola-web-catalog-card-icon"
+                      iconClassName="size-5"
+                      id={mcp.id}
+                    />
                     <span className="text-foreground mt-3 block truncate font-semibold">
                       {mcp.name || mcp.id}
                     </span>

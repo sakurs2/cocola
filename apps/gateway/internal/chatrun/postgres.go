@@ -40,6 +40,15 @@ func (p *Postgres) RuntimeSetting(ctx context.Context, key string) (json.RawMess
 	return value, err
 }
 
+// AnthropicServerWebToolsEnabled reads the model-route capability at the start
+// of every run so an administrator change takes effect without a process cache.
+func (p *Postgres) AnthropicServerWebToolsEnabled(ctx context.Context, routeID string) (bool, error) {
+	var enabled bool
+	err := p.pool.QueryRow(ctx, `SELECT anthropic_server_web_tools_enabled
+		FROM llm_model_routes WHERE id=$1`, routeID).Scan(&enabled)
+	return enabled, err
+}
+
 const runColumns = `trace_id, root_span_id, conversation_id, conversation_title,
 	user_id, source, model_route_id, model_alias, reasoning_effort, client_request_id, interaction_mode,
 	COALESCE(plan_id::text, ''), status, started_at,

@@ -62,6 +62,7 @@ class FakeRequest:
     sandbox_id: str = ""
     max_turns: int = 0
     reasoning_effort: str = ""
+    anthropic_server_web_tools_enabled: bool = False
     runtime_id: str = "claude-code"
     skill_id: str = ""
     allow_workspace_reset: bool = False
@@ -461,6 +462,7 @@ async def test_query_forwards_skill_capability_and_allows_only_broker_host(monke
         "skill-gateway",
         "open.feishu.cn",
         "open.larksuite.com",
+        "mcp.tavily.com",
     ]
     assert "COCOLA_SKILL_CREDENTIAL" not in binder.env
     assert provider.seen_options.skill_credential == "run-skill-credential"
@@ -532,7 +534,7 @@ async def test_query_forwards_lark_credential_without_skill_name_gate():
     assert "Cocola-managed Feishu capability policy" in options.system_prompt
     assert "tenant-token" not in options.system_prompt
     assert "cli_app_id" not in options.system_prompt
-    assert binder.egress == ["open.feishu.cn", "open.larksuite.com"]
+    assert binder.egress == ["open.feishu.cn", "open.larksuite.com", "mcp.tavily.com"]
 
 
 async def test_plan_mode_does_not_forward_lark_executable_credential():
@@ -1530,11 +1532,36 @@ async def test_query_loads_mcp_servers_into_options_and_trace():
     assert prov.seen_options.mcp_servers == {
         "amap": {"type": "http", "url": "https://mcp.example.com/mcp"}
     }
+    assert "Cocola Tavily web tools policy" not in (prov.seen_options.system_prompt or "")
     traces = [event for event in ctx.written if event.kind == "trace"]
     mcp_trace = next(event for event in traces if event.data["name"] == "sandbox.mcp_config_load")
     assert mcp_trace.data["mcp_count"] == "1"
     assert json.loads(mcp_trace.data["mcp_names"]) == ["amap"]
     assert mcp_trace.data["category"] == "agent_init"
+
+
+async def test_query_adds_tavily_policy_only_when_tavily_is_effective():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+    mcps = StaticMCPCatalog({"tavily": {"type": "http", "url": "https://mcp.tavily.com/mcp/"}})
+
+    await AgentRuntimeServicer(provider, mcps=mcps).Query(FakeRequest(), FakeContext())
+
+    assert provider.seen_options is not None
+    prompt = provider.seen_options.system_prompt or ""
+    assert "Cocola Tavily web tools policy (v1)" in prompt
+    assert prompt.index("Cocola Tavily web tools policy") < prompt.index("Cocola product identity")
+
+
+async def test_query_forwards_native_web_tools_capability():
+    provider = ListProvider([AgentEvent(kind="done", data={})])
+
+    await AgentRuntimeServicer(provider).Query(
+        FakeRequest(anthropic_server_web_tools_enabled=True),
+        FakeContext(),
+    )
+
+    assert provider.seen_options is not None
+    assert provider.seen_options.anthropic_server_web_tools_enabled is True
 
 
 async def test_plan_query_is_claude_read_only_and_skips_side_effect_integrations():

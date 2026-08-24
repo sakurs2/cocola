@@ -1308,18 +1308,19 @@ func (a *API) deleteLLMProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 type llmModelReq struct {
-	Alias              string `json:"alias,omitempty"`
-	ProviderID         string `json:"provider_id,omitempty"`
-	RealModel          string `json:"real_model,omitempty"`
-	Label              string `json:"label,omitempty"`
-	IconType           string `json:"icon_type,omitempty"`
-	IconSlug           string `json:"icon_slug,omitempty"`
-	IconURL            string `json:"icon_url,omitempty"`
-	Enabled            *bool  `json:"enabled,omitempty"`
-	Visible            *bool  `json:"visible,omitempty"`
-	IsDefault          bool   `json:"is_default,omitempty"`
-	SortOrder          int    `json:"sort_order,omitempty"`
-	EmbeddingDimension int    `json:"embedding_dimension,omitempty"`
+	Alias                          string `json:"alias,omitempty"`
+	ProviderID                     string `json:"provider_id,omitempty"`
+	RealModel                      string `json:"real_model,omitempty"`
+	Label                          string `json:"label,omitempty"`
+	IconType                       string `json:"icon_type,omitempty"`
+	IconSlug                       string `json:"icon_slug,omitempty"`
+	IconURL                        string `json:"icon_url,omitempty"`
+	Enabled                        *bool  `json:"enabled,omitempty"`
+	Visible                        *bool  `json:"visible,omitempty"`
+	IsDefault                      bool   `json:"is_default,omitempty"`
+	SortOrder                      int    `json:"sort_order,omitempty"`
+	EmbeddingDimension             int    `json:"embedding_dimension,omitempty"`
+	AnthropicServerWebToolsEnabled *bool  `json:"anthropic_server_web_tools_enabled,omitempty"`
 }
 
 func (a *API) createLLMModel(w http.ResponseWriter, r *http.Request) {
@@ -1387,19 +1388,20 @@ func (a *API) listPublicLLMModels(w http.ResponseWriter, r *http.Request) {
 
 func llmModelInput(req llmModelReq, actor string) service.LLMModelInput {
 	return service.LLMModelInput{
-		Alias:              req.Alias,
-		ProviderID:         req.ProviderID,
-		RealModel:          req.RealModel,
-		Label:              req.Label,
-		IconType:           req.IconType,
-		IconSlug:           req.IconSlug,
-		IconURL:            req.IconURL,
-		Enabled:            req.Enabled,
-		Visible:            req.Visible,
-		IsDefault:          req.IsDefault,
-		SortOrder:          req.SortOrder,
-		EmbeddingDimension: req.EmbeddingDimension,
-		Actor:              actor,
+		Alias:                          req.Alias,
+		ProviderID:                     req.ProviderID,
+		RealModel:                      req.RealModel,
+		Label:                          req.Label,
+		IconType:                       req.IconType,
+		IconSlug:                       req.IconSlug,
+		IconURL:                        req.IconURL,
+		Enabled:                        req.Enabled,
+		Visible:                        req.Visible,
+		IsDefault:                      req.IsDefault,
+		SortOrder:                      req.SortOrder,
+		EmbeddingDimension:             req.EmbeddingDimension,
+		AnthropicServerWebToolsEnabled: req.AnthropicServerWebToolsEnabled,
+		Actor:                          actor,
 	}
 }
 

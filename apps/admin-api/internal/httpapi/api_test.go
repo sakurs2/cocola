@@ -1257,6 +1257,50 @@ func TestDeleteReferencedLLMProviderReturnsActionableConflict(t *testing.T) {
 	}
 }
 
+func TestLLMModelNativeWebToolsCapabilityRoundTrip(t *testing.T) {
+	api := newTestAPI("k")
+	router := api.Router()
+	rec := do(t, router, http.MethodPost, "/admin/model-providers", "k", map[string]any{
+		"id": "compatible", "name": "Compatible", "type": "anthropic",
+		"base_url": "https://api.deepseek.com/anthropic", "enabled": false,
+		"icon_type": "simple-icons", "icon_slug": "anthropic",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create provider: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = do(t, router, http.MethodPost, "/admin/models", "k", map[string]any{
+		"alias": "compatible-chat", "provider_id": "compatible",
+		"real_model": "compatible-chat", "label": "Compatible Chat",
+		"icon_type": "simple-icons", "icon_slug": "anthropic",
+		"anthropic_server_web_tools_enabled": true,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create model route: want 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var created store.LLMModelRoute
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode model route: %v", err)
+	}
+	if !created.AnthropicServerWebToolsEnabled {
+		t.Fatalf("create response lost native web tools setting: %+v", created)
+	}
+
+	rec = do(t, router, http.MethodPatch, "/admin/models/"+created.ID, "k", map[string]any{
+		"anthropic_server_web_tools_enabled": false,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update model route: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var updated store.LLMModelRoute
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated model route: %v", err)
+	}
+	if updated.AnthropicServerWebToolsEnabled {
+		t.Fatalf("update response did not disable native web tools: %+v", updated)
+	}
+}
+
 func TestMCPCRUDAndEffectiveConfig(t *testing.T) {
 	api := newTestAPI("k")
 	r := api.Router()

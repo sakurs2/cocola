@@ -81,6 +81,7 @@ type LLMModel = {
   is_default: boolean;
   sort_order: number;
   embedding_dimension: number;
+  anthropic_server_web_tools_enabled: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -109,6 +110,7 @@ type ModelForm = {
   visible: boolean;
   is_default: boolean;
   sort_order: string;
+  anthropic_server_web_tools_enabled: boolean;
 };
 
 function DisclosureSummary({ children }: { children: ReactNode }) {
@@ -165,6 +167,7 @@ const EMPTY_MODEL: ModelForm = {
   visible: true,
   is_default: false,
   sort_order: "0",
+  anthropic_server_web_tools_enabled: false,
 };
 
 const EMPTY_EMBEDDING: EmbeddingForm = {
@@ -176,6 +179,15 @@ const EMPTY_EMBEDDING: EmbeddingForm = {
 const inputClass =
   "h-10 w-full min-w-0 rounded-xl border border-separator bg-background px-3 text-sm text-foreground outline-none transition disabled:cursor-not-allowed disabled:bg-surface-secondary/50 disabled:text-muted";
 const iconPickerControlClass = cn(inputClass, "h-11 min-h-11 rounded-2xl");
+
+function isOfficialAnthropicBaseURL(baseURL: string): boolean {
+  try {
+    const parsed = new URL(baseURL.trim());
+    return parsed.protocol === "https:" && parsed.hostname.toLowerCase() === "api.anthropic.com";
+  } catch {
+    return false;
+  }
+}
 
 function useObjectURL(file: File | null) {
   const [url, setURL] = useState("");
@@ -312,6 +324,9 @@ export default function AdminModelsPage() {
     setModelForm({
       ...EMPTY_MODEL,
       provider_id: firstChatProvider?.id ?? "",
+      anthropic_server_web_tools_enabled: isOfficialAnthropicBaseURL(
+        firstChatProvider?.base_url ?? "",
+      ),
       icon_type: firstChatProvider?.icon_type || "simple-icons",
       icon_slug:
         firstChatProvider?.icon_slug ||
@@ -351,6 +366,7 @@ export default function AdminModelsPage() {
       visible: model.visible,
       is_default: model.is_default,
       sort_order: String(model.sort_order),
+      anthropic_server_web_tools_enabled: model.anthropic_server_web_tools_enabled,
     });
     setModelIconFile(null);
     setFormError("");
@@ -443,6 +459,7 @@ export default function AdminModelsPage() {
         visible: modelForm.visible,
         is_default: modelForm.is_default,
         sort_order: Number.parseInt(modelForm.sort_order || "0", 10) || 0,
+        anthropic_server_web_tools_enabled: modelForm.anthropic_server_web_tools_enabled,
       };
       const url = editingModel
         ? `/api/admin/models/${encodeURIComponent(editingModel)}`
@@ -899,7 +916,16 @@ export default function AdminModelsPage() {
                 <SelectControl
                   className={inputClass}
                   value={modelForm.provider_id}
-                  onValueChange={(value) => setModelForm({ ...modelForm, provider_id: value })}
+                  onValueChange={(value) => {
+                    const provider = providerByID.get(value);
+                    setModelForm({
+                      ...modelForm,
+                      provider_id: value,
+                      anthropic_server_web_tools_enabled: isOfficialAnthropicBaseURL(
+                        provider?.base_url ?? "",
+                      ),
+                    });
+                  }}
                   options={[
                     { value: "", label: t("provider.select") },
                     ...providers
@@ -921,16 +947,46 @@ export default function AdminModelsPage() {
               </Field>
 
               {selectedProvider ? (
-                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/70 bg-surface-secondary/25 p-3">
-                  <ProviderProtocolBadge type={selectedProvider.type} />
-                  <span className="text-xs text-muted">
-                    {t("model.compatibleWith", {
-                      runtime:
-                        selectedProvider.type === "openai_embeddings"
-                          ? t("model.platformServices")
-                          : "Claude Code",
-                    })}
-                  </span>
+                <div className="grid gap-3 rounded-2xl border border-border/70 bg-surface-secondary/25 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ProviderProtocolBadge type={selectedProvider.type} />
+                    <span className="text-xs text-muted">
+                      {t("model.compatibleWith", {
+                        runtime:
+                          selectedProvider.type === "openai_embeddings"
+                            ? t("model.platformServices")
+                            : "Claude Code",
+                      })}
+                    </span>
+                  </div>
+                  {selectedProvider.type !== "openai_embeddings" ? (
+                    <div className="flex items-center justify-between gap-4 border-t border-border/70 pt-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-foreground">
+                          {t("model.nativeWebTools")}
+                        </div>
+                        <p className="mt-0.5 text-xs leading-5 text-muted">
+                          {t("model.nativeWebToolsDescription")}
+                        </p>
+                      </div>
+                      <Switch
+                        aria-label={t("model.nativeWebTools")}
+                        isSelected={modelForm.anthropic_server_web_tools_enabled}
+                        onChange={(anthropic_server_web_tools_enabled) =>
+                          setModelForm({
+                            ...modelForm,
+                            anthropic_server_web_tools_enabled,
+                          })
+                        }
+                      >
+                        <Switch.Content>
+                          <Switch.Control>
+                            <Switch.Thumb />
+                          </Switch.Control>
+                        </Switch.Content>
+                      </Switch>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

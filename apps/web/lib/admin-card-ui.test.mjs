@@ -4,6 +4,11 @@ import test from "node:test";
 
 const skillsSource = readFileSync(new URL("../app/admin/skills/page.tsx", import.meta.url), "utf8");
 const mcpsSource = readFileSync(new URL("../app/admin/mcps/page.tsx", import.meta.url), "utf8");
+const userMcpsSource = readFileSync(new URL("../app/mcps/page.tsx", import.meta.url), "utf8");
+const mcpIconSource = readFileSync(
+  new URL("../components/ui/mcp-server-icon.tsx", import.meta.url),
+  "utf8",
+);
 const toolboxCardSource = readFileSync(
   new URL("../app/admin/toolbox/toolbox-card.tsx", import.meta.url),
   "utf8",
@@ -45,6 +50,23 @@ test("Admin catalog cards have the approved HeroUI Demo hover contract", () => {
   assert.match(globalStyles, /\.cocola-admin-ui \.admin-skill-card:hover/);
   assert.match(globalStyles, /\.cocola-admin-ui \.admin-mcp-card:hover/);
   assert.match(globalStyles, /\.cocola-admin-ui \.admin-toolbox-card:hover/);
+});
+
+test("Admin and user MCP cards share deterministic server icons", () => {
+  assert.match(mcpsSource, /<MCPServerIcon className="admin-mcp-card-icon" id=\{mcp\.id\} \/>/);
+  assert.match(userMcpsSource, /<MCPServerIcon[\s\S]*?id=\{mcp\.id\}/);
+  assert.match(mcpIconSource, /id\.trim\(\)\.toLowerCase\(\) === "tavily"/);
+  assert.match(mcpIconSource, /ink: "#3370FF"/);
+});
+
+test("MCP editing preserves encrypted secrets while making saved URL state explicit", () => {
+  assert.match(mcpsSource, /url: transport === "stdio" \? "" : \(mcp\.url_hint \?\? ""\)/);
+  assert.match(mcpsSource, /if \(remoteURL && !remoteURLUnchanged\) body\.url = remoteURL/);
+  assert.match(mcpsSource, /if \(!apiKey && !tavilyEditing\)/);
+  assert.match(mcpsSource, /if \(apiKey\) \{[\s\S]*?body\.headers =/);
+  assert.match(mcpsSource, /method: tavilyEditing \? "PATCH" : "POST"/);
+  assert.match(mcpsSource, /className="h-10 min-h-10 w-full rounded-xl"/);
+  assert.match(mcpsSource, /top-1\/2 size-9 min-w-9 -translate-y-1\/2/);
 });
 
 test("Toolbox uses the compact business-card layout from the HeroUI Demo", () => {

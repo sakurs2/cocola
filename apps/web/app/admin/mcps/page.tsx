@@ -1,34 +1,19 @@
 "use client";
 
 import { Plug as McpPageIcon } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
-  useCallback,
-  useEffect,
-  useState,
-  type CSSProperties,
-  type ComponentType,
-  type ReactNode,
-} from "react";
-import {
-  Blocks,
-  Boxes,
   ChevronDown,
   CircleAlert,
-  Cloud,
-  Cpu,
   Eye,
   EyeOff,
+  KeyRound,
   LoaderCircle,
-  Network,
   Pencil,
-  Plug2,
   Plus,
-  Radio,
   Save,
-  Server,
-  Terminal,
+  Search as SearchIcon,
   Trash2,
-  Waypoints,
 } from "lucide-react";
 import {
   Button,
@@ -37,6 +22,7 @@ import {
   Chip,
   Input,
   Label,
+  Modal,
   SearchField,
   Switch,
   TextArea,
@@ -55,6 +41,7 @@ import {
   AdminToast,
   AdminTruncatedValue,
 } from "@/components/admin/admin-ui";
+import { MCPServerIcon } from "@/components/ui/mcp-server-icon";
 import { useTranslations } from "next-intl";
 
 type MCPServer = {
@@ -102,52 +89,13 @@ const EMPTY_FORM: FormState = {
   clearHeaders: false,
 };
 
-const GLYPH_ICONS: ComponentType<{ className?: string }>[] = [
-  Server,
-  Network,
-  Cloud,
-  Cpu,
-  Boxes,
-  Blocks,
-  Radio,
-  Waypoints,
-  Plug2,
-  Terminal,
-];
-const GLYPH_TONES: { ink: string; soft: string; ring: string }[] = [
-  { ink: "#ea580c", soft: "#ffedd5", ring: "#fdba74" }, // orange
-  { ink: "#d97706", soft: "#fef3c7", ring: "#fcd34d" }, // amber
-  { ink: "#0d9488", soft: "#ccfbf1", ring: "#5eead4" }, // teal
-  { ink: "#2563eb", soft: "#dbeafe", ring: "#93c5fd" }, // blue
-  { ink: "#7c3aed", soft: "#ede9fe", ring: "#c4b5fd" }, // violet
-  { ink: "#db2777", soft: "#fce7f3", ring: "#f9a8d4" }, // pink
-  { ink: "#0891b2", soft: "#cffafe", ring: "#67e8f9" }, // cyan
-  { ink: "#16a34a", soft: "#dcfce7", ring: "#86efac" }, // green
-  { ink: "#c026d3", soft: "#fae8ff", ring: "#f0abfc" }, // fuchsia
-  { ink: "#4f46e5", soft: "#e0e7ff", ring: "#a5b4fc" }, // indigo
-];
-
-function hashString(value: string): number {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash * 31 + value.charCodeAt(i)) | 0;
-  }
-  return Math.abs(hash);
-}
-
-function glyphFor(id: string) {
-  const h = hashString(id || "mcp");
-  const Icon = GLYPH_ICONS[h % GLYPH_ICONS.length] ?? Server;
-  const tone =
-    GLYPH_TONES[h % GLYPH_TONES.length] ??
-    ({ ink: "#ea580c", soft: "#ffedd5", ring: "#fdba74" } as const);
-  const style = {
-    "--glyph-ink": tone.ink,
-    "--glyph-soft": tone.soft,
-    "--glyph-ring": tone.ring,
-  } as CSSProperties;
-  return { Icon, style };
-}
+const TAVILY_MCP_URL = "https://mcp.tavily.com/mcp/";
+const TAVILY_DEFAULT_PARAMETERS = JSON.stringify({
+  search_depth: "basic",
+  max_results: 5,
+  include_images: false,
+  include_raw_content: false,
+});
 
 export default function AdminMCPPage() {
   const t = useTranslations("admin.mcpsPage");
@@ -155,6 +103,11 @@ export default function AdminMCPPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editing, setEditing] = useState<MCPServer | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [tavilyModalOpen, setTavilyModalOpen] = useState(false);
+  const [tavilyEditing, setTavilyEditing] = useState<MCPServer | null>(null);
+  const [tavilyAPIKey, setTavilyAPIKey] = useState("");
+  const [tavilyDefaultEnabled, setTavilyDefaultEnabled] = useState(true);
+  const [tavilyError, setTavilyError] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [showURL, setShowURL] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -204,12 +157,64 @@ export default function AdminMCPPage() {
       transport,
       command: mcp.command ?? "",
       args: (mcp.args ?? []).join("\n"),
+      url: transport === "stdio" ? "" : (mcp.url_hint ?? ""),
       defaultEnabled: mcp.default_enabled,
     });
     setAdvancedOpen(false);
-    setShowURL(false);
+    setShowURL(transport !== "stdio");
     setError("");
     setDrawerOpen(true);
+  };
+
+  const openTavily = () => {
+    const existing = mcps.find((mcp) => mcp.id === "tavily") ?? null;
+    setTavilyEditing(existing);
+    setTavilyAPIKey("");
+    setTavilyDefaultEnabled(existing?.default_enabled ?? true);
+    setTavilyError("");
+    setTavilyModalOpen(true);
+  };
+
+  const saveTavily = async () => {
+    const apiKey = tavilyAPIKey.trim();
+    if (!apiKey && !tavilyEditing) {
+      setTavilyError(t("tavily.keyRequired"));
+      return;
+    }
+    setSaving(true);
+    setTavilyError("");
+    setNotice("");
+    try {
+      const body: Record<string, unknown> = {
+        id: "tavily",
+        name: "Tavily",
+        description: t("tavily.serverDescription"),
+        transport: "http",
+        default_enabled: tavilyDefaultEnabled,
+      };
+      if (!tavilyEditing) body.url = TAVILY_MCP_URL;
+      if (apiKey) {
+        body.headers = {
+          Authorization: `Bearer ${apiKey}`,
+          DEFAULT_PARAMETERS: TAVILY_DEFAULT_PARAMETERS,
+        };
+      }
+      const response = await fetch(tavilyEditing ? "/api/admin/mcps/tavily" : "/api/admin/mcps", {
+        method: tavilyEditing ? "PATCH" : "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      setTavilyAPIKey("");
+      setTavilyEditing(null);
+      setTavilyModalOpen(false);
+      setNotice(t("savedNotice", { name: "Tavily" }));
+      await load();
+    } catch (err) {
+      setTavilyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const save = async () => {
@@ -225,9 +230,14 @@ export default function AdminMCPPage() {
       setError(t("validation.command"));
       return;
     }
+    const remoteURL = form.url.trim();
+    const savedURLHint = editing?.url_hint?.trim() ?? "";
+    const remoteURLUnchanged = Boolean(editing && savedURLHint && remoteURL === savedURLHint);
     const keepsRemoteURL =
-      editing && normalizeTransport(editing.transport) !== "stdio" && !form.url.trim();
-    if (form.transport !== "stdio" && !form.url.trim() && !keepsRemoteURL) {
+      editing &&
+      normalizeTransport(editing.transport) !== "stdio" &&
+      (!remoteURL || remoteURLUnchanged);
+    if (form.transport !== "stdio" && !remoteURL && !keepsRemoteURL) {
       setError(t("validation.url"));
       return;
     }
@@ -259,7 +269,7 @@ export default function AdminMCPPage() {
         if (env) body.env = env;
         if (form.clearEnv) body.clear_env = true;
       } else {
-        if (form.url.trim()) body.url = form.url.trim();
+        if (remoteURL && !remoteURLUnchanged) body.url = remoteURL;
         if (headers) body.headers = headers;
         if (form.clearHeaders) body.clear_headers = true;
       }
@@ -304,10 +314,21 @@ export default function AdminMCPPage() {
     }
   };
 
-  const visibleMcps = mcps.filter((mcp) =>
-    `${mcp.name} ${mcp.description} ${mcp.transport}`
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleMcps = mcps
+    .filter((mcp) =>
+      `${mcp.name} ${mcp.description} ${mcp.transport}`.toLowerCase().includes(normalizedQuery),
+    )
+    .sort((a, b) => Number(b.id === "tavily") - Number(a.id === "tavily"));
+  const tavilyConfigured = mcps.some((mcp) => mcp.id === "tavily");
+  const tavilyPresetVisible =
+    !tavilyConfigured &&
+    `tavily ${t("tavily.serverDescription")} http`.toLowerCase().includes(normalizedQuery);
+  const addControl = (
+    <Button className="gap-2" onPress={openCreate}>
+      <Plus className="size-4" />
+      {t("add")}
+    </Button>
   );
 
   return (
@@ -320,52 +341,46 @@ export default function AdminMCPPage() {
             <AdminRefreshButton refreshing={loading} onClick={() => void load()} variant="outline">
               {t("refresh")}
             </AdminRefreshButton>
-            {loading || mcps.length > 0 ? (
-              <Button className="gap-2" onPress={openCreate}>
-                <Plus className="size-4" />
-                {t("add")}
-              </Button>
-            ) : null}
+            {addControl}
           </>
         }
       />
 
       <AdminErrorDialog
-        error={drawerOpen ? null : error}
+        error={drawerOpen || tavilyModalOpen ? null : error}
         title={t("operationFailed")}
         onDismiss={() => setError("")}
         onRetry={() => void load()}
       />
       <AdminToast message={notice} tone="success" onDismiss={() => setNotice("")} />
 
-      {loading || mcps.length > 0 ? (
-        <SearchField
-          aria-label={t("search")}
-          className="w-full sm:w-[320px]"
-          value={query}
-          onChange={setQuery}
-        >
-          <SearchField.Group>
-            <SearchField.SearchIcon />
-            <SearchField.Input placeholder={t("search")} />
-            <SearchField.ClearButton />
-          </SearchField.Group>
-        </SearchField>
-      ) : null}
+      <SearchField
+        aria-label={t("search")}
+        className="w-full sm:w-[320px]"
+        value={query}
+        onChange={setQuery}
+      >
+        <SearchField.Group>
+          <SearchField.SearchIcon />
+          <SearchField.Input placeholder={t("search")} />
+          <SearchField.ClearButton />
+        </SearchField.Group>
+      </SearchField>
 
       {loading && !mcps.length ? (
         <div className="flex min-h-48 items-center justify-center text-sm text-muted">
           <LoaderCircle className="mr-2 size-4 animate-spin" />
           {t("loading")}
         </div>
-      ) : visibleMcps.length ? (
+      ) : tavilyPresetVisible || visibleMcps.length ? (
         <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {tavilyPresetVisible ? <TavilyPresetCard onConfigure={openTavily} /> : null}
           {visibleMcps.map((mcp) => (
             <MCPCard
               key={mcp.id}
               mcp={mcp}
               busy={busyID === mcp.id}
-              onEdit={() => openEdit(mcp)}
+              onEdit={() => (mcp.id === "tavily" ? openTavily() : openEdit(mcp))}
               onToggle={() => void mutate(mcp, mcp.enabled ? "disable" : "enable")}
               onDelete={() => setDeleteTarget(mcp)}
             />
@@ -374,18 +389,117 @@ export default function AdminMCPPage() {
       ) : (
         <AdminEmptyState
           icon={<McpPageIcon className="size-6" />}
-          title={mcps.length ? t("noMatch") : t("empty")}
-          description={mcps.length ? t("noMatchDescription") : t("emptyDescription")}
-          action={
-            !mcps.length ? (
-              <Button className="gap-2" onPress={openCreate}>
-                <Plus className="size-4" />
-                {t("add")}
-              </Button>
-            ) : undefined
-          }
+          title={t("noMatch")}
+          description={t("noMatchDescription")}
         />
       )}
+
+      <Modal
+        isOpen={tavilyModalOpen}
+        onOpenChange={(open) => {
+          if (saving) return;
+          setTavilyModalOpen(open);
+          if (!open) {
+            setTavilyEditing(null);
+            setTavilyAPIKey("");
+            setTavilyError("");
+          }
+        }}
+      >
+        <Modal.Backdrop isDismissable={!saving}>
+          <Modal.Container placement="center" size="sm">
+            <Modal.Dialog className="mx-auto w-full max-w-[440px]">
+              <Modal.CloseTrigger aria-label={t("tavily.close")} />
+              <Modal.Header className="items-start">
+                <Modal.Icon className="bg-[#3370FF]/10 text-[#3370FF]">
+                  <SearchIcon className="size-5" />
+                </Modal.Icon>
+                <div className="min-w-0">
+                  <Modal.Heading>
+                    {tavilyEditing ? t("tavily.manageTitle") : t("tavily.title")}
+                  </Modal.Heading>
+                  <p className="mt-1 text-sm leading-5 text-muted">
+                    {tavilyEditing ? t("tavily.manageDescription") : t("tavily.description")}
+                  </p>
+                </div>
+              </Modal.Header>
+              <Modal.Body className="grid content-start gap-4">
+                {tavilyError ? (
+                  <AdminAlert tone="error" icon={<CircleAlert className="size-4" />}>
+                    <span aria-live="polite">{tavilyError}</span>
+                  </AdminAlert>
+                ) : null}
+                {tavilyEditing?.header_hints?.Authorization ? (
+                  <AdminAlert tone="success" icon={<KeyRound className="size-4" />}>
+                    {t("tavily.keySaved")}
+                  </AdminAlert>
+                ) : null}
+                <TextField value={tavilyAPIKey} variant="secondary" onChange={setTavilyAPIKey}>
+                  <Label>{tavilyEditing ? t("tavily.newApiKey") : t("tavily.apiKey")}</Label>
+                  <div className="relative">
+                    <KeyRound
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted"
+                    />
+                    <Input
+                      autoFocus
+                      autoComplete="new-password"
+                      className="pl-10"
+                      placeholder={
+                        tavilyEditing
+                          ? t("tavily.apiKeyRotatePlaceholder")
+                          : t("tavily.apiKeyPlaceholder")
+                      }
+                      type="password"
+                    />
+                  </div>
+                </TextField>
+                <Card className="p-4">
+                  <Switch isSelected={tavilyDefaultEnabled} onChange={setTavilyDefaultEnabled}>
+                    <Switch.Content>
+                      <Switch.Control>
+                        <Switch.Thumb />
+                      </Switch.Control>
+                      <span>
+                        <span className="block text-sm font-medium">{t("fields.defaultOn")}</span>
+                        <span className="mt-0.5 block text-xs leading-5 text-muted">
+                          {t("tavily.defaultDescription")}
+                        </span>
+                      </span>
+                    </Switch.Content>
+                  </Switch>
+                </Card>
+              </Modal.Body>
+              <Modal.Footer className="gap-2">
+                <Button
+                  variant="outline"
+                  isDisabled={saving}
+                  onPress={() => {
+                    setTavilyEditing(null);
+                    setTavilyAPIKey("");
+                    setTavilyError("");
+                    setTavilyModalOpen(false);
+                  }}
+                >
+                  {t("cancel")}
+                </Button>
+                <Button
+                  className="min-w-28 gap-2 bg-[#3370FF] text-white hover:bg-[#2B60E8]"
+                  isDisabled={saving}
+                  onPress={() => void saveTavily()}
+                >
+                  {saving ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                  {saving
+                    ? t("saving")
+                    : tavilyEditing
+                      ? t("tavily.saveChanges")
+                      : t("tavily.save")}
+                </Button>
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
 
       <AdminDrawer
         open={drawerOpen}
@@ -429,7 +543,7 @@ export default function AdminMCPPage() {
             </TextField>
             <Field label={t("fields.transport")}>
               <SelectControl
-                className="w-full"
+                className="h-10 min-h-10 w-full rounded-xl"
                 value={form.transport}
                 onValueChange={(value) =>
                   setForm({ ...form, transport: value as FormState["transport"] })
@@ -526,7 +640,7 @@ export default function AdminMCPPage() {
                   <Button
                     isIconOnly
                     aria-label={showURL ? t("fields.hideUrl") : t("fields.showUrl")}
-                    className="absolute bottom-1 right-1 size-9 min-w-9"
+                    className="absolute right-1 top-1/2 size-9 min-w-9 -translate-y-1/2"
                     size="sm"
                     variant="ghost"
                     onPress={() => setShowURL((show) => !show)}
@@ -637,17 +751,11 @@ function MCPCard({
   const endpoint = !remote
     ? [mcp.command, ...(mcp.args ?? [])].filter(Boolean).join(" ")
     : mcp.url_hint;
-  const { Icon, style } = glyphFor(mcp.id);
   return (
     <Card className="admin-mcp-card p-5">
       <Card.Content className="flex h-full min-w-0 flex-col p-0">
         <div className="flex items-start gap-3">
-          <span
-            className="admin-mcp-card-icon flex size-10 shrink-0 items-center justify-center rounded-2xl"
-            style={{ ...style, background: "var(--glyph-soft)", color: "var(--glyph-ink)" }}
-          >
-            <Icon className="size-[18px]" />
-          </span>
+          <MCPServerIcon className="admin-mcp-card-icon" id={mcp.id} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="min-w-0 flex-1 text-sm font-semibold text-foreground">
@@ -704,6 +812,60 @@ function MCPCard({
               {t("remove")}
             </Button>
           </span>
+        </div>
+      </Card.Content>
+    </Card>
+  );
+}
+
+function TavilyPresetCard({ onConfigure }: { onConfigure: () => void }) {
+  const t = useTranslations("admin.mcpsPage.tavily");
+  const cardT = useTranslations("admin.mcpsPage.card");
+  return (
+    <Card className="admin-mcp-card p-5">
+      <Card.Content className="flex h-full min-w-0 flex-col p-0">
+        <div className="flex items-start gap-3">
+          <MCPServerIcon className="admin-mcp-card-icon" id="tavily" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="min-w-0 flex-1 text-sm font-semibold text-foreground">Tavily</h2>
+              <Chip size="sm" variant="soft">
+                {t("notConfigured")}
+              </Chip>
+            </div>
+            <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted">
+              {t("serverDescription")}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 min-w-0 rounded-2xl bg-surface-secondary p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+            URL
+          </div>
+          <AdminTruncatedValue
+            className="mt-1 font-mono text-xs tabular-nums text-foreground/80"
+            copyLabel={cardT("copyUrl")}
+            value={TAVILY_MCP_URL}
+          />
+        </div>
+
+        <div className="mt-auto flex items-center justify-between gap-3 pt-4">
+          <Button
+            className="gap-2 bg-[#3370FF] text-white hover:bg-[#2B60E8]"
+            size="sm"
+            onPress={onConfigure}
+          >
+            <KeyRound className="size-4" />
+            {t("configure")}
+          </Button>
+          <Switch aria-label={t("notConfiguredAria")} isDisabled isSelected={false}>
+            <Switch.Content>
+              <Switch.Control>
+                <Switch.Thumb className="admin-switch-thumb shadow-sm" />
+              </Switch.Control>
+            </Switch.Content>
+          </Switch>
         </div>
       </Card.Content>
     </Card>

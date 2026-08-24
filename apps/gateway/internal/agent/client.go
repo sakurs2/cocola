@@ -54,22 +54,23 @@ func IsRuntimeInterruption(err error) bool {
 // caller (HTTP layer) fills UserID/SessionId from the verified identity, never
 // from client-supplied fields.
 type Query struct {
-	UserID               string
-	SessionID            string
-	RuntimeID            string
-	InteractionMode      InteractionMode
-	RequireSessionResume bool
-	SkillID              string
-	Prompt               string
-	SandboxID            string
-	AllowWorkspaceReset  bool
-	MemoryContext        string
-	MaxTurns             int32
-	ModelRouteID         string
-	ReasoningEffort      string
-	TraceID              string
-	ParentSpanID         string
-	Source               string
+	UserID                         string
+	SessionID                      string
+	RuntimeID                      string
+	InteractionMode                InteractionMode
+	RequireSessionResume           bool
+	SkillID                        string
+	Prompt                         string
+	SandboxID                      string
+	AllowWorkspaceReset            bool
+	MemoryContext                  string
+	MaxTurns                       int32
+	ModelRouteID                   string
+	ReasoningEffort                string
+	AnthropicServerWebToolsEnabled bool
+	TraceID                        string
+	ParentSpanID                   string
+	Source                         string
 	// SandboxAuthToken is a fresh per-user cocola token the gateway mints from
 	// the verified identity (sub=UserID, ten=TenantID) for THIS turn. It is
 	// forwarded to agent-runtime over gRPC metadata and injected into the
@@ -402,20 +403,21 @@ func (c *Client) Stream(ctx context.Context, q Query, onEvent func(Event) error)
 		})
 	}
 	request := &agentv1.QueryRequest{
-		UserId:               q.UserID,
-		SessionId:            q.SessionID,
-		Prompt:               q.Prompt,
-		SandboxId:            q.SandboxID,
-		MaxTurns:             q.MaxTurns,
-		Attachments:          atts,
-		RuntimeId:            q.RuntimeID,
-		SkillId:              q.SkillID,
-		AllowWorkspaceReset:  q.AllowWorkspaceReset,
-		MemoryContext:        q.MemoryContext,
-		InteractionMode:      interactionModeProto(q.InteractionMode),
-		RequireSessionResume: q.RequireSessionResume,
-		WikiReferences:       wikiReferences,
-		ReasoningEffort:      q.ReasoningEffort,
+		UserId:                         q.UserID,
+		SessionId:                      q.SessionID,
+		Prompt:                         q.Prompt,
+		SandboxId:                      q.SandboxID,
+		MaxTurns:                       q.MaxTurns,
+		Attachments:                    atts,
+		RuntimeId:                      q.RuntimeID,
+		SkillId:                        q.SkillID,
+		AllowWorkspaceReset:            q.AllowWorkspaceReset,
+		MemoryContext:                  q.MemoryContext,
+		InteractionMode:                interactionModeProto(q.InteractionMode),
+		RequireSessionResume:           q.RequireSessionResume,
+		WikiReferences:                 wikiReferences,
+		ReasoningEffort:                q.ReasoningEffort,
+		AnthropicServerWebToolsEnabled: q.AnthropicServerWebToolsEnabled,
 	}
 	if q.Project != nil {
 		request.ProjectContext = projectContextProto(*q.Project)

@@ -213,6 +213,33 @@ def test_request_forwards_reasoning_effort_to_the_sandbox_shim():
     assert request["reasoning_effort"] == "high"
 
 
+def test_request_always_forwards_native_web_tools_capability():
+    provider = InSandboxShimProvider(StaticSandboxExecutor())
+
+    disabled = json.loads(
+        provider._build_request(
+            "search",
+            AgentOptions(user_id="U1", session_id="S1", sandbox_id="box-1"),
+            None,
+        )
+    )
+    enabled = json.loads(
+        provider._build_request(
+            "search",
+            AgentOptions(
+                user_id="U1",
+                session_id="S1",
+                sandbox_id="box-1",
+                anthropic_server_web_tools_enabled=True,
+            ),
+            None,
+        )
+    )
+
+    assert disabled["anthropic_server_web_tools_enabled"] is False
+    assert enabled["anthropic_server_web_tools_enabled"] is True
+
+
 def test_execute_request_sends_optional_structured_result_policy_explicitly():
     provider = InSandboxShimProvider(StaticSandboxExecutor())
 

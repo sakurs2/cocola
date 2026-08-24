@@ -34,6 +34,7 @@ class AgentOptions:
     max_turns: int = 30
     model_route_id: str | None = None
     reasoning_effort: str | None = None
+    anthropic_server_web_tools_enabled: bool = False
     # Runtime-native Skill names exposed to the current Agent. An explicit
     # list is passed to the SDK so stale or unrelated on-disk Skills remain
     # undiscoverable even if a previous turn used a different configuration.

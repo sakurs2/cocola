@@ -60,8 +60,9 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 
 	err = client.Stream(context.Background(), Query{
 		UserID: "user", SessionID: "session", Prompt: "read it",
-		ReasoningEffort:       "high",
-		SkillBrokerCredential: "skill-run-credential",
+		ReasoningEffort:                "high",
+		AnthropicServerWebToolsEnabled: true,
+		SkillBrokerCredential:          "skill-run-credential",
 		LarkCredential: LarkRuntimeCredential{
 			Status: RuntimeCredentialReadyForTest, AppID: "app-id", Brand: "feishu",
 			TenantAccessToken: "tenant-token",
@@ -107,6 +108,9 @@ func TestClientStreamMapsWikiReferences(t *testing.T) {
 	request := <-recording.requests
 	if request.ReasoningEffort != "high" {
 		t.Fatalf("ReasoningEffort = %q", request.ReasoningEffort)
+	}
+	if !request.AnthropicServerWebToolsEnabled {
+		t.Fatal("native web tools capability was not mapped to QueryRequest")
 	}
 	if len(request.WikiReferences) != 1 {
 		t.Fatalf("request = %#v", request)

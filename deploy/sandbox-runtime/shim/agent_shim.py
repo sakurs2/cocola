@@ -112,6 +112,8 @@ def _build_options(
     plan_mode = permission_mode == "plan"
 
     disallowed_tools = ["AskUserQuestion"]
+    if not bool(req.get("anthropic_server_web_tools_enabled", False)):
+        disallowed_tools.extend(["WebSearch", "WebFetch"])
     if plan_mode:
         # Plan content is persisted through Cocola's path-bound control tool.
         # Removing the general mutation tools prevents a model from attempting
@@ -122,7 +124,7 @@ def _build_options(
         max_turns=int(req.get("max_turns") or 20),
         cwd=cwd,
         permission_mode=permission_mode,
-        disallowed_tools=disallowed_tools,
+        disallowed_tools=list(dict.fromkeys(disallowed_tools)),
     )
     if plan_mode:
         # ExitPlanMode is a deferred Claude Code built-in. With a custom

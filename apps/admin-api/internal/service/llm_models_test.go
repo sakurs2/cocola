@@ -192,6 +192,67 @@ func TestLLMModelsDefaultAndPublicList(t *testing.T) {
 	}
 }
 
+func TestLLMModelAnthropicServerWebToolsDefaultsAndOverride(t *testing.T) {
+	ctx := context.Background()
+	svc := New(store.NewMemory(), nil, authTestClock).WithModelSecretKey("secret")
+	key := "test-only-key"
+	for _, provider := range []LLMProviderInput{
+		{
+			ID: "official", Name: "Anthropic", Type: ProviderAnthropic,
+			BaseURL: "https://api.anthropic.com/v1", APIKey: &key,
+		},
+		{
+			ID: "compatible", Name: "Compatible", Type: ProviderAnthropic,
+			BaseURL: "https://api.deepseek.com/anthropic", APIKey: &key,
+		},
+	} {
+		if _, err := svc.CreateLLMProvider(ctx, provider); err != nil {
+			t.Fatalf("create provider %s: %v", provider.ID, err)
+		}
+	}
+
+	official, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "official", ProviderID: "official", RealModel: "claude-sonnet",
+		Label: "Claude", IconType: IconSimpleIcons, IconSlug: "anthropic",
+	})
+	if err != nil {
+		t.Fatalf("create official route: %v", err)
+	}
+	if !official.AnthropicServerWebToolsEnabled {
+		t.Fatal("official Anthropic route should enable native web tools by default")
+	}
+
+	compatible, err := svc.CreateLLMModel(ctx, LLMModelInput{
+		Alias: "compatible", ProviderID: "compatible", RealModel: "deepseek-chat",
+		Label: "DeepSeek", IconType: IconSimpleIcons, IconSlug: "deepseek",
+	})
+	if err != nil {
+		t.Fatalf("create compatible route: %v", err)
+	}
+	if compatible.AnthropicServerWebToolsEnabled {
+		t.Fatal("compatible route should keep native web tools disabled by default")
+	}
+
+	disabled := false
+	official, err = svc.UpdateLLMModel(ctx, official.ID, LLMModelInput{
+		AnthropicServerWebToolsEnabled: &disabled,
+	})
+	if err != nil {
+		t.Fatalf("disable official route web tools: %v", err)
+	}
+	if official.AnthropicServerWebToolsEnabled {
+		t.Fatal("explicit native web tools override was not preserved")
+	}
+
+	official, err = svc.UpdateLLMModel(ctx, official.ID, LLMModelInput{Label: "Claude Updated"})
+	if err != nil {
+		t.Fatalf("update route without web tools field: %v", err)
+	}
+	if official.AnthropicServerWebToolsEnabled {
+		t.Fatal("omitted update should preserve the saved native web tools setting")
+	}
+}
+
 func TestLLMModelReasoningEffortsAreDerivedFromProtocol(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
