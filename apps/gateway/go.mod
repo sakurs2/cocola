@@ -7,7 +7,7 @@ require (
 	github.com/cocola-project/cocola/packages/go-common v0.0.0
 	github.com/cocola-project/cocola/packages/proto/gen/go v0.0.0
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.2
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.9
 	github.com/minio/minio-go/v7 v7.0.80
