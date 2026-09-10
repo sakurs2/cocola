@@ -49,7 +49,7 @@
     "geist": "^1.7.1",
     "lucide-react": "^1.22.0",
     "monaco-editor": "^0.55.1",
-    "next": "^15.5.21",
+    "next": "^15.5.24",
     "next-auth": "beta",
     "next-intl": "^4.13.5",
     "react": "19.2.6",
