@@ -7,7 +7,7 @@ dependencies = [
     "cocola-common",
     "cocola-proto",
     "grpcio>=1.73.1",
-    "protobuf>=6.30",
+    "protobuf>=7.35.1",
     "anyio>=4.3",
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
