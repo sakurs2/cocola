@@ -1,6 +1,6 @@
 module github.com/cocola-project/cocola/apps/gateway
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/cocola-project/cocola/db v0.0.0
@@ -8,13 +8,13 @@ require (
 	github.com/cocola-project/cocola/packages/proto/gen/go v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.0
-	github.com/jackc/pgx/v5 v5.7.2
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.9
 	github.com/minio/minio-go/v7 v7.0.80
 	github.com/pressly/goose/v3 v3.24.1
 	github.com/prometheus/client_golang v1.20.5
 	github.com/volcengine/OpenViking/sdk/go v0.0.0-20260801145533-c1d38eb47ff2
-	golang.org/x/sync v0.13.0
+	golang.org/x/sync v0.17.0
 	google.golang.org/grpc v1.65.0
 )
 
@@ -57,7 +57,7 @@ require (
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240701130421-f6361c86f094 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240701130421-f6361c86f094 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
